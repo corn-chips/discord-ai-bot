@@ -1825,3 +1825,453 @@ I had trouble understanding your request. Could you try asking differently?
 2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Sent message part 2/3
 2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Sent message part 3/3
 2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Successfully sent response in 3 parts
+2025-11-04 07:34:15 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170265205182535] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170265205182535]
+2025-11-04 07:34:15 | WARNING  | src.bot.discord_bot  | Empty prompt after removing mentions [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170265205182535] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170265205182535]
+2025-11-04 07:34:32 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170339066740767] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435170339066740767]
+2025-11-04 07:34:32 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435170339066740767] [message_id=1435170339066740767]
+2025-11-04 07:34:33 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435170339066740767, duration=0.679s] [message_id=1435170339066740767, duration=0.679s]
+2025-11-04 07:34:33 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:34:34 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.386s] [channel_id=1435154218032824452, duration=0.386s]
+2025-11-04 07:34:34 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:34:34 | INFO     | src.bot.discord_bot  | Loaded image from replied message: Screenshot_2025-07-05_110630.png (1802x1000)
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Generating response with 1 image(s)
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Input prompt length: 7452 characters
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+            ### **System Prompt: The Grounded Expert**
+
+            **[CORE IDENTITY]**
+
+            You are a grounded, well-informed expert AI assistant. Your primary function is to provide users w
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Context messages provided: 50
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=29 chars, Timestamp=2025-11-04 06:58:56.681000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=72 chars, Timestamp=2025-11-04 07:01:28.549000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:04:29.279000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:12:23.311000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:16:27.657000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[5]: Author=girafe, Length=43 chars, Timestamp=2025-11-04 07:21:21.139000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[6]: Author=girafe, Length=22 chars, Timestamp=2025-11-04 07:34:15.399000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[7]: Author=Ciel, Length=8 chars, Timestamp=2025-11-04 06:34:16.655000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[8]: Author=dank mr panda, Length=2 chars, Timestamp=2025-11-04 06:34:18.896000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[9]: Author=ord, Length=3 chars, Timestamp=2025-11-04 06:34:22.176000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[10]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:28.656000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[11]: Author=girafe, Length=1 chars, Timestamp=2025-11-04 06:34:29.459000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[12]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.008000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[13]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.393000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[14]: Author=Ciel, Length=39 chars, Timestamp=2025-11-04 06:34:30.806000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[15]: Author=Ciel, Length=3 chars, Timestamp=2025-11-04 06:34:31.583000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[16]: Author=ord, Length=39 chars, Timestamp=2025-11-04 06:34:42.910000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[17]: Author=Ciel, Length=45 chars, Timestamp=2025-11-04 06:34:58.647000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[18]: Author=Ciel, Length=21 chars, Timestamp=2025-11-04 06:35:11.696000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[19]: Author=ord, Length=41 chars, Timestamp=2025-11-04 06:36:03.331000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[20]: Author=ord, Length=72 chars, Timestamp=2025-11-04 06:36:22.315000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[21]: Author=ord, Length=12 chars, Timestamp=2025-11-04 06:36:36.804000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[22]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:37:09.830000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[23]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:37:18.919000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[24]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:38:20.160000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[25]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:38:20.211000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[26]: Author=Ciel, Length=36 chars, Timestamp=2025-11-04 06:38:23.258000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[27]: Author=Ciel, Length=40 chars, Timestamp=2025-11-04 06:38:33.195000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[28]: Author=Ciel, Length=43 chars, Timestamp=2025-11-04 06:38:46.803000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[29]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:38:58.433000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[30]: Author=Ciel, Length=58 chars, Timestamp=2025-11-04 06:39:04.087000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[31]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:39:06.204000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[32]: Author=dank mr panda, Length=67 chars, Timestamp=2025-11-04 06:39:47.364000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[33]: Author=ord, Length=52 chars, Timestamp=2025-11-04 06:40:26.795000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[34]: Author=Ciel, Length=101 chars, Timestamp=2025-11-04 06:40:30.199000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[35]: Author=ord, Length=24 chars, Timestamp=2025-11-04 06:40:36.669000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[36]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:40:59.690000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[37]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:41:48.499000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[38]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:45:02.980000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[39]: Author=ord, Length=114 chars, Timestamp=2025-11-04 06:45:12.392000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[40]: Author=ord, Length=89 chars, Timestamp=2025-11-04 06:45:27.852000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[41]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:47:48.105000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[42]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:51:12.762000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[43]: Author=dank mr panda, Length=52 chars, Timestamp=2025-11-04 06:51:32.743000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[44]: Author=dank mr panda, Length=53 chars, Timestamp=2025-11-04 06:55:51.763000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[45]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:56:25.219000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[46]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:58:05.826000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[47]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 06:58:15.785000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[48]: Author=dank mr panda, Length=6 chars, Timestamp=2025-11-04 06:58:43.163000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client |   Context[49]: Author=girafe, Length=40 chars, Timestamp=2025-11-04 07:34:33.009000+00:00
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:34:34 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 15.800s)
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Output token count (estimated): 862
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Output length: 5533 characters
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | Output (first 200 chars): This image is a technical slide, likely originating from an NVIDIA developer presentation, that illustrates the **relative performance cost (overhead) associated with changing various rendering states
+2025-11-04 07:34:50 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:34:50 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=15.800s] [duration=15.800s]
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:34:50 | INFO     | discord_bot          | Message processing completed [user_id=614936365825654798, guild_id=1222771487753113650, duration=16.046s] [user_id=614936365825654798, guild_id=1222771487753113650, duration=16.046s]
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Response too long (5533 chars), splitting into multiple messages
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Sent message part 1/4
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Sent message part 2/4
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Sent message part 3/4
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Sent message part 4/4
+2025-11-04 07:34:50 | INFO     | src.bot.discord_bot  | Successfully sent response in 4 parts
+2025-11-04 07:35:15 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:35:15 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:35:15 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:38:32 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:38:32 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:38:32 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:38:32 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:38:32 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:38:32 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:38:32 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:38:32 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:38:35 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:42:34 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:42:35 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:42:35 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:42:56 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:42:56 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:42:56 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:42:56 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:42:56 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:42:56 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:42:56 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:42:56 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:42:59 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:45:12 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:45:12 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:45:12 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:46:02 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:46:02 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:46:02 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:46:02 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:46:02 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:02 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:46:02 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:46:02 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:46:05 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:46:06 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173249284702349] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173249284702349]
+2025-11-04 07:46:06 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:46:07 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.370s] [channel_id=1435154218032824452, duration=0.370s]
+2025-11-04 07:46:07 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Input prompt length: 3928 characters
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Context messages provided: 50
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=2 chars, Timestamp=2025-11-04 06:34:18.896000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[1]: Author=ord, Length=3 chars, Timestamp=2025-11-04 06:34:22.176000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[2]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:28.656000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[3]: Author=girafe, Length=1 chars, Timestamp=2025-11-04 06:34:29.459000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[4]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.008000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[5]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.393000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[6]: Author=Ciel, Length=39 chars, Timestamp=2025-11-04 06:34:30.806000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[7]: Author=Ciel, Length=3 chars, Timestamp=2025-11-04 06:34:31.583000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[8]: Author=ord, Length=39 chars, Timestamp=2025-11-04 06:34:42.910000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[9]: Author=Ciel, Length=45 chars, Timestamp=2025-11-04 06:34:58.647000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[10]: Author=Ciel, Length=21 chars, Timestamp=2025-11-04 06:35:11.696000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[11]: Author=ord, Length=41 chars, Timestamp=2025-11-04 06:36:03.331000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[12]: Author=ord, Length=72 chars, Timestamp=2025-11-04 06:36:22.315000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[13]: Author=ord, Length=12 chars, Timestamp=2025-11-04 06:36:36.804000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[14]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:37:09.830000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[15]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:37:18.919000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[16]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:38:20.160000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[17]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:38:20.211000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[18]: Author=Ciel, Length=36 chars, Timestamp=2025-11-04 06:38:23.258000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[19]: Author=Ciel, Length=40 chars, Timestamp=2025-11-04 06:38:33.195000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[20]: Author=Ciel, Length=43 chars, Timestamp=2025-11-04 06:38:46.803000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[21]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:38:58.433000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[22]: Author=Ciel, Length=58 chars, Timestamp=2025-11-04 06:39:04.087000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[23]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:39:06.204000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[24]: Author=dank mr panda, Length=67 chars, Timestamp=2025-11-04 06:39:47.364000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[25]: Author=ord, Length=52 chars, Timestamp=2025-11-04 06:40:26.795000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[26]: Author=Ciel, Length=101 chars, Timestamp=2025-11-04 06:40:30.199000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[27]: Author=ord, Length=24 chars, Timestamp=2025-11-04 06:40:36.669000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[28]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:40:59.690000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[29]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:41:48.499000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[30]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:45:02.980000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[31]: Author=ord, Length=114 chars, Timestamp=2025-11-04 06:45:12.392000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[32]: Author=ord, Length=89 chars, Timestamp=2025-11-04 06:45:27.852000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[33]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:47:48.105000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[34]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:51:12.762000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[35]: Author=dank mr panda, Length=52 chars, Timestamp=2025-11-04 06:51:32.743000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[36]: Author=dank mr panda, Length=53 chars, Timestamp=2025-11-04 06:55:51.763000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[37]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:56:25.219000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[38]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:58:05.826000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[39]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 06:58:15.785000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[40]: Author=dank mr panda, Length=6 chars, Timestamp=2025-11-04 06:58:43.163000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[41]: Author=dank mr panda, Length=29 chars, Timestamp=2025-11-04 06:58:56.681000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[42]: Author=dank mr panda, Length=72 chars, Timestamp=2025-11-04 07:01:28.549000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[43]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:04:29.279000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[44]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:12:23.311000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[45]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:16:27.657000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[46]: Author=girafe, Length=43 chars, Timestamp=2025-11-04 07:21:21.139000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[47]: Author=girafe, Length=22 chars, Timestamp=2025-11-04 07:34:15.399000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[48]: Author=girafe, Length=40 chars, Timestamp=2025-11-04 07:34:33.009000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client |   Context[49]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 07:46:06.859000+00:00
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:46:07 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 3.469s)
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Output token count (estimated): 19
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Output length: 108 characters
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | Output (first 200 chars): I cannot process that request. Please provide a clear, appropriate query, and I will be happy to assist you.
+2025-11-04 07:46:10 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:10 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.469s] [duration=3.469s]
+2025-11-04 07:46:10 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:46:10 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.518s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.518s]
+2025-11-04 07:46:11 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 07:46:30 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173350157586442] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173350157586442]
+2025-11-04 07:46:30 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:46:31 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.460s] [channel_id=1435154218032824452, duration=0.460s]
+2025-11-04 07:46:31 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Input prompt length: 3981 characters
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Context messages provided: 50
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[0]: Author=ord, Length=3 chars, Timestamp=2025-11-04 06:34:22.176000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[1]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:28.656000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[2]: Author=girafe, Length=1 chars, Timestamp=2025-11-04 06:34:29.459000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[3]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.008000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[4]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.393000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[5]: Author=Ciel, Length=39 chars, Timestamp=2025-11-04 06:34:30.806000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[6]: Author=Ciel, Length=3 chars, Timestamp=2025-11-04 06:34:31.583000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[7]: Author=ord, Length=39 chars, Timestamp=2025-11-04 06:34:42.910000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[8]: Author=Ciel, Length=45 chars, Timestamp=2025-11-04 06:34:58.647000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[9]: Author=Ciel, Length=21 chars, Timestamp=2025-11-04 06:35:11.696000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[10]: Author=ord, Length=41 chars, Timestamp=2025-11-04 06:36:03.331000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[11]: Author=ord, Length=72 chars, Timestamp=2025-11-04 06:36:22.315000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[12]: Author=ord, Length=12 chars, Timestamp=2025-11-04 06:36:36.804000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[13]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:37:09.830000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[14]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:37:18.919000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[15]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:38:20.160000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[16]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:38:20.211000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[17]: Author=Ciel, Length=36 chars, Timestamp=2025-11-04 06:38:23.258000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[18]: Author=Ciel, Length=40 chars, Timestamp=2025-11-04 06:38:33.195000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[19]: Author=Ciel, Length=43 chars, Timestamp=2025-11-04 06:38:46.803000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[20]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:38:58.433000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[21]: Author=Ciel, Length=58 chars, Timestamp=2025-11-04 06:39:04.087000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[22]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:39:06.204000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[23]: Author=dank mr panda, Length=67 chars, Timestamp=2025-11-04 06:39:47.364000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[24]: Author=ord, Length=52 chars, Timestamp=2025-11-04 06:40:26.795000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[25]: Author=Ciel, Length=101 chars, Timestamp=2025-11-04 06:40:30.199000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[26]: Author=ord, Length=24 chars, Timestamp=2025-11-04 06:40:36.669000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[27]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:40:59.690000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[28]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:41:48.499000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[29]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:45:02.980000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[30]: Author=ord, Length=114 chars, Timestamp=2025-11-04 06:45:12.392000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[31]: Author=ord, Length=89 chars, Timestamp=2025-11-04 06:45:27.852000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[32]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:47:48.105000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[33]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:51:12.762000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[34]: Author=dank mr panda, Length=52 chars, Timestamp=2025-11-04 06:51:32.743000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[35]: Author=dank mr panda, Length=53 chars, Timestamp=2025-11-04 06:55:51.763000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[36]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:56:25.219000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[37]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:58:05.826000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[38]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 06:58:15.785000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[39]: Author=dank mr panda, Length=6 chars, Timestamp=2025-11-04 06:58:43.163000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[40]: Author=dank mr panda, Length=29 chars, Timestamp=2025-11-04 06:58:56.681000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[41]: Author=dank mr panda, Length=72 chars, Timestamp=2025-11-04 07:01:28.549000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[42]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:04:29.279000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[43]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:12:23.311000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[44]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:16:27.657000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[45]: Author=girafe, Length=43 chars, Timestamp=2025-11-04 07:21:21.139000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[46]: Author=girafe, Length=22 chars, Timestamp=2025-11-04 07:34:15.399000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[47]: Author=girafe, Length=40 chars, Timestamp=2025-11-04 07:34:33.009000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[48]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 07:46:06.859000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client |   Context[49]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 07:46:30.909000+00:00
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:46:31 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 4.365s)
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Output token count (estimated): 91
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Output length: 627 characters
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | Output (first 200 chars): The chat was highly focused on directly addressing and testing the AI (@1142103557747785758).
+
+The main activities included:
+
+*   **Testing Capabilities:** Users requested web searches (Walmart front 
+2025-11-04 07:46:35 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:46:35 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=4.365s] [duration=4.365s]
+2025-11-04 07:46:35 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:46:35 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.409s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.409s]
+2025-11-04 07:46:36 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 07:47:01 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173479744798791] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173479744798791]
+2025-11-04 07:47:01 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:47:02 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.413s] [channel_id=1435154218032824452, duration=0.413s]
+2025-11-04 07:47:02 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Input prompt length: 4064 characters
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Context messages provided: 50
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[0]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:28.656000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[1]: Author=girafe, Length=1 chars, Timestamp=2025-11-04 06:34:29.459000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[2]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.008000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[3]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.393000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[4]: Author=Ciel, Length=39 chars, Timestamp=2025-11-04 06:34:30.806000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[5]: Author=Ciel, Length=3 chars, Timestamp=2025-11-04 06:34:31.583000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[6]: Author=ord, Length=39 chars, Timestamp=2025-11-04 06:34:42.910000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[7]: Author=Ciel, Length=45 chars, Timestamp=2025-11-04 06:34:58.647000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[8]: Author=Ciel, Length=21 chars, Timestamp=2025-11-04 06:35:11.696000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[9]: Author=ord, Length=41 chars, Timestamp=2025-11-04 06:36:03.331000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[10]: Author=ord, Length=72 chars, Timestamp=2025-11-04 06:36:22.315000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[11]: Author=ord, Length=12 chars, Timestamp=2025-11-04 06:36:36.804000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[12]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:37:09.830000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[13]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:37:18.919000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[14]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:38:20.160000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[15]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:38:20.211000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[16]: Author=Ciel, Length=36 chars, Timestamp=2025-11-04 06:38:23.258000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[17]: Author=Ciel, Length=40 chars, Timestamp=2025-11-04 06:38:33.195000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[18]: Author=Ciel, Length=43 chars, Timestamp=2025-11-04 06:38:46.803000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[19]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:38:58.433000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[20]: Author=Ciel, Length=58 chars, Timestamp=2025-11-04 06:39:04.087000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[21]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:39:06.204000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[22]: Author=dank mr panda, Length=67 chars, Timestamp=2025-11-04 06:39:47.364000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[23]: Author=ord, Length=52 chars, Timestamp=2025-11-04 06:40:26.795000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[24]: Author=Ciel, Length=101 chars, Timestamp=2025-11-04 06:40:30.199000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[25]: Author=ord, Length=24 chars, Timestamp=2025-11-04 06:40:36.669000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[26]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:40:59.690000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[27]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:41:48.499000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[28]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:45:02.980000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[29]: Author=ord, Length=114 chars, Timestamp=2025-11-04 06:45:12.392000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[30]: Author=ord, Length=89 chars, Timestamp=2025-11-04 06:45:27.852000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[31]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:47:48.105000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[32]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:51:12.762000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[33]: Author=dank mr panda, Length=52 chars, Timestamp=2025-11-04 06:51:32.743000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[34]: Author=dank mr panda, Length=53 chars, Timestamp=2025-11-04 06:55:51.763000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[35]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:56:25.219000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[36]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:58:05.826000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[37]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 06:58:15.785000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[38]: Author=dank mr panda, Length=6 chars, Timestamp=2025-11-04 06:58:43.163000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[39]: Author=dank mr panda, Length=29 chars, Timestamp=2025-11-04 06:58:56.681000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[40]: Author=dank mr panda, Length=72 chars, Timestamp=2025-11-04 07:01:28.549000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[41]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:04:29.279000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[42]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:12:23.311000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[43]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:16:27.657000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[44]: Author=girafe, Length=43 chars, Timestamp=2025-11-04 07:21:21.139000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[45]: Author=girafe, Length=22 chars, Timestamp=2025-11-04 07:34:15.399000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[46]: Author=girafe, Length=40 chars, Timestamp=2025-11-04 07:34:33.009000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[47]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 07:46:06.859000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[48]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 07:46:30.909000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client |   Context[49]: Author=girafe, Length=62 chars, Timestamp=2025-11-04 07:47:01.805000+00:00
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:47:02 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 5.660s)
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Output token count (estimated): 177
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Output length: 1087 characters
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | Output (first 200 chars): Semaphores are synchronization tools used to manage limited resources.
+
+In *Valorant* terms, imagine a **Spike Plant Site (A, B, or C)** as the critical, shared resource.
+
+Here is the breakdown:
+
+*   
+2025-11-04 07:47:08 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:47:08 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=5.660s] [duration=5.660s]
+2025-11-04 07:47:08 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:47:08 | INFO     | discord_bot          | Message processing completed [user_id=614936365825654798, guild_id=1222771487753113650, duration=5.944s] [user_id=614936365825654798, guild_id=1222771487753113650, duration=5.944s]
+2025-11-04 07:47:08 | INFO     | src.bot.discord_bot  | Successfully sent response to _giraffe in #grok

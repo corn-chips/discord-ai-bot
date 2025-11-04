@@ -111,6 +111,55 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             )
     
     
+    @bot.tree.command(name="prompt-mode", description="Switch between thinking (detailed) and short (concise) response modes")
+    @app_commands.describe(
+        mode="The response mode to use"
+    )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="Short - Concise & Direct Responses", value="short"),
+        app_commands.Choice(name="Thinking - Detailed Analysis (Single-Use)", value="thinking"),
+    ])
+    async def prompt_mode(interaction: discord.Interaction, mode: app_commands.Choice[str]):
+        """Switch between prompt modes for different response styles."""
+        try:
+            old_mode = gemini_client.get_prompt_mode()
+            success = gemini_client.set_prompt_mode(mode.value)
+            
+            if success:
+                embed = discord.Embed(
+                    title="💭 Prompt Mode Changed",
+                    description=f"Successfully switched response mode!",
+                    color=discord.Color.purple()
+                )
+                embed.add_field(name="Previous Mode", value=old_mode.capitalize(), inline=True)
+                embed.add_field(name="New Mode", value=mode.value.capitalize(), inline=True)
+                
+                mode_descriptions = {
+                    "short": "✨ **Short Mode:** Quick, concise responses focused on directly answering your question without unnecessary details.",
+                    "thinking": "🧠 **Thinking Mode:** Comprehensive, in-depth analysis with detailed explanations, context, and thorough reasoning.\n\n⚡ *Note: Thinking mode automatically reverts to Short mode after one use.*"
+                }
+                
+                embed.add_field(
+                    name="Mode Description", 
+                    value=mode_descriptions.get(mode.value, "Standard response mode"), 
+                    inline=False
+                )
+                
+                logger.info(f"User {interaction.user} changed prompt mode from {old_mode} to {mode.value}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    "❌ Failed to change prompt mode. Please try again later.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error changing prompt mode: {e}")
+            await interaction.response.send_message(
+                f"❌ Error: {str(e)}",
+                ephemeral=True
+            )
+    
+    
     @bot.tree.command(name="stats", description="View bot statistics and usage data")
     async def stats(interaction: discord.Interaction):
         """Display bot statistics including token usage and performance metrics."""
@@ -211,6 +260,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             name="📝 Slash Commands",
             value="`/ping` - Check bot status and latency\n"
                   "`/model` - Switch between AI models\n"
+                  "`/prompt-mode` - Switch between thinking and short modes\n"
                   "`/stats` - View usage statistics\n"
                   "`/config` - View current configuration\n"
                   "`/help` - Show this help message",
@@ -249,10 +299,20 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
         
         # Model settings
         current_model = gemini_client.get_current_model()
+        current_prompt_mode = gemini_client.get_prompt_mode()
         embed.add_field(
             name="🤖 AI Model",
             value=f"**Current Model:** {current_model}\n"
                   f"**Description:** {_get_model_description(current_model)}",
+            inline=False
+        )
+        
+        # Prompt mode settings
+        mode_emoji = "🧠" if current_prompt_mode == "thinking" else "✨"
+        mode_desc = "Detailed analysis" if current_prompt_mode == "thinking" else "Concise responses"
+        embed.add_field(
+            name="💭 Response Mode",
+            value=f"{mode_emoji} **{current_prompt_mode.capitalize()} Mode**\n{mode_desc}",
             inline=False
         )
         

@@ -26,8 +26,7 @@ class MessageContext:
 
     def __post_init__(self):
         """Validate the message context after initialization."""
-        if not self.content:
-            raise ValueError("Message content cannot be empty")
+        # Note: content can be empty for messages with only attachments, embeds, or stickers
         if not self.author:
             raise ValueError("Message author cannot be empty")
         if self.message_id <= 0:

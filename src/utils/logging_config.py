@@ -94,6 +94,16 @@ class PerformanceLogger:
             logger_name: Name of the logger to use
         """
         self.logger = logging.getLogger(logger_name)
+        self._stats = {
+            'message_count': 0,
+            'api_calls': 0,
+            'api_failures': 0,
+            'total_response_time': 0.0,
+            'total_api_time': 0.0,
+            'total_tokens': 0,
+            'input_tokens': 0,
+            'output_tokens': 0
+        }
     
     def log_api_call(
         self, 
@@ -124,6 +134,11 @@ class PerformanceLogger:
             self.logger.info(f"API call to {api_name} completed", extra=extra)
         else:
             self.logger.warning(f"API call to {api_name} failed", extra=extra)
+            self._stats['api_failures'] += 1
+        
+        # Update statistics
+        self._stats['api_calls'] += 1
+        self._stats['total_api_time'] += duration
     
     def log_message_processing(
         self, 
@@ -155,6 +170,55 @@ class PerformanceLogger:
             extra['guild_id'] = guild_id
         
         self.logger.info("Message processing completed", extra=extra)
+        
+        # Update statistics
+        self._stats['message_count'] += 1
+        self._stats['total_response_time'] += duration
+        
+        # Estimate tokens (rough approximation: 1 token ≈ 4 characters)
+        estimated_input = context_messages * 50  # Avg 50 tokens per context message
+        estimated_output = response_length // 4
+        self._stats['input_tokens'] += estimated_input
+        self._stats['output_tokens'] += estimated_output
+        self._stats['total_tokens'] += estimated_input + estimated_output
+    
+    def get_summary_stats(self) -> dict:
+        """
+        Get summary statistics.
+        
+        Returns:
+            Dictionary containing performance statistics
+        """
+        stats = dict(self._stats)
+        
+        # Calculate averages
+        if stats['message_count'] > 0:
+            stats['avg_response_time'] = stats['total_response_time'] / stats['message_count']
+            stats['success_rate'] = ((stats['message_count'] - stats['api_failures']) / stats['message_count']) * 100
+        else:
+            stats['avg_response_time'] = 0.0
+            stats['success_rate'] = 100.0
+        
+        if stats['api_calls'] > 0:
+            stats['avg_api_time'] = stats['total_api_time'] / stats['api_calls']
+        else:
+            stats['avg_api_time'] = 0.0
+        
+        return stats
+    
+    def clear_cache(self) -> None:
+        """Clear all cached statistics."""
+        self._stats = {
+            'message_count': 0,
+            'api_calls': 0,
+            'api_failures': 0,
+            'total_response_time': 0.0,
+            'total_api_time': 0.0,
+            'total_tokens': 0,
+            'input_tokens': 0,
+            'output_tokens': 0
+        }
+        self.logger.info("Performance statistics cache cleared")
 
 
 def setup_logging(

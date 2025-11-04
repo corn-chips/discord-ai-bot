@@ -49,16 +49,17 @@ class TestMessageContext(unittest.TestCase):
         self.assertTrue(context.is_reply)
         self.assertEqual(context.replied_to_id, replied_to_id)
 
-    def test_empty_content_raises_error(self):
-        """Test that empty content raises ValueError."""
-        with self.assertRaises(ValueError) as context:
-            MessageContext(
-                content="",
-                author="test_user",
-                timestamp=self.valid_timestamp,
-                message_id=self.valid_message_id
-            )
-        self.assertIn("content cannot be empty", str(context.exception))
+    def test_empty_content_allowed(self):
+        """Test that empty content is allowed (for image-only messages)."""
+        # Empty content should be allowed since messages can have attachments/embeds only
+        context = MessageContext(
+            content="",
+            author="test_user",
+            timestamp=self.valid_timestamp,
+            message_id=self.valid_message_id
+        )
+        self.assertEqual(context.content, "")
+        self.assertEqual(context.author, "test_user")
 
     def test_empty_author_raises_error(self):
         """Test that empty author raises ValueError."""

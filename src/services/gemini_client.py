@@ -40,12 +40,25 @@ class GeminiClient:
         self.config = config
         self.error_manager = ErrorManager()
         self.performance_logger = PerformanceLogger("gemini_client")
-        self._configure_api()
         self._model = None
+        self._current_model_name = "gemini-2.5-flash"
+        self._configure_api()
         
     def _configure_api(self) -> None:
         """Configure the Gemini API with authentication and settings."""
         try:
+            # Validate API key exists and is not empty
+            if not self.config.gemini_api_key or not self.config.gemini_api_key.strip():
+                logger.error("Gemini API key is missing or empty")
+                self._model = None
+                return
+            
+            # Check if API key looks valid (basic format check)
+            if len(self.config.gemini_api_key) < 20:
+                logger.error("Gemini API key appears to be invalid (too short)")
+                self._model = None
+                return
+            
             genai.configure(api_key=self.config.gemini_api_key)
             
             # Configure the model with appropriate settings
@@ -65,36 +78,109 @@ class GeminiClient:
             }
             
             self._model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
+                model_name=self._current_model_name,
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
             
-            logger.info("Gemini API configured successfully")
+            logger.info(f"Gemini API configured successfully with model: {self._current_model_name}")
+            
+        except ValueError as e:
+            logger.error(f"Invalid Gemini API key format: {e}")
+            self._model = None
+        except Exception as e:
+            logger.error(f"Failed to configure Gemini API: {e}", exc_info=True)
+            self._model = None
+    
+    def get_current_model(self) -> str:
+        """Get the name of the currently active model."""
+        return self._current_model_name
+    
+    def set_model(self, model_name: str) -> bool:
+        """
+        Switch to a different Gemini Flash model.
+        
+        Args:
+            model_name: Name of the model to switch to
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        valid_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite", 
+            "gemini-2.0-flash-exp",
+            "gemini-2.0-flash-lite"
+        ]
+        
+        if model_name not in valid_models:
+            logger.error(f"Invalid model name: {model_name}")
+            return False
+        
+        try:
+            old_model = self._current_model_name
+            self._current_model_name = model_name
+            
+            # Reconfigure with new model
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 1000,
+            }
+            
+            safety_settings = {
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+            }
+            
+            self._model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+            
+            logger.info(f"Switched model from {old_model} to {model_name}")
+            return True
             
         except Exception as e:
-            logger.error(f"Failed to configure Gemini API: {e}")
-            raise
+            logger.error(f"Failed to switch model to {model_name}: {e}")
+            # Revert to old model
+            self._current_model_name = old_model
+            return False
     
-    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None) -> APIResponse:
+    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None) -> APIResponse:
         """
         Generate a response using the Gemini API with retry logic.
         
         Args:
             prompt: The user's message/prompt
             context: Optional conversation context for better responses
+            images: Optional list of PIL Image objects to include in the request
             
         Returns:
             APIResponse containing the generated response or error information
         """
         if not self._model:
+            logger.error("Attempted to generate response but Gemini model is not configured")
             return APIResponse(
                 success=False,
                 error_type="configuration_error",
-                content="Gemini API not properly configured"
+                content="Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable."
             )
         
-        formatted_prompt = self.format_prompt(prompt, context)
+        # Build content for API call
+        if images and len(images) > 0:
+            # Multimodal content with images
+            formatted_prompt = self.format_prompt(prompt, context)
+            content = [formatted_prompt] + images
+            logger.info(f"Generating response with {len(images)} image(s)")
+        else:
+            # Text-only content
+            formatted_prompt = self.format_prompt(prompt, context)
+            content = formatted_prompt
         
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -105,37 +191,105 @@ class GeminiClient:
                 start_time = time.time()
                 
                 response = await asyncio.wait_for(
-                    self._generate_response_async(formatted_prompt),
+                    self._generate_response_async(content),
                     timeout=self.config.response_timeout
                 )
                 
                 duration = time.time() - start_time
                 
-                if response and response.text:
-                    logger.info("Successfully generated response from Gemini API")
-                    
-                    # Log performance metrics
-                    self.performance_logger.log_api_call(
-                        api_name="gemini_generate_content",
-                        duration=duration,
-                        success=True
-                    )
-                    
-                    return APIResponse(
-                        success=True,
-                        content=response.text.strip()
-                    )
-                else:
-                    logger.warning("Gemini API returned empty response")
-                    
-                    # Log failed API call
+                # Check if response is valid
+                if not response:
+                    logger.warning("Gemini API returned None response")
                     self.performance_logger.log_api_call(
                         api_name="gemini_generate_content",
                         duration=duration,
                         success=False,
                         error_type="empty_response"
                     )
+                    return APIResponse(
+                        success=False,
+                        error_type="empty_response",
+                        content="The AI returned no response"
+                    )
+                
+                # Check finish_reason before accessing text
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    finish_reason = candidate.finish_reason
                     
+                    # Handle different finish reasons
+                    if finish_reason == 1:  # STOP - normal completion
+                        if response.text:
+                            logger.info("Successfully generated response from Gemini API")
+                            self.performance_logger.log_api_call(
+                                api_name="gemini_generate_content",
+                                duration=duration,
+                                success=True
+                            )
+                            return APIResponse(
+                                success=True,
+                                content=response.text.strip()
+                            )
+                    elif finish_reason == 2:  # MAX_TOKENS
+                        logger.warning("Gemini API response hit max tokens")
+                        self.performance_logger.log_api_call(
+                            api_name="gemini_generate_content",
+                            duration=duration,
+                            success=False,
+                            error_type="max_tokens"
+                        )
+                        return APIResponse(
+                            success=False,
+                            error_type="max_tokens",
+                            content="Response was too long and was cut off. Please try a simpler question."
+                        )
+                    elif finish_reason == 3:  # SAFETY
+                        logger.warning("Gemini API response blocked by safety filters")
+                        self.performance_logger.log_api_call(
+                            api_name="gemini_generate_content",
+                            duration=duration,
+                            success=False,
+                            error_type="safety_filter"
+                        )
+                        return APIResponse(
+                            success=False,
+                            error_type="safety_filter",
+                            content="I can't respond to that due to content safety guidelines. Please rephrase your message."
+                        )
+                    elif finish_reason == 4:  # RECITATION
+                        logger.warning("Gemini API response blocked due to recitation")
+                        self.performance_logger.log_api_call(
+                            api_name="gemini_generate_content",
+                            duration=duration,
+                            success=False,
+                            error_type="recitation"
+                        )
+                        return APIResponse(
+                            success=False,
+                            error_type="recitation",
+                            content="I can't provide that response as it may be copyrighted content."
+                        )
+                    else:
+                        logger.warning(f"Gemini API returned unexpected finish_reason: {finish_reason}")
+                        self.performance_logger.log_api_call(
+                            api_name="gemini_generate_content",
+                            duration=duration,
+                            success=False,
+                            error_type="unknown_finish_reason"
+                        )
+                        return APIResponse(
+                            success=False,
+                            error_type="unknown_finish_reason",
+                            content="Received an unexpected response from the AI. Please try again."
+                        )
+                else:
+                    logger.warning("Gemini API returned response without candidates")
+                    self.performance_logger.log_api_call(
+                        api_name="gemini_generate_content",
+                        duration=duration,
+                        success=False,
+                        error_type="empty_response"
+                    )
                     return APIResponse(
                         success=False,
                         error_type="empty_response",
@@ -191,12 +345,12 @@ class GeminiClient:
             content="An unexpected error occurred"
         )
     
-    async def _generate_response_async(self, prompt: str):
+    async def _generate_response_async(self, content):
         """
         Async wrapper for Gemini API call.
         
         Args:
-            prompt: Formatted prompt to send to the API
+            content: Content to send to the API (string for text-only, list for multimodal)
             
         Returns:
             Generated response from Gemini API
@@ -206,7 +360,7 @@ class GeminiClient:
         return await loop.run_in_executor(
             None, 
             self._model.generate_content, 
-            prompt
+            content
         )
     
     def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None) -> str:

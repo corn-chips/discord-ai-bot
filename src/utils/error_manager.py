@@ -76,30 +76,30 @@ class ErrorManager:
         """Initialize user-friendly error messages for each error type."""
         return {
             # API-related errors
-            ErrorType.RATE_LIMIT: "I'm currently experiencing high demand. Please try again in a few moments! 🤖",
-            ErrorType.TIMEOUT: "My response took too long to generate. Please try asking again! ⏰",
-            ErrorType.AUTHENTICATION_ERROR: "I'm having trouble connecting to my AI service. Please try again later! 🔧",
-            ErrorType.SERVICE_UNAVAILABLE: "My AI service is temporarily unavailable. Please try again in a few minutes! 🛠️",
-            ErrorType.EMPTY_RESPONSE: "I couldn't generate a response to that. Could you try rephrasing your question? 🤔",
-            ErrorType.INVALID_REQUEST: "I had trouble understanding your request. Could you try asking differently? ❓",
+            ErrorType.RATE_LIMIT: "⚠️ **Rate Limit Exceeded**\nI'm currently experiencing high demand. Please try again in a few moments!",
+            ErrorType.TIMEOUT: "⏰ **Request Timeout**\nMy response took too long to generate. Please try asking again!",
+            ErrorType.AUTHENTICATION_ERROR: "🔧 **Authentication Error**\nI'm having trouble connecting to my AI service. Please try again later!",
+            ErrorType.SERVICE_UNAVAILABLE: "🛠️ **Service Unavailable**\nMy AI service is temporarily unavailable. Please try again in a few minutes!",
+            ErrorType.EMPTY_RESPONSE: "🤔 **Empty Response**\nI couldn't generate a response to that. Could you try rephrasing your question?",
+            ErrorType.INVALID_REQUEST: "❓ **Invalid Request**\nI had trouble understanding your request. Could you try asking differently?",
             
             # Discord-related errors
-            ErrorType.DISCORD_PERMISSION_ERROR: "I don't have the necessary permissions to respond here. Please check my permissions! 🔒",
-            ErrorType.DISCORD_HTTP_ERROR: "I'm having trouble sending messages right now. Please try again! 📤",
-            ErrorType.DISCORD_CONNECTION_ERROR: "I'm experiencing connection issues with Discord. Please try again! 🌐",
+            ErrorType.DISCORD_PERMISSION_ERROR: "🔒 **Permission Error**\nI don't have the necessary permissions to respond here. Please check my permissions!",
+            ErrorType.DISCORD_HTTP_ERROR: "📤 **Discord API Error**\nI'm having trouble sending messages right now. Please try again!",
+            ErrorType.DISCORD_CONNECTION_ERROR: "🌐 **Connection Error**\nI'm experiencing connection issues with Discord. Please try again!",
             
             # Configuration errors
-            ErrorType.CONFIGURATION_ERROR: "I'm experiencing a configuration issue. Please try again later! ⚙️",
-            ErrorType.MISSING_TOKEN: "I'm not properly configured. Please contact an administrator! 🔑",
-            ErrorType.INVALID_TOKEN: "My authentication credentials are invalid. Please contact an administrator! 🚫",
+            ErrorType.CONFIGURATION_ERROR: "⚙️ **Configuration Error**\nI'm experiencing a configuration issue. Please try again later!",
+            ErrorType.MISSING_TOKEN: "🔑 **Missing Token**\nI'm not properly configured. Please contact an administrator!",
+            ErrorType.INVALID_TOKEN: "🚫 **Invalid Token**\nMy authentication credentials are invalid. Please contact an administrator!",
             
             # Context collection errors
-            ErrorType.CONTEXT_COLLECTION_ERROR: "I had trouble reading the conversation history. Please try again! 📚",
-            ErrorType.MESSAGE_HISTORY_ERROR: "I couldn't access the message history. Please try again! 📜",
+            ErrorType.CONTEXT_COLLECTION_ERROR: "📚 **Context Collection Error**\nI had trouble reading the conversation history. Please try again!",
+            ErrorType.MESSAGE_HISTORY_ERROR: "📜 **Message History Error**\nI couldn't access the message history. Please try again!",
             
             # General errors
-            ErrorType.UNKNOWN_ERROR: "Something unexpected happened. Please try again! 🤷‍♂️",
-            ErrorType.VALIDATION_ERROR: "There was an issue with the message format. Please try again! ✅"
+            ErrorType.UNKNOWN_ERROR: "🤷‍♂️ **Unexpected Error**\nSomething unexpected happened. Please try again!",
+            ErrorType.VALIDATION_ERROR: "✅ **Validation Error**\nThere was an issue with the message format. Please try again!"
         }
     
     def _initialize_technical_messages(self) -> Dict[ErrorType, str]:
@@ -176,7 +176,8 @@ class ErrorManager:
         self, 
         error: Exception, 
         custom_message: Optional[str] = None,
-        retry_after: Optional[int] = None
+        retry_after: Optional[int] = None,
+        include_error_details: bool = True
     ) -> ErrorContext:
         """
         Create an ErrorContext object from an exception.
@@ -185,6 +186,7 @@ class ErrorManager:
             error: The exception that occurred
             custom_message: Optional custom user message
             retry_after: Optional retry delay in seconds
+            include_error_details: Whether to include technical error details in user message
             
         Returns:
             ErrorContext object with categorized error information
@@ -208,10 +210,21 @@ class ErrorManager:
             ErrorType.EMPTY_RESPONSE
         } else logging.ERROR
         
+        # Build user message with error details if requested
+        if custom_message:
+            user_message = custom_message
+        else:
+            user_message = self.get_user_message(error_type)
+            if include_error_details and error:
+                # Add technical details in a user-friendly way
+                error_str = str(error).strip()
+                if error_str and len(error_str) < 200:  # Only include if not too long
+                    user_message += f"\n\n**Details:** `{error_str}`"
+        
         return ErrorContext(
             error_type=error_type,
             original_error=error,
-            user_message=custom_message or self.get_user_message(error_type),
+            user_message=user_message,
             technical_details=self._technical_messages.get(error_type, str(error)),
             retry_after=retry_after,
             should_retry=should_retry,

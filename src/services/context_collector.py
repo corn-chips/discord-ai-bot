@@ -73,6 +73,11 @@ class ContextCollector:
                     if message.author.bot:
                         continue
                     
+                    # Skip messages with no text content (images, embeds, stickers only)
+                    if not message.content or not message.content.strip():
+                        self.logger.debug(f"Skipping message {message.id} with no text content")
+                        continue
+                    
                     # Convert Discord message to MessageContext
                     message_context = MessageContext(
                         content=message.content,
@@ -142,6 +147,9 @@ class ContextCollector:
                 
                 # Add messages before (in chronological order)
                 for msg in reversed(before_messages):
+                    # Skip messages with no text content
+                    if not msg.content or not msg.content.strip():
+                        continue
                     reply_context.append(MessageContext(
                         content=msg.content,
                         author=msg.author.display_name,
@@ -151,15 +159,16 @@ class ContextCollector:
                         replied_to_id=msg.reference.message_id if msg.reference else None
                     ))
                 
-                # Add the replied-to message itself
-                reply_context.append(MessageContext(
-                    content=replied_to_message.content,
-                    author=replied_to_message.author.display_name,
-                    timestamp=replied_to_message.created_at,
-                    message_id=replied_to_message.id,
-                    is_reply=replied_to_message.reference is not None,
-                    replied_to_id=replied_to_message.reference.message_id if replied_to_message.reference else None
-                ))
+                # Add the replied-to message itself (if it has text content)
+                if replied_to_message.content and replied_to_message.content.strip():
+                    reply_context.append(MessageContext(
+                        content=replied_to_message.content,
+                        author=replied_to_message.author.display_name,
+                        timestamp=replied_to_message.created_at,
+                        message_id=replied_to_message.id,
+                        is_reply=replied_to_message.reference is not None,
+                        replied_to_id=replied_to_message.reference.message_id if replied_to_message.reference else None
+                    ))
                 
                 # Get messages after the replied-to message
                 async for msg in message.channel.history(
@@ -168,6 +177,9 @@ class ContextCollector:
                     oldest_first=True
                 ):
                     if not msg.author.bot and msg.id != message.id:  # Skip bot messages and the original message
+                        # Skip messages with no text content
+                        if not msg.content or not msg.content.strip():
+                            continue
                         reply_context.append(MessageContext(
                             content=msg.content,
                             author=msg.author.display_name,

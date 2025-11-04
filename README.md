@@ -3,15 +3,28 @@
 A Discord bot that provides AI-powered conversational responses using Google's Gemini API. The bot mimics Grok's functionality from Twitter, offering contextual responses when mentioned in Discord channels.
 
 ## Todo List
- - [ ] Make model interpret user message to do actual actions in discord server (mute all, ban all, kick all, etc)
- - [ ] Add functionality to read files in the discord message
+ - [ ] (CANCELED, UNSAFE) Make model interpret user message to do actual actions in discord server (mute all, ban all, kick all, etc)
+ - [ ] Add image editing via nano-banana model
+ - [x] Add functionality to read files in the discord message
+ - [x] **NEW!** Add PDF support - PDFs are now converted to images and processed!
+ - [ ] Make it so that markdown is consistent through split messages
  - [ ] Add feature to join vc and answer in real time
+
 ## Features
 
 - **Context-Aware Responses**: Analyzes recent message history for relevant context
 - **Enhanced Reply Context**: Provides additional context when replying to specific messages
+- **Image Analysis**: Supports image attachments for visual understanding
+- **PDF Support**: 🎉 **NEW!** Full PDF support - automatically converts PDFs to images for AI analysis (see [PDF_SUPPORT.md](PDF_SUPPORT.md))
+  - Multi-page support - processes all pages
+  - High-quality conversion (2x resolution)
+  - Works with assignments, documents, reports, and more
+- **File Upload Support**: Reads and processes uploaded text files, code, configurations, logs, and more (see [FILE_UPLOAD_FEATURE.md](FILE_UPLOAD_FEATURE.md))
+  - Supports 40+ file types including all major programming languages
+  - Comprehensive logging for debugging (see [FILE_UPLOAD_DEBUGGING.md](FILE_UPLOAD_DEBUGGING.md))
 - **Error Handling**: Graceful handling of API errors with user-friendly messages
 - **Configurable**: Customizable message limits, timeouts, and other settings
+- **Detailed Logging**: Track file processing, AI requests, and responses for troubleshooting
 
 ## Setup
 
@@ -164,6 +177,8 @@ Or manually:
 1. Build the Docker image:
 ```bash
 docker build -t discord-grok-bot .
+
+docker compose build --no-cache
 ```
 
 2. Run with Docker Compose:

@@ -9,11 +9,12 @@ import asyncio
 import io
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 
 import discord
 from discord.ext import commands
 from PIL import Image
+import fitz  # PyMuPDF
 
 from ..config import BotConfig
 from ..models.data_models import APIResponse
@@ -319,9 +320,74 @@ class DiscordBot(discord.Client):
         # Clean up extra whitespace
         return content.strip()
     
+    async def _convert_pdf_to_images(self, pdf_bytes: bytes, filename: str) -> List[Image.Image]:
+        """
+        Convert a PDF file to a list of PNG images.
+        
+        Args:
+            pdf_bytes: The PDF file content as bytes
+            filename: The name of the PDF file (for logging)
+            
+        Returns:
+            List of PIL Image objects, one per page
+        """
+        images = []
+        try:
+            logger.info(f"=" * 80)
+            logger.info(f"PDF CONVERSION STARTED: {filename}")
+            logger.info(f"PDF size: {len(pdf_bytes)} bytes ({len(pdf_bytes) / 1024:.2f} KB)")
+            
+            # Open PDF with PyMuPDF
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_count = len(pdf_document)
+            
+            logger.info(f"PDF has {page_count} page(s)")
+            
+            # Convert each page to an image
+            for page_num in range(page_count):
+                try:
+                    logger.info(f"Converting page {page_num + 1}/{page_count}...")
+                    
+                    page = pdf_document[page_num]
+                    
+                    # Render page to pixmap (image) at 2x resolution for better quality
+                    mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better quality
+                    pix = page.get_pixmap(matrix=mat)
+                    
+                    # Convert pixmap to PIL Image
+                    img_data = pix.tobytes("png")
+                    image = Image.open(io.BytesIO(img_data))
+                    
+                    # Convert to RGB if necessary
+                    if image.mode == 'RGBA':
+                        background = Image.new('RGB', image.size, (255, 255, 255))
+                        background.paste(image, mask=image.split()[3])
+                        image = background
+                    elif image.mode not in ['RGB', 'L']:
+                        image = image.convert('RGB')
+                    
+                    images.append(image)
+                    logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to convert page {page_num + 1}: {e}")
+                    continue
+            
+            pdf_document.close()
+            
+            logger.info(f"✅ PDF CONVERSION COMPLETE: {len(images)} pages converted successfully")
+            logger.info(f"=" * 80)
+            
+        except Exception as e:
+            logger.error(f"Failed to convert PDF {filename}: {e}", exc_info=True)
+            logger.info(f"=" * 80)
+        
+        return images
+    
     async def _extract_images_from_message(self, message: discord.Message) -> List[Image.Image]:
         """
         Extract and download images from a Discord message.
+        Also converts PDF files to images for processing.
         
         Args:
             message: The Discord message to extract images from
@@ -331,10 +397,29 @@ class DiscordBot(discord.Client):
         """
         images = []
         
-        # Check message attachments for images
+        # Check message attachments for images and PDFs
         for attachment in message.attachments:
+            # Check if attachment is a PDF
+            if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
+                try:
+                    logger.info(f"📄 PDF detected: {attachment.filename}")
+                    # Download the PDF
+                    pdf_bytes = await attachment.read()
+                    
+                    # Convert PDF pages to images
+                    pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
+                    
+                    if pdf_images:
+                        images.extend(pdf_images)
+                        logger.info(f"✅ Added {len(pdf_images)} page(s) from PDF: {attachment.filename}")
+                    else:
+                        logger.warning(f"⚠️ No pages could be extracted from PDF: {attachment.filename}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process PDF {attachment.filename}: {e}", exc_info=True)
+            
             # Check if attachment is an image based on content type or filename
-            if attachment.content_type and attachment.content_type.startswith('image/'):
+            elif attachment.content_type and attachment.content_type.startswith('image/'):
                 try:
                     # Download the image
                     image_bytes = await attachment.read()
@@ -358,12 +443,27 @@ class DiscordBot(discord.Client):
                 except Exception as e:
                     logger.error(f"Failed to load image from attachment {attachment.filename}: {e}")
         
-        # Also check if the message is a reply and has images in the replied message
+        # Also check if the message is a reply and has images/PDFs in the replied message
         if message.reference and message.reference.resolved:
             replied_message = message.reference.resolved
             if isinstance(replied_message, discord.Message):
                 for attachment in replied_message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                    # Check for PDFs in replied message
+                    if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
+                        try:
+                            logger.info(f"📄 PDF detected in replied message: {attachment.filename}")
+                            pdf_bytes = await attachment.read()
+                            pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
+                            
+                            if pdf_images:
+                                images.extend(pdf_images)
+                                logger.info(f"✅ Added {len(pdf_images)} page(s) from replied PDF: {attachment.filename}")
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to process PDF from replied message {attachment.filename}: {e}")
+                    
+                    # Check for images in replied message
+                    elif attachment.content_type and attachment.content_type.startswith('image/'):
                         try:
                             image_bytes = await attachment.read()
                             image = Image.open(io.BytesIO(image_bytes))
@@ -382,6 +482,152 @@ class DiscordBot(discord.Client):
                             logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
         
         return images
+    
+    async def _extract_files_from_message(self, message: discord.Message) -> Tuple[List[Dict[str, str]], List[str]]:
+        """
+        Extract and read non-image files from a Discord message.
+        
+        Args:
+            message: The Discord message to extract files from
+            
+        Returns:
+            Tuple of (list of file dictionaries with name and content, list of unsupported filenames)
+        """
+        files = []
+        unsupported_files = []
+        
+        logger.info(f"Extracting files from message {message.id}")
+        logger.info(f"Total attachments in message: {len(message.attachments)}")
+        
+        # Supported text-based file extensions
+        text_extensions = {
+            '.txt', '.md', '.json', '.yaml', '.yml', '.xml', '.csv', 
+            '.log', '.ini', '.cfg', '.conf', '.py', '.js', '.ts', 
+            '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs',
+            '.html', '.css', '.jsx', '.tsx', '.vue', '.php', '.rb',
+            '.sh', '.bash', '.ps1', '.sql', '.r', '.m', '.swift',
+            '.kt', '.scala', '.pl', '.lua', '.dart'
+        }
+        
+        # Maximum file size to read (5MB)
+        max_file_size = 5 * 1024 * 1024
+        
+        async def process_attachment(attachment: discord.Attachment) -> None:
+            """Process a single attachment."""
+            logger.info(f"Processing attachment: {attachment.filename}")
+            logger.info(f"  - Content type: {attachment.content_type}")
+            logger.info(f"  - Size: {attachment.size} bytes ({attachment.size / 1024:.2f} KB)")
+            
+            # Skip images (handled by _extract_images_from_message)
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                logger.info(f"  → Skipping {attachment.filename} (image file - handled separately)")
+                return
+            
+            # Skip PDFs (now handled by _extract_images_from_message as images)
+            if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
+                logger.info(f"  → Skipping {attachment.filename} (PDF file - converted to images and handled separately)")
+                return
+            
+            # Check file size
+            if attachment.size > max_file_size:
+                logger.warning(f"  → REJECTED: {attachment.filename} is too large ({attachment.size} bytes = {attachment.size / (1024*1024):.1f}MB)")
+                logger.warning(f"  → Maximum allowed size: {max_file_size / (1024*1024):.1f}MB")
+                unsupported_files.append(f"{attachment.filename} (too large: {attachment.size / (1024*1024):.1f}MB)")
+                return
+            
+            # Get file extension
+            file_ext = None
+            if '.' in attachment.filename:
+                file_ext = '.' + attachment.filename.rsplit('.', 1)[1].lower()
+                logger.info(f"  - File extension: {file_ext}")
+            else:
+                logger.info(f"  - No file extension detected")
+            
+            # Check if it's a supported text file
+            is_supported = file_ext in text_extensions or attachment.content_type and (
+                attachment.content_type.startswith('text/') or 
+                'json' in attachment.content_type or
+                'xml' in attachment.content_type or
+                'yaml' in attachment.content_type
+            )
+            
+            if is_supported:
+                logger.info(f"  ✓ {attachment.filename} is a SUPPORTED file type")
+                try:
+                    logger.info(f"  → Downloading file content...")
+                    # Download and decode the file
+                    file_bytes = await attachment.read()
+                    logger.info(f"  → Downloaded {len(file_bytes)} bytes")
+                    
+                    # Try multiple encodings
+                    content = None
+                    tried_encodings = []
+                    for encoding in ['utf-8', 'latin-1', 'cp1252', 'ascii']:
+                        try:
+                            content = file_bytes.decode(encoding)
+                            logger.info(f"  ✓ Successfully decoded {attachment.filename} with {encoding} encoding")
+                            break
+                        except UnicodeDecodeError:
+                            tried_encodings.append(encoding)
+                            logger.debug(f"  ✗ Failed to decode with {encoding}")
+                            continue
+                    
+                    if content is None:
+                        logger.error(f"  → FAILED: Could not decode file {attachment.filename} with any encoding")
+                        logger.error(f"  → Tried encodings: {', '.join(tried_encodings)}")
+                        unsupported_files.append(f"{attachment.filename} (encoding error)")
+                        return
+                    
+                    files.append({
+                        'name': attachment.filename,
+                        'content': content,
+                        'size': attachment.size
+                    })
+                    logger.info(f"  ✅ SUCCESS: Loaded {attachment.filename}")
+                    logger.info(f"     - File size: {attachment.size} bytes ({attachment.size / 1024:.2f} KB)")
+                    logger.info(f"     - Content length: {len(content)} characters")
+                    logger.info(f"     - Content preview: {content[:150]}..." if len(content) > 150 else f"     - Full content: {content}")
+                    
+                except Exception as e:
+                    logger.error(f"  → FAILED: Error loading {attachment.filename}: {e}")
+                    logger.error(f"  → Exception type: {type(e).__name__}")
+                    unsupported_files.append(f"{attachment.filename} (error: {str(e)})")
+            else:
+                # Unsupported file type
+                logger.warning(f"  → REJECTED: {attachment.filename} is an UNSUPPORTED file type")
+                logger.warning(f"  → Extension '{file_ext}' not in supported list")
+                logger.warning(f"  → Content type '{attachment.content_type}' not recognized as text-based")
+                unsupported_files.append(f"{attachment.filename} (unsupported type)")
+        
+        # Process attachments from the main message
+        logger.info("Processing attachments from main message...")
+        for idx, attachment in enumerate(message.attachments, 1):
+            logger.info(f"Attachment {idx}/{len(message.attachments)}: {attachment.filename}")
+            await process_attachment(attachment)
+        
+        # Also check if the message is a reply and has files in the replied message
+        if message.reference and message.reference.resolved:
+            replied_message = message.reference.resolved
+            if isinstance(replied_message, discord.Message):
+                logger.info(f"Message is a reply, processing {len(replied_message.attachments)} attachments from replied message...")
+                for idx, attachment in enumerate(replied_message.attachments, 1):
+                    logger.info(f"Replied attachment {idx}/{len(replied_message.attachments)}: {attachment.filename}")
+                    await process_attachment(attachment)
+        
+        # Final summary
+        logger.info("=" * 40)
+        logger.info(f"FILE EXTRACTION SUMMARY:")
+        logger.info(f"  ✅ Successfully processed: {len(files)} file(s)")
+        if files:
+            for f in files:
+                logger.info(f"     - {f['name']}")
+        logger.info(f"  ❌ Failed/Unsupported: {len(unsupported_files)} file(s)")
+        if unsupported_files:
+            for f in unsupported_files:
+                logger.info(f"     - {f}")
+        logger.info("=" * 40)
+        
+        return files, unsupported_files
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
@@ -500,27 +746,107 @@ class DiscordBot(discord.Client):
                     # Extract images from the message
                     images = await self._extract_images_from_message(message)
                     
-                    # Validate prompt is not empty (or has images)
-                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0:
-                        logger.warning("Empty user prompt and no images provided to response generation")
-                        await message.reply("Please provide a message or attach an image for me to respond to! 📝")
+                    # Extract files from the message
+                    logger.info("=" * 80)
+                    logger.info("FILE EXTRACTION STARTED")
+                    files, unsupported_files = await self._extract_files_from_message(message)
+                    logger.info(f"File extraction complete: {len(files)} supported, {len(unsupported_files)} unsupported")
+                    
+                    # Log details about successfully processed files
+                    if files:
+                        logger.info("✅ SUCCESSFULLY PROCESSED FILES:")
+                        for idx, file_info in enumerate(files, 1):
+                            logger.info(f"  {idx}. {file_info['name']}")
+                            logger.info(f"     - Size: {file_info['size']} bytes ({file_info['size'] / 1024:.2f} KB)")
+                            logger.info(f"     - Content length: {len(file_info['content'])} characters")
+                            logger.info(f"     - First 100 chars: {file_info['content'][:100]}...")
+                    else:
+                        logger.info("❌ No files were successfully processed")
+                    
+                    # Log details about unsupported files
+                    if unsupported_files:
+                        logger.warning("⚠️ UNSUPPORTED/FAILED FILES:")
+                        for idx, unsupported in enumerate(unsupported_files, 1):
+                            logger.warning(f"  {idx}. {unsupported}")
+                    
+                    logger.info("=" * 80)
+                    
+                    # Notify user about unsupported files if any
+                    if unsupported_files:
+                        unsupported_msg = "ℹ️ Note: The following files could not be processed:\n" + "\n".join(f"- {f}" for f in unsupported_files)
+                        logger.info(f"Sending unsupported files notification to user")
+                        try:
+                            await message.channel.send(unsupported_msg)
+                        except Exception as e:
+                            logger.error(f"Failed to send unsupported files message: {e}")
+                    
+                    # Validate prompt is not empty (or has images/files)
+                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0 and len(files) == 0:
+                        logger.warning("Empty user prompt and no images/files provided to response generation")
+                        await message.reply("Please provide a message, attach an image, or upload a file for me to respond to! 📝")
                         return
                     
+                    # Build enhanced prompt with file contents
+                    enhanced_prompt = user_prompt
+                    
+                    # Add file contents to the prompt
+                    if files:
+                        logger.info("=" * 80)
+                        logger.info("BUILDING AI PROMPT WITH FILE CONTENTS")
+                        file_contents_text = "\n\n--- UPLOADED FILES ---\n"
+                        for file_info in files:
+                            file_contents_text += f"\n📄 **File: {file_info['name']}** (Size: {file_info['size']} bytes)\n"
+                            file_contents_text += f"```\n{file_info['content']}\n```\n"
+                            logger.info(f"  ✓ Added {file_info['name']} to AI prompt")
+                        
+                        # Prepend file contents to the prompt
+                        if not enhanced_prompt or not enhanced_prompt.strip():
+                            enhanced_prompt = f"I have uploaded the following file(s). Please analyze them:\n{file_contents_text}"
+                            logger.info("Using auto-generated prompt for files (no user message)")
+                        else:
+                            enhanced_prompt = f"{file_contents_text}\n\nUser's question/request: {enhanced_prompt}"
+                            logger.info(f"Combined file contents with user prompt: '{user_prompt[:100]}...'")
+                        
+                        logger.info(f"✅ Enhanced prompt built with {len(files)} file(s)")
+                        logger.info(f"Total prompt length: {len(enhanced_prompt)} characters")
+                        logger.info("=" * 80)
+                    
                     # If only images, provide a default prompt
-                    if not user_prompt or not user_prompt.strip():
-                        user_prompt = "What's in this image? Please describe it in detail."
+                    elif not enhanced_prompt or not enhanced_prompt.strip():
+                        enhanced_prompt = "What's in this image? Please describe it in detail."
                         logger.info("Using default prompt for image-only message")
                     
-                    # Generate AI response with timeout handling (including images if present)
+                    # Generate AI response with timeout handling (including images and files if present)
+                    logger.info("=" * 80)
+                    logger.info("SENDING TO AI API")
+                    logger.info(f"  - Prompt length: {len(enhanced_prompt)} characters")
+                    logger.info(f"  - Context messages: {len(context)}")
+                    logger.info(f"  - Images included: {len(images) if images else 0}")
+                    logger.info(f"  - Files included in prompt: {len(files)}")
+                    if files:
+                        logger.info("  - Files sent to AI:")
+                        for f in files:
+                            logger.info(f"    • {f['name']}")
+                    logger.info("=" * 80)
+                    
                     api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(user_prompt, context, images=images if images else None),
+                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None),
                         timeout=self.config.response_timeout + 5  # Add buffer to client timeout
                     )
                     
                     duration = time.time() - start_time
                     
                     if api_response.success:
-                        logger.info("Successfully generated AI response")
+                        logger.info("=" * 80)
+                        logger.info("✅ AI RESPONSE GENERATED SUCCESSFULLY")
+                        logger.info(f"  - Response length: {len(api_response.content) if api_response.content else 0} characters")
+                        logger.info(f"  - Processing duration: {duration:.2f} seconds")
+                        logger.info(f"  - Files were included in request: {len(files) > 0}")
+                        if files:
+                            logger.info(f"  - Files that were processed by AI:")
+                            for f in files:
+                                logger.info(f"    ✓ {f['name']}")
+                        logger.info("=" * 80)
                         
                         # Log performance metrics
                         self.performance_logger.log_message_processing(

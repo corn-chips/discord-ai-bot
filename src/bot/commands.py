@@ -220,13 +220,36 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             
             # Current model
             current_model = gemini_client.get_current_model()
+            current_prompt_mode = gemini_client.get_prompt_mode()
             embed.add_field(
                 name="⚙️ Configuration",
                 value=f"**Model:** {current_model}\n"
+                      f"**Prompt Mode:** {current_prompt_mode.capitalize()}\n"
                       f"**Max Context:** {config.max_context_messages} messages\n"
                       f"**Timeout:** {config.response_timeout}s",
                 inline=False
             )
+            
+            # API Usage and Rate Limits
+            api_info = gemini_client.get_api_usage_info()
+            if api_info.get('api_configured'):
+                rate_limits = api_info.get('rate_limits', {}).get('free_tier', {})
+                embed.add_field(
+                    name="📈 API Rate Limits (Free Tier)",
+                    value=f"**Requests/Minute:** {rate_limits.get('requests_per_minute', 'N/A'):,}\n"
+                          f"**Requests/Day:** {rate_limits.get('requests_per_day', 'N/A'):,}\n"
+                          f"**Tokens/Minute:** {rate_limits.get('tokens_per_minute', 'N/A'):,}",
+                    inline=True
+                )
+                
+                model_caps = api_info.get('model_capabilities', {})
+                embed.add_field(
+                    name="🔧 Model Capabilities",
+                    value=f"**Max Input:** {model_caps.get('max_input_tokens', 0):,} tokens\n"
+                          f"**Max Output:** {model_caps.get('max_output_tokens', 0):,} tokens\n"
+                          f"**Context Window:** 1M tokens",
+                    inline=True
+                )
             
             embed.set_footer(text=f"Requested by {interaction.user.display_name}")
             

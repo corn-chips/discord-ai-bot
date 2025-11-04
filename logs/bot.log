@@ -2275,3 +2275,647 @@ Here is the breakdown:
 2025-11-04 07:47:08 | INFO     | src.bot.discord_bot  | Successfully generated AI response
 2025-11-04 07:47:08 | INFO     | discord_bot          | Message processing completed [user_id=614936365825654798, guild_id=1222771487753113650, duration=5.944s] [user_id=614936365825654798, guild_id=1222771487753113650, duration=5.944s]
 2025-11-04 07:47:08 | INFO     | src.bot.discord_bot  | Successfully sent response to _giraffe in #grok
+2025-11-04 07:48:39 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173888303562803] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435173888303562803]
+2025-11-04 07:48:39 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:48:39 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.512s] [channel_id=1435154218032824452, duration=0.512s]
+2025-11-04 07:48:39 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Input prompt length: 4148 characters
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Context messages provided: 50
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[0]: Author=girafe, Length=1 chars, Timestamp=2025-11-04 06:34:29.459000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[1]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.008000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[2]: Author=girafe, Length=2 chars, Timestamp=2025-11-04 06:34:30.393000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[3]: Author=Ciel, Length=39 chars, Timestamp=2025-11-04 06:34:30.806000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[4]: Author=Ciel, Length=3 chars, Timestamp=2025-11-04 06:34:31.583000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[5]: Author=ord, Length=39 chars, Timestamp=2025-11-04 06:34:42.910000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[6]: Author=Ciel, Length=45 chars, Timestamp=2025-11-04 06:34:58.647000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[7]: Author=Ciel, Length=21 chars, Timestamp=2025-11-04 06:35:11.696000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[8]: Author=ord, Length=41 chars, Timestamp=2025-11-04 06:36:03.331000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[9]: Author=ord, Length=72 chars, Timestamp=2025-11-04 06:36:22.315000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[10]: Author=ord, Length=12 chars, Timestamp=2025-11-04 06:36:36.804000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[11]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:37:09.830000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[12]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:37:18.919000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[13]: Author=ord, Length=34 chars, Timestamp=2025-11-04 06:38:20.160000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[14]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:38:20.211000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[15]: Author=Ciel, Length=36 chars, Timestamp=2025-11-04 06:38:23.258000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[16]: Author=Ciel, Length=40 chars, Timestamp=2025-11-04 06:38:33.195000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[17]: Author=Ciel, Length=43 chars, Timestamp=2025-11-04 06:38:46.803000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[18]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:38:58.433000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[19]: Author=Ciel, Length=58 chars, Timestamp=2025-11-04 06:39:04.087000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[20]: Author=ord, Length=10 chars, Timestamp=2025-11-04 06:39:06.204000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[21]: Author=dank mr panda, Length=67 chars, Timestamp=2025-11-04 06:39:47.364000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[22]: Author=ord, Length=52 chars, Timestamp=2025-11-04 06:40:26.795000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[23]: Author=Ciel, Length=101 chars, Timestamp=2025-11-04 06:40:30.199000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[24]: Author=ord, Length=24 chars, Timestamp=2025-11-04 06:40:36.669000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[25]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:40:59.690000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[26]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:41:48.499000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[27]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:45:02.980000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[28]: Author=ord, Length=114 chars, Timestamp=2025-11-04 06:45:12.392000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[29]: Author=ord, Length=89 chars, Timestamp=2025-11-04 06:45:27.852000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[30]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:47:48.105000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[31]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 06:51:12.762000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[32]: Author=dank mr panda, Length=52 chars, Timestamp=2025-11-04 06:51:32.743000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[33]: Author=dank mr panda, Length=53 chars, Timestamp=2025-11-04 06:55:51.763000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[34]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:56:25.219000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[35]: Author=dank mr panda, Length=3 chars, Timestamp=2025-11-04 06:58:05.826000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[36]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 06:58:15.785000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[37]: Author=dank mr panda, Length=6 chars, Timestamp=2025-11-04 06:58:43.163000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[38]: Author=dank mr panda, Length=29 chars, Timestamp=2025-11-04 06:58:56.681000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[39]: Author=dank mr panda, Length=72 chars, Timestamp=2025-11-04 07:01:28.549000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[40]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:04:29.279000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[41]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:12:23.311000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[42]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:16:27.657000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[43]: Author=girafe, Length=43 chars, Timestamp=2025-11-04 07:21:21.139000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[44]: Author=girafe, Length=22 chars, Timestamp=2025-11-04 07:34:15.399000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[45]: Author=girafe, Length=40 chars, Timestamp=2025-11-04 07:34:33.009000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[46]: Author=dank mr panda, Length=27 chars, Timestamp=2025-11-04 07:46:06.859000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[47]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 07:46:30.909000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[48]: Author=girafe, Length=62 chars, Timestamp=2025-11-04 07:47:01.805000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client |   Context[49]: Author=girafe, Length=74 chars, Timestamp=2025-11-04 07:48:39.213000+00:00
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:48:39 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 4.239s)
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Output token count (estimated): 123
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Output length: 854 characters
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | Output (first 200 chars): This is necessary to allow the overloaded stream insertion operator (`<<`) to access the private or protected members of your class.
+
+Here is a concise breakdown:
+
+*   **Operator Overloading Requireme
+2025-11-04 07:48:44 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:48:44 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=4.239s] [duration=4.239s]
+2025-11-04 07:48:44 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:48:44 | INFO     | discord_bot          | Message processing completed [user_id=614936365825654798, guild_id=1222771487753113650, duration=4.286s] [user_id=614936365825654798, guild_id=1222771487753113650, duration=4.286s]
+2025-11-04 07:48:44 | INFO     | src.bot.discord_bot  | Successfully sent response to _giraffe in #grok
+2025-11-04 07:49:34 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:49:34 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:49:34 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:49:37 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:49:37 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:49:37 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:49:37 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:49:37 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:49:37 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:49:37 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:49:37 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:49:39 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:49:39 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:49:39 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:49:39 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:49:39 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:49:41 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:49:41 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:50:05 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:50:05 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:50:05 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:50:57 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:50:57 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:50:57 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:50:57 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:50:57 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:50:57 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:50:57 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:50:57 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:50:59 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:50:59 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:50:59 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:50:59 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:50:59 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:51:00 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:51:00 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:51:09 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:51:09 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:51:09 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:51:10 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:51:10 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:51:10 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:51:10 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:51:10 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:51:10 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:51:10 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:51:10 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:51:13 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:51:13 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:51:13 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:51:13 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:51:13 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:51:18 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:51:18 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:51:18 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:51:25 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:51:25 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:51:25 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:51:25 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:51:25 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:51:25 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:51:25 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:51:25 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:51:27 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:51:27 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:51:27 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:51:27 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:51:27 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:51:27 | WARNING  | discord.http         | We are being rate limited. PUT https://discord.com/api/v10/applications/1142103557747785758/commands responded with 429. Retrying in 2.11 seconds.
+2025-11-04 07:52:30 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:52:30 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:52:32 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:52:32 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:52:32 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:52:48 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:52:48 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:52:48 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:52:48 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:52:48 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:52:48 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:52:48 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:52:48 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:52:51 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:53:24 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:53:24 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:53:24 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:53:25 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:53:25 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:53:25 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:53:25 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:53:25 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:53:25 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:53:25 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:53:25 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s)
+2025-11-04 07:53:27 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:53:40 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:53:40 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:53:40 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:53:43 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:53:43 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:53:43 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:53:43 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:53:43 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:53:43 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:53:43 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:53:43 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:53:46 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:53:46 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:53:46 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:53:46 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:53:46 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s) globally
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /ping - Check if the bot is responsive
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /model - Switch between Gemini Flash AI models
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /prompt-mode - Switch between thinking (detailed) and short (concise) response modes
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /stats - View bot statistics and usage data
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /help - Show help information and available commands
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /config - View current bot configuration
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /clear-cache - Clear bot's message cache (Admin only)
+2025-11-04 07:54:28 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:55:02 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:55:02 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:55:02 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:57:10 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:57:10 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:57:10 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:57:10 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:57:10 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:57:10 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:57:10 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:57:10 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s) globally
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /ping - Check if the bot is responsive
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /model - Switch between Gemini Flash AI models
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /prompt-mode - Switch between thinking (detailed) and short (concise) response modes
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /stats - View bot statistics and usage data
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /help - Show help information and available commands
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /config - View current bot configuration
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /clear-cache - Clear bot's message cache (Admin only)
+2025-11-04 07:57:13 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:57:35 | INFO     | discord_bot          | Performance statistics cache cleared
+2025-11-04 07:57:35 | INFO     | src.bot.commands     | Admin _giraffe cleared bot cache
+2025-11-04 08:03:58 | INFO     | src.services.gemini_client | Prompt mode changed from 'short' to 'thinking'
+2025-11-04 08:03:58 | INFO     | src.bot.commands     | User dankmrpanda changed prompt mode from short to thinking
+2025-11-04 08:04:27 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok-test [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435177860485615758] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435177860485615758]
+2025-11-04 08:04:27 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 08:04:27 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.229s] [channel_id=1435167927513907241, duration=0.229s]
+2025-11-04 08:04:27 | INFO     | src.bot.discord_bot  | Collected 6 messages for context
+2025-11-04 08:04:28 | INFO     | src.bot.discord_bot  | Loaded image from attachment: usagi.jpg (735x681)
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Generating response with 1 image(s)
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Input prompt length: 4696 characters
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Grounded Expert**
+
+**[CORE IDENTITY]**
+
+You are a grounded, well-informed expert AI assistant. Your primary function is to provide users with accurate, verifiable, and compre
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Context messages provided: 6
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:33:43.142000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client |   Context[5]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 08:04:26.255000+00:00
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 08:04:28 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 10.917s)
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Output token count (estimated): 470
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Output length: 3211 characters
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Output (first 200 chars): This image is a widely circulated internet meme featuring characters from the popular Japanese franchise *Chiikawa* (officially titled *Nanka Chiisakute Kawaii Yatsu*, or "Something Small and Cute").
+
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:04:39 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=10.917s] [duration=10.917s]
+2025-11-04 08:04:39 | INFO     | src.services.gemini_client | Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)
+2025-11-04 08:04:39 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 08:04:39 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=11.159s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=11.159s]
+2025-11-04 08:04:39 | INFO     | src.bot.discord_bot  | Response too long (3211 chars), splitting into multiple messages
+2025-11-04 08:04:39 | INFO     | src.bot.discord_bot  | Sent message part 1/2
+2025-11-04 08:04:39 | INFO     | src.bot.discord_bot  | Sent message part 2/2
+2025-11-04 08:04:39 | INFO     | src.bot.discord_bot  | Successfully sent response in 2 parts
+2025-11-04 08:04:48 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok-test [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435177955386196039] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435177955386196039]
+2025-11-04 08:04:48 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 08:04:49 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.249s] [channel_id=1435167927513907241, duration=0.249s]
+2025-11-04 08:04:49 | INFO     | src.bot.discord_bot  | Collected 7 messages for context
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Input prompt length: 1533 characters
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Context messages provided: 7
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:33:43.142000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[5]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 08:04:26.255000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client |   Context[6]: Author=dank mr panda, Length=28 chars, Timestamp=2025-11-04 08:04:48.881000+00:00
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 08:04:49 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 3.767s)
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Output token count (estimated): 49
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Output length: 362 characters
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | Output (first 200 chars): "Sigma" has two main interpretations:
+
+1.  **Greek Letter:** The 18th letter of the Greek alphabet ($\Sigma$ or $\sigma$). It often represents standard deviation in statistics.
+2.  **Slang:** In inter
+2025-11-04 08:04:53 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:04:53 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.767s] [duration=3.767s]
+2025-11-04 08:04:53 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 08:04:53 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.862s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.862s]
+2025-11-04 08:04:53 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok-test
+2025-11-04 08:05:36 | INFO     | src.services.gemini_client | Prompt mode changed from 'short' to 'thinking'
+2025-11-04 08:05:36 | INFO     | src.bot.commands     | User _giraffe changed prompt mode from short to thinking
+2025-11-04 08:05:55 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok-test [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435178236131672135] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435178236131672135]
+2025-11-04 08:05:55 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 08:05:56 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.326s] [channel_id=1435167927513907241, duration=0.326s]
+2025-11-04 08:05:56 | INFO     | src.bot.discord_bot  | Collected 8 messages for context
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Input prompt length: 4816 characters
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Grounded Expert**
+
+**[CORE IDENTITY]**
+
+You are a grounded, well-informed expert AI assistant. Your primary function is to provide users with accurate, verifiable, and compre
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Context messages provided: 8
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:33:43.142000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[5]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 08:04:26.255000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[6]: Author=dank mr panda, Length=28 chars, Timestamp=2025-11-04 08:04:48.881000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client |   Context[7]: Author=girafe, Length=46 chars, Timestamp=2025-11-04 08:05:55.816000+00:00
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 08:05:56 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 3.718s)
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Output token count (estimated): 50
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Output length: 334 characters
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Output (first 200 chars): The request to "complete the assignment" is too ambiguous to fulfill.
+
+Please provide the specific details of the assignment, including:
+
+1.  The subject matter or topic.
+2.  The full instructions or 
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:05:59 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.718s] [duration=3.718s]
+2025-11-04 08:05:59 | INFO     | src.services.gemini_client | Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)
+2025-11-04 08:05:59 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 08:05:59 | INFO     | discord_bot          | Message processing completed [user_id=614936365825654798, guild_id=1222771487753113650, duration=3.755s] [user_id=614936365825654798, guild_id=1222771487753113650, duration=3.755s]
+2025-11-04 08:06:00 | INFO     | src.bot.discord_bot  | Successfully sent response to _giraffe in #grok-test
+2025-11-04 08:11:54 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok-test [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435179739538259979] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435179739538259979]
+2025-11-04 08:11:54 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 08:11:54 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.272s] [channel_id=1435167927513907241, duration=0.272s]
+2025-11-04 08:11:54 | INFO     | src.bot.discord_bot  | Collected 9 messages for context
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Input prompt length: 1676 characters
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Context messages provided: 9
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:33:43.142000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[5]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 08:04:26.255000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[6]: Author=dank mr panda, Length=28 chars, Timestamp=2025-11-04 08:04:48.881000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[7]: Author=girafe, Length=46 chars, Timestamp=2025-11-04 08:05:55.816000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client |   Context[8]: Author=dank mr panda, Length=42 chars, Timestamp=2025-11-04 08:11:54.256000+00:00
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 08:11:54 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 2.806s)
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Output token count (estimated): 83
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Output length: 533 characters
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | Output (first 200 chars): Bubble sort is a simple sorting algorithm that repeatedly steps through a list, compares adjacent elements, and swaps them if they are in the wrong order.
+
+Key characteristics:
+
+*   **Mechanism:** It 
+2025-11-04 08:11:57 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:11:57 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=2.806s] [duration=2.806s]
+2025-11-04 08:11:57 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 08:11:57 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.834s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.834s]
+2025-11-04 08:11:57 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok-test
+2025-11-04 08:12:17 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok-test [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435179836233613342] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435179836233613342]
+2025-11-04 08:12:17 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 08:12:17 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.381s] [channel_id=1435167927513907241, duration=0.381s]
+2025-11-04 08:12:17 | INFO     | src.bot.discord_bot  | Collected 10 messages for context
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Input prompt length: 1734 characters
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+### **System Prompt: The Concise Expert**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaini
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Context messages provided: 10
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[4]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:33:43.142000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[5]: Author=dank mr panda, Length=41 chars, Timestamp=2025-11-04 08:04:26.255000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[6]: Author=dank mr panda, Length=28 chars, Timestamp=2025-11-04 08:04:48.881000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[7]: Author=girafe, Length=46 chars, Timestamp=2025-11-04 08:05:55.816000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[8]: Author=dank mr panda, Length=42 chars, Timestamp=2025-11-04 08:11:54.256000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client |   Context[9]: Author=ord, Length=43 chars, Timestamp=2025-11-04 08:12:17.310000+00:00
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 08:12:17 | INFO     | src.services.gemini_client | Using search-enabled model: False
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 2.597s)
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Output token count (estimated): 63
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Output length: 400 characters
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | Output (first 200 chars): Selection Sort is a simple comparison sorting algorithm.
+
+It works by:
+
+1.  Dividing the list into a sorted and an unsorted sublist.
+2.  Repeatedly finding the smallest (or largest) element from the u
+2025-11-04 08:12:20 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:12:20 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=2.597s] [duration=2.597s]
+2025-11-04 08:12:20 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 08:12:20 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=2.618s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=2.618s]
+2025-11-04 08:12:20 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok-test
+2025-11-04 08:12:49 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 08:12:49 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 08:12:49 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 08:12:55 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 08:12:55 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 08:12:55 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 08:12:55 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 08:12:55 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:12:55 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 08:12:55 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 08:12:55 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s) globally
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /ping - Check if the bot is responsive
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /model - Switch between Gemini Flash AI models
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /prompt-mode - Switch between thinking (detailed) and short (concise) response modes
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /stats - View bot statistics and usage data
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /help - Show help information and available commands
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /config - View current bot configuration
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /clear-cache - Clear bot's message cache (Admin only)
+2025-11-04 08:12:58 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 08:13:38 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 08:13:38 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 08:13:38 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 08:14:53 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 08:14:53 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 08:14:53 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 08:14:53 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 08:14:53 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 08:14:53 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 08:14:53 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 08:14:53 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | Synced 7 slash command(s) globally
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /ping - Check if the bot is responsive
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /model - Switch between Gemini Flash AI models
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /prompt-mode - Switch between thinking (detailed) and short (concise) response modes
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /stats - View bot statistics and usage data
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /help - Show help information and available commands
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /config - View current bot configuration
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /clear-cache - Clear bot's message cache (Admin only)
+2025-11-04 08:14:56 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!

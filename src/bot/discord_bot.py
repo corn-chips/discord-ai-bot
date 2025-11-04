@@ -96,8 +96,15 @@ class DiscordBot(discord.Client):
         # Set up slash commands
         try:
             await setup_commands(self, self.config, self.gemini_client, self.performance_logger)
+            
+            # Sync commands globally
             synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} slash command(s)")
+            logger.info(f"Synced {len(synced)} slash command(s) globally")
+            
+            # Log each synced command for verification
+            for cmd in synced:
+                logger.info(f"  ✓ Command synced: /{cmd.name} - {cmd.description}")
+            
         except Exception as e:
             logger.error(f"Failed to sync slash commands: {e}", exc_info=True)
         

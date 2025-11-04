@@ -6,5 +6,6 @@ and other business logic components.
 """
 
 from .gemini_client import GeminiClient
+from .message_splitter import MessageSplitter
 
-__all__ = ['GeminiClient']
+__all__ = ['GeminiClient', 'MessageSplitter']

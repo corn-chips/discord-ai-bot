@@ -5,40 +5,35 @@ services:
     build: .
     container_name: discord-grok-bot
     restart: unless-stopped
+    # Load environment variables from .env file
+    # Required: DISCORD_BOT_TOKEN, GEMINI_API_KEY
+    # Optional: NANO_BANANA_API_KEY (defaults to GEMINI_API_KEY for image generation)
     env_file:
       - .env
     volumes:
+      # Mount logs directory for persistent logging
       - ./logs:/app/logs
-      - ./bot.log:/app/bot.log
+      # Mount source code for live editing (development)
+      - ./src:/app/src
+      # Temporary files (image processing, file uploads)
+      - bot-temp:/app/temp
+      # Cache data (API responses, processed data)
+      - bot-cache:/app/cache
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_FILE=/app/logs/bot.log
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "python", "scripts/health_check.py"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
-      start_period: 40s
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: Add monitoring with Prometheus (uncomment if needed)
-  # prometheus:
-  #   image: prom/prometheus:latest
-  #   container_name: prometheus
-  #   ports:
-  #     - "9090:9090"
-  #   volumes:
-  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-  #   command:
-  #     - '--config.file=/etc/prometheus/prometheus.yml'
-  #     - '--storage.tsdb.path=/prometheus'
-  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
-  #     - '--web.console.templates=/etc/prometheus/consoles'
-
-networks:
-  default:
-    name: discord-bot-network
+volumes:
+  bot-temp:
+  bot-cache:

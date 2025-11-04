@@ -38,7 +38,7 @@ class GeminiClient:
             config: Bot configuration containing API key and settings
         """
         self.config = config
-        self.error_manager = ErrorManager()
+        self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("gemini_client")
         self._model = None
         self._model_with_search = None

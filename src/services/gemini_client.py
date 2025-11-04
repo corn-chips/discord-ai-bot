@@ -147,6 +147,58 @@ class GeminiClient:
         logger.info(f"Prompt mode changed from '{old_mode}' to '{mode}'")
         return True
     
+    def get_api_usage_info(self) -> dict:
+        """
+        Get API usage information and rate limits.
+        
+        Returns:
+            Dictionary containing API usage information including:
+            - model_info: Current model details
+            - rate_limits: Known rate limits for the API
+            - pricing_tier: Free or paid tier information
+        """
+        try:
+            usage_info = {
+                "model_name": self._current_model_name,
+                "api_configured": self._model is not None,
+                "rate_limits": {
+                    "free_tier": {
+                        "requests_per_minute": 15,
+                        "requests_per_day": 1500,
+                        "tokens_per_minute": 1000000,
+                        "tokens_per_day": None  # No daily token limit for free tier
+                    },
+                    "paid_tier": {
+                        "requests_per_minute": 2000,
+                        "requests_per_day": None,  # No daily limit for paid
+                        "tokens_per_minute": 4000000,
+                        "tokens_per_day": None
+                    }
+                },
+                "model_capabilities": {
+                    "max_input_tokens": 1048576,  # 1M tokens context window
+                    "max_output_tokens": 65536,   # 64K tokens output
+                    "supports_images": True,
+                    "supports_video": False,
+                    "supports_audio": False
+                },
+                "pricing": {
+                    "free_tier": "Free up to rate limits",
+                    "paid_tier": "Pay-as-you-go pricing available"
+                }
+            }
+            
+            logger.debug(f"Retrieved API usage info for model: {self._current_model_name}")
+            return usage_info
+            
+        except Exception as e:
+            logger.error(f"Error getting API usage info: {e}")
+            return {
+                "error": str(e),
+                "model_name": self._current_model_name,
+                "api_configured": False
+            }
+    
     def set_model(self, model_name: str) -> bool:
         """
         Switch to a different Gemini Flash model.

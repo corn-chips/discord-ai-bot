@@ -2,6 +2,10 @@
 
 A Discord bot that provides AI-powered conversational responses using Google's Gemini API. The bot mimics Grok's functionality from Twitter, offering contextual responses when mentioned in Discord channels.
 
+## Todo List
+ - [ ] Make model interpret user message to do actual actions in discord server (mute all, ban all, kick all, etc)
+ - [ ] Add functionality to read files in the discord message
+ - [ ] Add feature to join vc and answer in real time
 ## Features
 
 - **Context-Aware Responses**: Analyzes recent message history for relevant context

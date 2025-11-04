@@ -6,11 +6,14 @@ message processing, and coordinates with other services to provide AI responses.
 """
 
 import asyncio
+import io
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 import discord
 from discord.ext import commands
+from PIL import Image
 
 from ..config import BotConfig
 from ..models.data_models import APIResponse
@@ -18,6 +21,7 @@ from ..services.context_collector import ContextCollector
 from ..services.gemini_client import GeminiClient
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
+from .commands import setup_commands
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,10 @@ class DiscordBot(discord.Client):
             reply_context_range=config.reply_context_range
         )
         self.gemini_client = GeminiClient(config)
+        self.start_time = datetime.now()
+        
+        # Set up command tree for slash commands
+        self.tree = discord.app_commands.CommandTree(self)
         
         logger.info("DiscordBot initialized with configuration")
     
@@ -84,6 +92,14 @@ class DiscordBot(discord.Client):
             name="@mentions for AI responses"
         )
         await self.change_presence(activity=activity)
+        
+        # Set up slash commands
+        try:
+            await setup_commands(self, self.config, self.gemini_client, self.performance_logger)
+            synced = await self.tree.sync()
+            logger.info(f"Synced {len(synced)} slash command(s)")
+        except Exception as e:
+            logger.error(f"Failed to sync slash commands: {e}", exc_info=True)
         
         logger.info("✅ Bot is ready and listening for mentions!")
     
@@ -141,7 +157,12 @@ class DiscordBot(discord.Client):
             user_prompt = self._extract_user_prompt(message)
             if not user_prompt.strip():
                 context_logger.warning("Empty prompt after removing mentions")
-                await message.reply("I was mentioned but didn't see a message to respond to!")
+                try:
+                    await message.reply("I was mentioned but didn't see a message to respond to! Please include a message with your mention. 📝")
+                except discord.Forbidden:
+                    context_logger.error(f"No permission to reply in channel {message.channel.id}")
+                except discord.HTTPException as e:
+                    context_logger.error(f"Failed to send empty prompt message: {e}")
                 return
             
             # Process message with timing
@@ -153,7 +174,31 @@ class DiscordBot(discord.Client):
             
             # Log processing completion (will be called from _generate_and_send_response)
             
+        except discord.Forbidden as e:
+            context_logger.error(f"Permission error processing message: {e}")
+            error_context = self.error_manager.create_error_context(
+                e, "I don't have the necessary permissions to respond here. Please check that I can read message history and send messages! 🔒"
+            )
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except discord.HTTPException as e:
+            context_logger.error(f"Discord API error processing message: {e}")
+            error_context = self.error_manager.create_error_context(
+                e, "I'm having trouble communicating with Discord. Please try again in a moment! 🌐"
+            )
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except asyncio.CancelledError:
+            context_logger.warning(f"Message processing was cancelled for message {message.id}")
+            # Don't send error response for cancelled operations
+            raise
+            
+        except KeyboardInterrupt:
+            context_logger.info("Bot shutdown requested")
+            raise
+            
         except Exception as e:
+            context_logger.error(f"Unexpected error processing message: {e}", exc_info=True)
             error_context = self.error_manager.handle_discord_error(e, message)
             await self.error_manager.send_error_response(message, error_context)
     
@@ -172,10 +217,29 @@ class DiscordBot(discord.Client):
             # Check if this is a reply and collect appropriate context
             if message.reference:
                 logger.debug("Message is a reply, collecting enhanced context")
-                # Get enhanced reply context
-                reply_context = await self.context_collector.get_reply_context(message)
+                try:
+                    # Get enhanced reply context
+                    reply_context = await self.context_collector.get_reply_context(message)
+                except discord.NotFound:
+                    logger.warning(f"Replied-to message not found: {message.reference.message_id}")
+                    reply_context = []
+                except discord.Forbidden:
+                    logger.warning(f"No permission to fetch replied message in channel {message.channel.id}")
+                    reply_context = []
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to fetch reply context: {e}")
+                    reply_context = []
+                
                 # Get standard channel context
-                standard_context = await self.context_collector.get_channel_context(message.channel)
+                try:
+                    standard_context = await self.context_collector.get_channel_context(message.channel)
+                except discord.Forbidden:
+                    logger.warning(f"No permission to read message history in channel {message.channel.id}")
+                    standard_context = []
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to fetch channel context: {e}")
+                    standard_context = []
+                
                 # Combine contexts, removing duplicates
                 combined_context = self.context_collector._remove_duplicate_messages(
                     standard_context, reply_context
@@ -183,18 +247,46 @@ class DiscordBot(discord.Client):
             else:
                 logger.debug("Message is not a reply, collecting standard context")
                 # Get standard channel context only
-                combined_context = await self.context_collector.get_channel_context(message.channel)
+                try:
+                    combined_context = await self.context_collector.get_channel_context(message.channel)
+                except discord.Forbidden:
+                    logger.warning(f"No permission to read message history in channel {message.channel.id}")
+                    combined_context = []
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to fetch channel context: {e}")
+                    combined_context = []
             
             logger.info(f"Collected {len(combined_context)} messages for context")
             
             # Generate AI response using Gemini API with collected context
             await self._generate_and_send_response(message, user_prompt, combined_context)
             
-        except Exception as e:
+        except discord.Forbidden as e:
             error_context = self.error_manager.create_error_context(
-                e, "I had trouble collecting conversation context. Please try again!"
+                e, "I don't have permission to read message history in this channel. Please check my permissions! 🔒"
             )
-            self.error_manager.log_error(error_context, "Context collection failed")
+            self.error_manager.log_error(error_context, f"Permission denied in channel {message.channel.id}")
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except discord.HTTPException as e:
+            error_context = self.error_manager.create_error_context(
+                e, "I'm having trouble communicating with Discord. Please try again in a moment! 🌐"
+            )
+            self.error_manager.log_error(error_context, f"Discord API error in channel {message.channel.id}")
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except asyncio.TimeoutError as e:
+            error_context = self.error_manager.create_error_context(
+                e, "It's taking too long to gather context. Please try again! ⏰"
+            )
+            self.error_manager.log_error(error_context, f"Timeout collecting context in channel {message.channel.id}")
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except Exception as e:
+            # Categorize the error for more specific handling
+            error_context = self.error_manager.create_error_context(e, include_error_details=True)
+            
+            self.error_manager.log_error(error_context, f"Unexpected error in channel {message.channel.id}")
             await self.error_manager.send_error_response(message, error_context)
     
     def _extract_user_prompt(self, message: discord.Message) -> str:
@@ -219,6 +311,70 @@ class DiscordBot(discord.Client):
         
         # Clean up extra whitespace
         return content.strip()
+    
+    async def _extract_images_from_message(self, message: discord.Message) -> List[Image.Image]:
+        """
+        Extract and download images from a Discord message.
+        
+        Args:
+            message: The Discord message to extract images from
+            
+        Returns:
+            List of PIL Image objects from the message attachments
+        """
+        images = []
+        
+        # Check message attachments for images
+        for attachment in message.attachments:
+            # Check if attachment is an image based on content type or filename
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                try:
+                    # Download the image
+                    image_bytes = await attachment.read()
+                    
+                    # Convert to PIL Image
+                    image = Image.open(io.BytesIO(image_bytes))
+                    
+                    # Convert RGBA to RGB if necessary (Gemini prefers RGB)
+                    if image.mode == 'RGBA':
+                        # Create white background
+                        background = Image.new('RGB', image.size, (255, 255, 255))
+                        background.paste(image, mask=image.split()[3])  # Use alpha channel as mask
+                        image = background
+                    elif image.mode not in ['RGB', 'L']:
+                        # Convert other modes to RGB
+                        image = image.convert('RGB')
+                    
+                    images.append(image)
+                    logger.info(f"Loaded image from attachment: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to load image from attachment {attachment.filename}: {e}")
+        
+        # Also check if the message is a reply and has images in the replied message
+        if message.reference and message.reference.resolved:
+            replied_message = message.reference.resolved
+            if isinstance(replied_message, discord.Message):
+                for attachment in replied_message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith('image/'):
+                        try:
+                            image_bytes = await attachment.read()
+                            image = Image.open(io.BytesIO(image_bytes))
+                            
+                            if image.mode == 'RGBA':
+                                background = Image.new('RGB', image.size, (255, 255, 255))
+                                background.paste(image, mask=image.split()[3])
+                                image = background
+                            elif image.mode not in ['RGB', 'L']:
+                                image = image.convert('RGB')
+                            
+                            images.append(image)
+                            logger.info(f"Loaded image from replied message: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
+        
+        return images
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
@@ -273,18 +429,27 @@ class DiscordBot(discord.Client):
             "empty_response": ErrorType.EMPTY_RESPONSE,
             "invalid_request": ErrorType.INVALID_REQUEST,
             "configuration_error": ErrorType.CONFIGURATION_ERROR,
-            "unknown_error": ErrorType.UNKNOWN_ERROR
+            "unknown_error": ErrorType.UNKNOWN_ERROR,
+            "safety_filter": ErrorType.EMPTY_RESPONSE,  # Treat safety filter as empty response
+            "max_tokens": ErrorType.INVALID_REQUEST,
+            "recitation": ErrorType.EMPTY_RESPONSE
         }
         
         error_type = error_type_mapping.get(api_response.error_type, ErrorType.UNKNOWN_ERROR)
-        user_message = self.error_manager.get_user_message(error_type)
+        base_message = self.error_manager.get_user_message(error_type)
+        
+        # Add specific error details from the API response
+        if api_response.content:
+            user_message = f"{base_message}\n\n**Details:** {api_response.content}"
+        else:
+            user_message = f"{base_message}\n\n**Error Type:** `{api_response.error_type}`"
         
         # Create error context
         from ..utils.error_manager import ErrorContext
         error_context = ErrorContext(
             error_type=error_type,
             user_message=user_message,
-            technical_details=api_response.content or "API response error",
+            technical_details=api_response.content or f"API response error: {api_response.error_type}",
             retry_after=api_response.retry_after
         )
         
@@ -310,50 +475,98 @@ class DiscordBot(discord.Client):
             context: The collected conversation context
         """
         # Add typing indicator to show the bot is working
-        async with message.channel.typing():
-            try:
-                # Track performance metrics
-                import time
-                start_time = time.time()
-                
-                # Generate AI response with timeout handling
-                api_response = await asyncio.wait_for(
-                    self.gemini_client.generate_response(user_prompt, context),
-                    timeout=self.config.response_timeout + 5  # Add buffer to client timeout
-                )
-                
-                duration = time.time() - start_time
-                
-                if api_response.success:
-                    logger.info("Successfully generated AI response")
+        try:
+            async with message.channel.typing():
+                try:
+                    # Track performance metrics
+                    import time
+                    start_time = time.time()
                     
-                    # Log performance metrics
-                    self.performance_logger.log_message_processing(
-                        duration=duration,
-                        context_messages=len(context),
-                        response_length=len(api_response.content) if api_response.content else 0,
-                        user_id=message.author.id,
-                        guild_id=message.guild.id if message.guild else None
+                    # Extract images from the message
+                    images = await self._extract_images_from_message(message)
+                    
+                    # Validate prompt is not empty (or has images)
+                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0:
+                        logger.warning("Empty user prompt and no images provided to response generation")
+                        await message.reply("Please provide a message or attach an image for me to respond to! 📝")
+                        return
+                    
+                    # If only images, provide a default prompt
+                    if not user_prompt or not user_prompt.strip():
+                        user_prompt = "What's in this image? Please describe it in detail."
+                        logger.info("Using default prompt for image-only message")
+                    
+                    # Generate AI response with timeout handling (including images if present)
+                    api_response = await asyncio.wait_for(
+                        self.gemini_client.generate_response(user_prompt, context, images=images if images else None),
+                        timeout=self.config.response_timeout + 5  # Add buffer to client timeout
                     )
                     
-                    await self._send_response_safely(message, api_response.content)
-                else:
-                    logger.error(f"Failed to generate response: {api_response.error_type}")
-                    await self._handle_response_error(message, api_response)
+                    duration = time.time() - start_time
                     
-            except asyncio.TimeoutError:
-                logger.error(f"Response generation timed out for message {message.id}")
-                timeout_response = APIResponse(
-                    success=False,
-                    error_type="timeout",
-                    content="Response generation timed out"
-                )
-                await self._handle_response_error(message, timeout_response)
-                
-            except Exception as e:
-                error_context = self.error_manager.create_error_context(e)
-                self.error_manager.log_error(error_context, "Unexpected error during response generation")
-                await self.error_manager.send_error_response(message, error_context)
+                    if api_response.success:
+                        logger.info("Successfully generated AI response")
+                        
+                        # Log performance metrics
+                        self.performance_logger.log_message_processing(
+                            duration=duration,
+                            context_messages=len(context),
+                            response_length=len(api_response.content) if api_response.content else 0,
+                            user_id=message.author.id,
+                            guild_id=message.guild.id if message.guild else None
+                        )
+                        
+                        await self._send_response_safely(message, api_response.content)
+                    else:
+                        logger.error(f"Failed to generate response: {api_response.error_type}")
+                        await self._handle_response_error(message, api_response)
+                        
+                except asyncio.TimeoutError:
+                    logger.error(f"Response generation timed out for message {message.id} after {self.config.response_timeout}s")
+                    timeout_response = APIResponse(
+                        success=False,
+                        error_type="timeout",
+                        content=f"Response generation timed out after {self.config.response_timeout} seconds"
+                    )
+                    await self._handle_response_error(message, timeout_response)
+                    
+                except ConnectionError as e:
+                    logger.error(f"Connection error during API call: {e}")
+                    error_context = self.error_manager.create_error_context(
+                        e, "I'm having trouble connecting to my AI service. Please try again in a moment! 🌐"
+                    )
+                    self.error_manager.log_error(error_context, "API connection error")
+                    await self.error_manager.send_error_response(message, error_context)
+                    
+                except ValueError as e:
+                    logger.error(f"Invalid value provided to API: {e}")
+                    error_context = self.error_manager.create_error_context(
+                        e, "There was an issue with the request format. Please try rephrasing your message! 📝"
+                    )
+                    self.error_manager.log_error(error_context, "API value error")
+                    await self.error_manager.send_error_response(message, error_context)
+                    
+                except Exception as e:
+                    error_context = self.error_manager.create_error_context(e)
+                    self.error_manager.log_error(error_context, f"Unexpected error during response generation for message {message.id}")
+                    await self.error_manager.send_error_response(message, error_context)
+                    
+        except discord.Forbidden as e:
+            logger.error(f"Missing permissions to show typing indicator in channel {message.channel.id}")
+            # Continue without typing indicator
+            error_context = self.error_manager.create_error_context(
+                e, "I don't have permission to respond in this channel. Please check my permissions! 🔒"
+            )
+            self.error_manager.log_error(error_context, "Permission error showing typing indicator")
+            await self.error_manager.send_error_response(message, error_context)
+            
+        except discord.HTTPException as e:
+            logger.error(f"Discord HTTP error showing typing indicator: {e}")
+            error_context = self.error_manager.create_error_context(
+                e, "I'm having trouble communicating with Discord. Please try again! 🌐"
+            )
+            self.error_manager.log_error(error_context, "Discord HTTP error")
+            await self.error_manager.send_error_response(message, error_context)
     
     async def _send_response_safely(self, message: discord.Message, response_content: str):
         """
@@ -366,6 +579,12 @@ class DiscordBot(discord.Client):
             response_content: The AI-generated response content
         """
         try:
+            # Validate response content
+            if not response_content or not response_content.strip():
+                logger.warning("Empty response content generated")
+                await message.reply("I generated a response, but it appears to be empty. Could you try asking differently? 🤔")
+                return
+            
             # Check if response is too long for Discord (2000 character limit)
             if len(response_content) > 2000:
                 logger.warning(f"Response too long ({len(response_content)} chars), truncating")
@@ -375,7 +594,53 @@ class DiscordBot(discord.Client):
             await message.reply(response_content)
             logger.info(f"Successfully sent response to {message.author} in #{message.channel.name}")
             
+        except discord.Forbidden as e:
+            logger.error(f"Permission denied sending response in channel {message.channel.id}")
+            error_context = self.error_manager.create_error_context(
+                e, "I don't have permission to send messages in this channel. Please check my permissions! 🔒"
+            )
+            await self.error_manager.send_error_response(
+                message, 
+                error_context, 
+                fallback_reaction="🔒"
+            )
+            
+        except discord.HTTPException as e:
+            if e.status == 429:  # Rate limit
+                logger.warning(f"Rate limited sending response: {e}")
+                error_context = self.error_manager.create_error_context(
+                    e, "I'm being rate limited by Discord. Please try again in a moment! 🕒"
+                )
+            elif e.status >= 500:  # Server error
+                logger.error(f"Discord server error sending response: {e}")
+                error_context = self.error_manager.create_error_context(
+                    e, "Discord is experiencing issues. Please try again in a moment! 🛠️"
+                )
+            else:
+                logger.error(f"HTTP error sending response: {e}")
+                error_context = self.error_manager.create_error_context(
+                    e, "I had trouble sending my response. Please try again! 📤"
+                )
+            
+            await self.error_manager.send_error_response(
+                message, 
+                error_context, 
+                fallback_reaction="⚠️"
+            )
+            
+        except discord.NotFound as e:
+            logger.error(f"Message or channel not found: {e}")
+            error_context = self.error_manager.create_error_context(
+                e, "The message or channel no longer exists. Please try again! 🔍"
+            )
+            await self.error_manager.send_error_response(
+                message, 
+                error_context, 
+                fallback_reaction="❓"
+            )
+            
         except Exception as e:
+            logger.error(f"Unexpected error sending response: {e}", exc_info=True)
             error_context = self.error_manager.handle_discord_error(e, message)
             await self.error_manager.send_error_response(
                 message, 

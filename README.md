@@ -19,6 +19,8 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 
 ### Installation
 
+#### Option 1: Standard Python Installation
+
 1. Clone the repository:
 ```bash
 git clone <repository-url>
@@ -41,6 +43,41 @@ cp .env.example .env
 python main.py
 ```
 
+#### Option 2: Docker Installation (Recommended)
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd discord-grok-bot
+```
+
+2. Configure environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your actual tokens and configuration
+```
+
+3. Build and run with Docker Compose:
+```bash
+docker-compose up -d
+```
+
+The bot will automatically start in the background. To view logs:
+```bash
+docker-compose logs -f
+```
+
+To stop the bot:
+```bash
+docker-compose down
+```
+
+**Docker Benefits:**
+- Isolated environment with all dependencies included
+- Automatic health checks and restart on failure
+- Easy deployment and scaling
+- Consistent behavior across different systems
+
 ### Discord Bot Setup
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
@@ -49,8 +86,9 @@ python main.py
 4. Enable the following bot permissions:
    - Send Messages
    - Read Message History
-   - Use Slash Commands (optional)
-5. Invite the bot to your server using the OAuth2 URL generator
+   - Use Application Commands (Required for slash commands)
+5. Enable the **Message Content Intent** in the Bot section
+6. Invite the bot to your server using the OAuth2 URL generator with `bot` and `applications.commands` scopes
 
 ### Google Gemini API Setup
 
@@ -77,9 +115,22 @@ The bot uses environment variables for configuration. Copy `.env.example` to `.e
 
 ## Usage
 
+### Basic Usage
 1. Invite the bot to your Discord server with appropriate permissions
 2. Mention the bot in any channel: `@YourBot Hello, how are you?`
 3. The bot will respond with an AI-generated message based on the context
+
+### Slash Commands
+The bot includes powerful slash commands for configuration and monitoring:
+
+- `/ping` - Check bot status and latency
+- `/model` - Switch between Gemini Flash models (2.5, 2.5-Lite, 2.0, 2.0-Lite)
+- `/stats` - View usage statistics and token consumption
+- `/config` - View current configuration
+- `/help` - Show help information
+- `/clear-cache` - Clear statistics cache (Admin only)
+
+📖 See [SLASH_COMMANDS.md](SLASH_COMMANDS.md) for detailed command documentation.
 
 ## Deployment
 

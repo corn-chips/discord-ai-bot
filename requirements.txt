@@ -1,7 +1,22 @@
 discord.py>=2.3.0
-google-generativeai>=0.3.0
+google-generativeai>=0.8.0
+google-genai>=1.0.0
 python-dotenv>=1.0.0
 aiohttp>=3.8.0
 Pillow>=10.0.0
 PyMuPDF>=1.23.0
 pdf2image>=1.16.0
+
+# Image processing dependencies
+requests>=2.31.0
+numpy>=1.24.0
+
+# Message formatting dependencies
+markdown>=3.5.0
+beautifulsoup4>=4.12.0
+
+# Enhanced error handling and logging
+colorlog>=6.7.0
+
+# System monitoring and health checks
+psutil>=5.9.0

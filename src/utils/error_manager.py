@@ -41,6 +41,20 @@ class ErrorType(Enum):
     CONTEXT_COLLECTION_ERROR = "context_collection_error"
     MESSAGE_HISTORY_ERROR = "message_history_error"
     
+    # Image processing errors
+    IMAGE_PROCESSING_ERROR = "image_processing_error"
+    IMAGE_VALIDATION_ERROR = "image_validation_error"
+    IMAGE_SIZE_ERROR = "image_size_error"
+    IMAGE_FORMAT_ERROR = "image_format_error"
+    NANO_BANANA_API_ERROR = "nano_banana_api_error"
+    IMAGE_UPLOAD_ERROR = "image_upload_error"
+    IMAGE_DOWNLOAD_ERROR = "image_download_error"
+    
+    # Message formatting errors
+    MESSAGE_SPLIT_ERROR = "message_split_error"
+    MARKDOWN_PROCESSING_ERROR = "markdown_processing_error"
+    MESSAGE_TOO_LONG_ERROR = "message_too_long_error"
+    
     # General errors
     UNKNOWN_ERROR = "unknown_error"
     VALIDATION_ERROR = "validation_error"
@@ -67,8 +81,14 @@ class ErrorManager:
     and handling different error scenarios appropriately.
     """
     
-    def __init__(self):
-        """Initialize the ErrorManager with predefined error messages."""
+    def __init__(self, config=None):
+        """
+        Initialize the ErrorManager with predefined error messages.
+        
+        Args:
+            config: Optional BotConfig instance for accessing dev_mode_enabled
+        """
+        self.config = config
         self._user_messages = self._initialize_user_messages()
         self._technical_messages = self._initialize_technical_messages()
     
@@ -80,11 +100,11 @@ class ErrorManager:
             ErrorType.TIMEOUT: "⏰ **Request Timeout**\nMy response took too long to generate. Please try asking again!",
             ErrorType.AUTHENTICATION_ERROR: "🔧 **Authentication Error**\nI'm having trouble connecting to my AI service. Please try again later!",
             ErrorType.SERVICE_UNAVAILABLE: "🛠️ **Service Unavailable**\nMy AI service is temporarily unavailable. Please try again in a few minutes!",
-            ErrorType.EMPTY_RESPONSE: "🤔 **Empty Response**\nI couldn't generate a response to that. Could you try rephrasing your question?",
-            ErrorType.INVALID_REQUEST: "❓ **Invalid Request**\nI had trouble understanding your request. Could you try asking differently?",
+            ErrorType.EMPTY_RESPONSE: "🤔 **Empty Response**\nI couldn't generate a response to that. Could you try rephrasing your question?\n\n💡 **Tip:** Use `/help` to see what I can help with, or try `/features` to discover my capabilities!",
+            ErrorType.INVALID_REQUEST: "❓ **Invalid Request**\nI had trouble understanding your request. Could you try asking differently?\n\n💡 **Tip:** I work best with natural language - just mention me and ask your question!",
             
             # Discord-related errors
-            ErrorType.DISCORD_PERMISSION_ERROR: "🔒 **Permission Error**\nI don't have the necessary permissions to respond here. Please check my permissions!",
+            ErrorType.DISCORD_PERMISSION_ERROR: "🔒 **Permission Error**\nI don't have the necessary permissions to respond here. Please check my permissions!\n\n💡 **Tip:** I need 'Send Messages', 'Read Message History', and 'Add Reactions' permissions to work properly.",
             ErrorType.DISCORD_HTTP_ERROR: "📤 **Discord API Error**\nI'm having trouble sending messages right now. Please try again!",
             ErrorType.DISCORD_CONNECTION_ERROR: "🌐 **Connection Error**\nI'm experiencing connection issues with Discord. Please try again!",
             
@@ -96,6 +116,20 @@ class ErrorManager:
             # Context collection errors
             ErrorType.CONTEXT_COLLECTION_ERROR: "📚 **Context Collection Error**\nI had trouble reading the conversation history. Please try again!",
             ErrorType.MESSAGE_HISTORY_ERROR: "📜 **Message History Error**\nI couldn't access the message history. Please try again!",
+            
+            # Image processing errors
+            ErrorType.IMAGE_PROCESSING_ERROR: "🖼️ **Image Processing Error**\nI encountered an issue while processing your image. Please try again with a different image!\n\n💡 **Tip:** Use `/help image_editing` to learn about supported image editing features.",
+            ErrorType.IMAGE_VALIDATION_ERROR: "🚫 **Invalid Image**\nThe image you uploaded appears to be corrupted or invalid. Please try uploading a different image!\n\n💡 **Tip:** Supported formats are JPG, PNG, GIF, and WebP up to 10MB.",
+            ErrorType.IMAGE_SIZE_ERROR: "📏 **Image Too Large**\nYour image is too large to process. Please upload an image smaller than 10MB!\n\n💡 **Tip:** Try compressing your image or reducing its resolution before uploading.",
+            ErrorType.IMAGE_FORMAT_ERROR: "🎨 **Unsupported Format**\nI can only process JPG, PNG, GIF, and WebP images. Please convert your image and try again!\n\n💡 **Tip:** Most image editors can save in these formats.",
+            ErrorType.NANO_BANANA_API_ERROR: "🍌 **Image Editing Service Error**\nThe image editing service is temporarily unavailable. Please try again in a few minutes!\n\n💡 **Tip:** You can still use me for conversations and file analysis while image editing is unavailable.",
+            ErrorType.IMAGE_UPLOAD_ERROR: "📤 **Upload Error**\nI couldn't upload the edited image. Please try again!\n\n💡 **Tip:** Check your internet connection and try the edit again.",
+            ErrorType.IMAGE_DOWNLOAD_ERROR: "📥 **Download Error**\nI couldn't download your image. Please make sure it's accessible and try again!\n\n💡 **Tip:** Try re-uploading the image directly to Discord.",
+            
+            # Message formatting errors
+            ErrorType.MESSAGE_SPLIT_ERROR: "✂️ **Message Formatting Error**\nI had trouble formatting your response. The message may be incomplete!\n\n💡 **Tip:** Try asking for a shorter response or request information in parts.",
+            ErrorType.MARKDOWN_PROCESSING_ERROR: "📝 **Formatting Error**\nI encountered an issue while formatting the response. Some formatting may be lost!\n\n💡 **Tip:** The content is still accurate, just with simplified formatting.",
+            ErrorType.MESSAGE_TOO_LONG_ERROR: "📏 **Response Too Long**\nMy response is too long to send. I'll try to break it into smaller parts!\n\n💡 **Tip:** Use `/prompt-mode short` for more concise responses.",
             
             # General errors
             ErrorType.UNKNOWN_ERROR: "🤷‍♂️ **Unexpected Error**\nSomething unexpected happened. Please try again!",
@@ -119,6 +153,16 @@ class ErrorManager:
             ErrorType.INVALID_TOKEN: "Authentication token format invalid",
             ErrorType.CONTEXT_COLLECTION_ERROR: "Failed to collect message context",
             ErrorType.MESSAGE_HISTORY_ERROR: "Failed to retrieve message history",
+            ErrorType.IMAGE_PROCESSING_ERROR: "Image processing operation failed",
+            ErrorType.IMAGE_VALIDATION_ERROR: "Image validation failed",
+            ErrorType.IMAGE_SIZE_ERROR: "Image exceeds maximum size limit",
+            ErrorType.IMAGE_FORMAT_ERROR: "Unsupported image format",
+            ErrorType.NANO_BANANA_API_ERROR: "Nano-banana API request failed",
+            ErrorType.IMAGE_UPLOAD_ERROR: "Failed to upload processed image",
+            ErrorType.IMAGE_DOWNLOAD_ERROR: "Failed to download source image",
+            ErrorType.MESSAGE_SPLIT_ERROR: "Message splitting operation failed",
+            ErrorType.MARKDOWN_PROCESSING_ERROR: "Markdown processing failed",
+            ErrorType.MESSAGE_TOO_LONG_ERROR: "Message exceeds maximum length",
             ErrorType.UNKNOWN_ERROR: "Unhandled exception occurred",
             ErrorType.VALIDATION_ERROR: "Data validation failed"
         }
@@ -144,8 +188,32 @@ class ErrorManager:
         elif isinstance(error, discord.ConnectionClosed):
             return ErrorType.DISCORD_CONNECTION_ERROR
         
+        # Image processing errors (check first for specificity)
+        if any(term in error_str for term in ["image size", "file too large", "exceeds maximum size"]):
+            return ErrorType.IMAGE_SIZE_ERROR
+        elif any(term in error_str for term in ["unsupported format", "invalid format", "image format"]):
+            return ErrorType.IMAGE_FORMAT_ERROR
+        elif any(term in error_str for term in ["nano-banana", "nano_banana", "image editing service"]):
+            return ErrorType.NANO_BANANA_API_ERROR
+        elif any(term in error_str for term in ["image validation", "corrupted image", "invalid image"]):
+            return ErrorType.IMAGE_VALIDATION_ERROR
+        elif any(term in error_str for term in ["image upload", "upload failed"]):
+            return ErrorType.IMAGE_UPLOAD_ERROR
+        elif any(term in error_str for term in ["image download", "download failed"]):
+            return ErrorType.IMAGE_DOWNLOAD_ERROR
+        elif any(term in error_str for term in ["image processing", "image edit"]):
+            return ErrorType.IMAGE_PROCESSING_ERROR
+        
+        # Message formatting errors
+        elif any(term in error_str for term in ["message split", "splitting failed"]):
+            return ErrorType.MESSAGE_SPLIT_ERROR
+        elif any(term in error_str for term in ["markdown processing", "markdown error"]):
+            return ErrorType.MARKDOWN_PROCESSING_ERROR
+        elif any(term in error_str for term in ["message too long", "exceeds character limit"]):
+            return ErrorType.MESSAGE_TOO_LONG_ERROR
+        
         # API-related errors (check error message content)
-        if any(term in error_str for term in ["rate limit", "quota exceeded", "too many requests"]):
+        elif any(term in error_str for term in ["rate limit", "quota exceeded", "too many requests"]):
             return ErrorType.RATE_LIMIT
         elif any(term in error_str for term in ["timeout", "timed out"]):
             return ErrorType.TIMEOUT
@@ -199,7 +267,11 @@ class ErrorManager:
             ErrorType.TIMEOUT,
             ErrorType.SERVICE_UNAVAILABLE,
             ErrorType.DISCORD_HTTP_ERROR,
-            ErrorType.DISCORD_CONNECTION_ERROR
+            ErrorType.DISCORD_CONNECTION_ERROR,
+            ErrorType.NANO_BANANA_API_ERROR,
+            ErrorType.IMAGE_UPLOAD_ERROR,
+            ErrorType.IMAGE_DOWNLOAD_ERROR,
+            ErrorType.MESSAGE_SPLIT_ERROR
         }
         should_retry = error_type in retryable_errors
         
@@ -210,13 +282,29 @@ class ErrorManager:
             ErrorType.EMPTY_RESPONSE
         } else logging.ERROR
         
+        # Check if developer mode is enabled
+        dev_mode = self.config and getattr(self.config, 'dev_mode_enabled', False)
+        
         # Build user message with error details if requested
         if custom_message:
             user_message = custom_message
         else:
             user_message = self.get_user_message(error_type)
-            if include_error_details and error:
-                # Add technical details in a user-friendly way
+            
+            # In dev mode, always include full error details
+            if dev_mode and error:
+                import traceback
+                error_str = str(error).strip()
+                error_trace = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
+                
+                user_message += f"\n\n**🔧 Developer Mode - Full Error Details:**"
+                user_message += f"\n**Error Type:** `{type(error).__name__}`"
+                if error_str:
+                    user_message += f"\n**Error Message:** `{error_str}`"
+                user_message += f"\n**Stack Trace:**\n```\n{error_trace[:1500]}\n```"  # Limit to avoid message too long
+            
+            # In normal mode, include brief details only if requested
+            elif include_error_details and error:
                 error_str = str(error).strip()
                 if error_str and len(error_str) < 200:  # Only include if not too long
                     user_message += f"\n\n**Details:** `{error_str}`"
@@ -389,3 +477,247 @@ class ErrorManager:
         except Exception as unexpected_error:
             logger.error(f"Unexpected error sending error response: {unexpected_error}")
             return False
+    
+    def handle_image_processing_error(
+        self, 
+        error: Exception, 
+        context_info: Optional[str] = None,
+        image_size: Optional[int] = None,
+        image_format: Optional[str] = None
+    ) -> ErrorContext:
+        """
+        Handle image processing errors with specific processing and recovery suggestions.
+        
+        Args:
+            error: The image processing error that occurred
+            context_info: Optional context information
+            image_size: Optional image size in bytes
+            image_format: Optional image format
+            
+        Returns:
+            ErrorContext with image processing-specific handling
+        """
+        error_context = self.create_error_context(error)
+        
+        # Add actionable suggestions based on error type
+        if error_context.error_type == ErrorType.IMAGE_SIZE_ERROR:
+            if image_size:
+                size_mb = image_size / (1024 * 1024)
+                error_context.user_message += f"\n\n💡 **Tip:** Your image is {size_mb:.1f}MB. Try compressing it or using a smaller resolution."
+        
+        elif error_context.error_type == ErrorType.IMAGE_FORMAT_ERROR:
+            if image_format:
+                error_context.user_message += f"\n\n💡 **Tip:** {image_format.upper()} format is not supported. Try converting to JPG or PNG."
+            else:
+                error_context.user_message += f"\n\n💡 **Tip:** Supported formats are JPG, PNG, GIF, and WebP."
+        
+        elif error_context.error_type == ErrorType.NANO_BANANA_API_ERROR:
+            error_context.user_message += f"\n\n💡 **Tip:** The image editing service may be experiencing high load. Try again in a few minutes."
+            # Set retry delay for API errors
+            error_context.retry_after = 120  # 2 minutes
+        
+        elif error_context.error_type == ErrorType.IMAGE_PROCESSING_ERROR:
+            error_context.user_message += f"\n\n💡 **Tip:** Try using a simpler image or different edit instructions."
+        
+        # Log the error with context
+        log_info = f"Image Processing Error"
+        if context_info:
+            log_info += f" ({context_info})"
+        if image_size:
+            log_info += f" - Size: {image_size} bytes"
+        if image_format:
+            log_info += f" - Format: {image_format}"
+        
+        self.log_error(error_context, log_info)
+        
+        return error_context
+    
+    def handle_message_formatting_error(
+        self, 
+        error: Exception, 
+        message_length: Optional[int] = None,
+        context_info: Optional[str] = None
+    ) -> ErrorContext:
+        """
+        Handle message formatting errors with recovery mechanisms.
+        
+        Args:
+            error: The message formatting error that occurred
+            message_length: Optional original message length
+            context_info: Optional context information
+            
+        Returns:
+            ErrorContext with message formatting-specific handling
+        """
+        error_context = self.create_error_context(error)
+        
+        # Add recovery suggestions based on error type
+        if error_context.error_type == ErrorType.MESSAGE_TOO_LONG_ERROR:
+            error_context.user_message += f"\n\n💡 **Tip:** I'll try to break this into smaller messages."
+            if message_length:
+                error_context.user_message += f" (Original length: {message_length:,} characters)"
+        
+        elif error_context.error_type == ErrorType.MESSAGE_SPLIT_ERROR:
+            error_context.user_message += f"\n\n💡 **Tip:** Some formatting may be simplified to ensure delivery."
+        
+        elif error_context.error_type == ErrorType.MARKDOWN_PROCESSING_ERROR:
+            error_context.user_message += f"\n\n💡 **Tip:** The response will be sent as plain text to ensure readability."
+        
+        # Log the error with context
+        log_info = f"Message Formatting Error"
+        if context_info:
+            log_info += f" ({context_info})"
+        if message_length:
+            log_info += f" - Length: {message_length} characters"
+        
+        self.log_error(error_context, log_info)
+        
+        return error_context
+    
+    def suggest_error_resolution(self, error_type: ErrorType, context: dict) -> str:
+        """
+        Suggest specific resolution steps for different error types.
+        
+        Args:
+            error_type: The type of error that occurred
+            context: Additional context information
+            
+        Returns:
+            Actionable resolution suggestion string
+        """
+        suggestions = {
+            ErrorType.IMAGE_SIZE_ERROR: [
+                "Compress your image using an online tool",
+                "Reduce image resolution or dimensions",
+                "Convert to JPG format for smaller file size"
+            ],
+            ErrorType.IMAGE_FORMAT_ERROR: [
+                "Convert image to JPG, PNG, GIF, or WebP format",
+                "Use an online image converter",
+                "Save image in a different format from your editor"
+            ],
+            ErrorType.NANO_BANANA_API_ERROR: [
+                "Wait a few minutes and try again",
+                "Check if the image editing service is operational",
+                "Try with a simpler edit instruction"
+            ],
+            ErrorType.IMAGE_PROCESSING_ERROR: [
+                "Try with a different image",
+                "Use simpler edit instructions",
+                "Ensure image is not corrupted"
+            ],
+            ErrorType.MESSAGE_SPLIT_ERROR: [
+                "Request a shorter response",
+                "Ask for the information in parts",
+                "Use simpler formatting in your request"
+            ],
+            ErrorType.DISCORD_PERMISSION_ERROR: [
+                "Check bot permissions in server settings",
+                "Ensure bot has 'Send Messages' permission",
+                "Contact server administrator for permission help"
+            ]
+        }
+        
+        error_suggestions = suggestions.get(error_type, ["Try again later", "Contact support if issue persists"])
+        
+        suggestion_text = "**Suggested solutions:**\n"
+        for i, suggestion in enumerate(error_suggestions, 1):
+            suggestion_text += f"{i}. {suggestion}\n"
+        
+        return suggestion_text.strip()
+    
+    def log_user_action_error(
+        self, 
+        user_id: str, 
+        action: str, 
+        error: Exception,
+        additional_context: Optional[dict] = None
+    ) -> None:
+        """
+        Log user action errors with context for debugging and monitoring.
+        
+        Args:
+            user_id: ID of the user who triggered the error
+            action: The action that caused the error
+            error: The exception that occurred
+            additional_context: Optional additional context information
+        """
+        error_context = self.create_error_context(error)
+        
+        # Build context information
+        context_parts = [f"User: {user_id}", f"Action: {action}"]
+        
+        if additional_context:
+            for key, value in additional_context.items():
+                context_parts.append(f"{key}: {value}")
+        
+        context_info = " | ".join(context_parts)
+        
+        # Log with appropriate level based on error severity
+        if error_context.error_type in {ErrorType.RATE_LIMIT, ErrorType.TIMEOUT}:
+            log_level = logging.WARNING
+        else:
+            log_level = logging.ERROR
+        
+        logger.log(
+            log_level,
+            f"User action error - {error_context.technical_details}",
+            extra={
+                'user_id': user_id,
+                'action': action,
+                'error_type': error_context.error_type.value,
+                'context': context_info
+            },
+            exc_info=error
+        )
+    
+    async def attempt_error_recovery(
+        self, 
+        error_context: ErrorContext, 
+        recovery_function,
+        max_retries: int = 3,
+        backoff_factor: float = 2.0
+    ) -> Tuple[bool, Optional[Exception]]:
+        """
+        Attempt to recover from transient errors with exponential backoff.
+        
+        Args:
+            error_context: The error context to recover from
+            recovery_function: Async function to call for recovery
+            max_retries: Maximum number of retry attempts
+            backoff_factor: Multiplier for retry delay
+            
+        Returns:
+            Tuple of (success, final_error)
+        """
+        if not error_context.should_retry:
+            return False, error_context.original_error
+        
+        import asyncio
+        
+        retry_count = 0
+        last_error = error_context.original_error
+        
+        while retry_count < max_retries:
+            try:
+                # Calculate delay with exponential backoff
+                delay = (backoff_factor ** retry_count)
+                if error_context.retry_after:
+                    delay = max(delay, error_context.retry_after)
+                
+                if delay > 0:
+                    logger.info(f"Retrying after {delay} seconds (attempt {retry_count + 1}/{max_retries})")
+                    await asyncio.sleep(delay)
+                
+                # Attempt recovery
+                await recovery_function()
+                logger.info(f"Error recovery successful after {retry_count + 1} attempts")
+                return True, None
+                
+            except Exception as retry_error:
+                retry_count += 1
+                last_error = retry_error
+                logger.warning(f"Retry attempt {retry_count} failed: {retry_error}")
+        
+        logger.error(f"Error recovery failed after {max_retries} attempts")
+        return False, last_error

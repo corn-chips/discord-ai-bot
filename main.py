@@ -11,7 +11,7 @@ import signal
 import sys
 from dotenv import load_dotenv
 
-from src.config import load_and_validate_config
+from src.config import load_and_validate_config, validate_startup_connectivity
 from src.bot.discord_bot import DiscordBot
 
 # Load environment variables
@@ -66,6 +66,11 @@ async def main():
                 f"Response timeout: {config.response_timeout}s")
     
     try:
+        # Validate service connectivity
+        connectivity_ok = await validate_startup_connectivity(config)
+        if not connectivity_ok:
+            logger.warning("Some services are unavailable, but continuing startup...")
+        
         # Initialize the Discord bot
         bot_instance = DiscordBot(config)
         logger.info("✅ Bot instance created successfully")

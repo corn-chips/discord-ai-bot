@@ -49,6 +49,7 @@ class APIResponse:
     content: Optional[str] = None
     error_type: Optional[str] = None
     retry_after: Optional[int] = None
+    grounding_sources: Optional[list] = None
 
     def __post_init__(self):
         """Validate the API response after initialization."""

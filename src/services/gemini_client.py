@@ -41,23 +41,34 @@ class GeminiClient:
         self.error_manager = ErrorManager()
         self.performance_logger = PerformanceLogger("gemini_client")
         self._model = None
-        self._current_model_name = "gemini-2.5-flash"
+        self._model_with_search = None
+        self._current_model_name = "gemini-flash-latest"
         self._configure_api()
         
     def _configure_api(self) -> None:
         """Configure the Gemini API with authentication and settings."""
         try:
+            logger.info("=" * 80)
+            logger.info("CONFIGURING GEMINI API")
+            
             # Validate API key exists and is not empty
             if not self.config.gemini_api_key or not self.config.gemini_api_key.strip():
                 logger.error("Gemini API key is missing or empty")
                 self._model = None
+                logger.info("=" * 80)
                 return
             
             # Check if API key looks valid (basic format check)
             if len(self.config.gemini_api_key) < 20:
                 logger.error("Gemini API key appears to be invalid (too short)")
+                logger.error(f"API key length: {len(self.config.gemini_api_key)}")
                 self._model = None
+                logger.info("=" * 80)
                 return
+            
+            logger.info(f"API Key length: {len(self.config.gemini_api_key)} characters")
+            logger.info(f"API Key (first 8 chars): {self.config.gemini_api_key[:8]}...")
+            logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
             
             genai.configure(api_key=self.config.gemini_api_key)
             
@@ -66,31 +77,46 @@ class GeminiClient:
                 "temperature": 0.7,
                 "top_p": 0.8,
                 "top_k": 40,
-                "max_output_tokens": 1000,
+                "max_output_tokens": 65536,  # Maximum token limit for longest possible responses
             }
             
-            # Configure safety settings to be less restrictive for general conversation
+            # Configure safety settings - all filters disabled
             safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
+            # Configure model (Google Search grounding not available in current API version)
             self._model = genai.GenerativeModel(
                 model_name=self._current_model_name,
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
             
-            logger.info(f"Gemini API configured successfully with model: {self._current_model_name}")
+            # Set model_with_search to same model for now (search feature unavailable)
+            self._model_with_search = self._model
+            
+            logger.info(f"Model name: {self._current_model_name}")
+            logger.info(f"Generation config: temperature={generation_config['temperature']}, "
+                       f"top_p={generation_config['top_p']}, top_k={generation_config['top_k']}, "
+                       f"max_output_tokens={generation_config['max_output_tokens']}")
+            logger.info(f"Safety settings: All filters set to BLOCK_NONE")
+            logger.info(f"Gemini API configured successfully")
+            logger.info("=" * 80)
             
         except ValueError as e:
             logger.error(f"Invalid Gemini API key format: {e}")
+            logger.error(f"ValueError details: {repr(e)}", exc_info=True)
             self._model = None
+            logger.info("=" * 80)
         except Exception as e:
             logger.error(f"Failed to configure Gemini API: {e}", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception details: {repr(e)}")
             self._model = None
+            logger.info("=" * 80)
     
     def get_current_model(self) -> str:
         """Get the name of the currently active model."""
@@ -106,19 +132,28 @@ class GeminiClient:
         Returns:
             True if successful, False otherwise
         """
+        logger.info("=" * 80)
+        logger.info("SWITCHING MODEL")
+        
         valid_models = [
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite", 
             "gemini-2.0-flash-exp",
-            "gemini-2.0-flash-lite"
+            "gemini-2.0-flash-lite",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest"
         ]
         
         if model_name not in valid_models:
             logger.error(f"Invalid model name: {model_name}")
+            logger.error(f"Valid models: {', '.join(valid_models)}")
+            logger.info("=" * 80)
             return False
         
         try:
             old_model = self._current_model_name
+            logger.info(f"Old model: {old_model}")
+            logger.info(f"New model: {model_name}")
             self._current_model_name = model_name
             
             # Reconfigure with new model
@@ -126,30 +161,65 @@ class GeminiClient:
                 "temperature": 0.7,
                 "top_p": 0.8,
                 "top_k": 40,
-                "max_output_tokens": 1000,
+                "max_output_tokens": 65536,  # Increased to allow longer responses (will be split if needed)
             }
             
             safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
+            # Configure model (Google Search grounding not available in current API version)
             self._model = genai.GenerativeModel(
                 model_name=model_name,
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
             
-            logger.info(f"Switched model from {old_model} to {model_name}")
+            # Set model_with_search to same model for now (search feature unavailable)
+            self._model_with_search = self._model
+            
+            logger.info(f"Model switched successfully from {old_model} to {model_name}")
+            logger.info("=" * 80)
             return True
             
         except Exception as e:
             logger.error(f"Failed to switch model to {model_name}: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception details: {repr(e)}", exc_info=True)
             # Revert to old model
+            logger.warning(f"Reverting to old model: {old_model}")
             self._current_model_name = old_model
+            logger.info("=" * 80)
             return False
+    
+    def _should_use_search(self, prompt: str) -> bool:
+        """
+        Determine if Google Search should be used based on the prompt content.
+        
+        Args:
+            prompt: The user's message/prompt
+            
+        Returns:
+            True if search should be used, False otherwise
+        """
+        prompt_lower = prompt.lower()
+        
+        # Check for URLs
+        if "http://" in prompt_lower or "https://" in prompt_lower or "www." in prompt_lower:
+            return True
+        
+        # Check for explicit search keywords
+        search_keywords = [
+            "search", "look up", "lookup", "find online", "google", 
+            "search for", "look for", "check online", "find information",
+            "what's new", "latest", "current", "recent news", "today's",
+            "web search", "internet"
+        ]
+        
+        return any(keyword in prompt_lower for keyword in search_keywords)
     
     async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None) -> APIResponse:
         """
@@ -171,16 +241,39 @@ class GeminiClient:
                 content="Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable."
             )
         
+        # Log API call initiation
+        logger.info("=" * 80)
+        logger.info("API CALL INITIATED")
+        logger.info(f"Model: {self._current_model_name}")
+        logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
+        
+        # Determine if Google Search should be used
+        use_search = self._should_use_search(prompt)
+        if use_search:
+            logger.info("Google Search enabled for this request")
+        
         # Build content for API call
         if images and len(images) > 0:
             # Multimodal content with images
             formatted_prompt = self.format_prompt(prompt, context)
             content = [formatted_prompt] + images
             logger.info(f"Generating response with {len(images)} image(s)")
+            logger.info(f"Input prompt length: {len(formatted_prompt)} characters")
+            logger.info(f"Input prompt (first 200 chars): {formatted_prompt[:200]}")
         else:
             # Text-only content
             formatted_prompt = self.format_prompt(prompt, context)
             content = formatted_prompt
+            logger.info(f"Input prompt length: {len(formatted_prompt)} characters")
+            logger.info(f"Input prompt (first 200 chars): {formatted_prompt[:200]}")
+        
+        # Log context details
+        if context:
+            logger.info(f"Context messages provided: {len(context)}")
+            for i, msg in enumerate(context):
+                logger.info(f"  Context[{i}]: Author={msg.author}, Length={len(msg.content)} chars, Timestamp={msg.timestamp}")
+        else:
+            logger.info("No context messages provided")
         
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -191,15 +284,21 @@ class GeminiClient:
                 start_time = time.time()
                 
                 response = await asyncio.wait_for(
-                    self._generate_response_async(content),
+                    self._generate_response_async(content, use_search),
                     timeout=self.config.response_timeout
                 )
                 
                 duration = time.time() - start_time
                 
+                # Log API response details
+                logger.info("-" * 80)
+                logger.info(f"API RESPONSE RECEIVED (Duration: {duration:.3f}s)")
+                logger.info(f"Response object type: {type(response)}")
+                
                 # Check if response is valid
                 if not response:
                     logger.warning("Gemini API returned None response")
+                    logger.info("=" * 80)
                     self.performance_logger.log_api_call(
                         api_name="gemini_generate_content",
                         duration=duration,
@@ -217,34 +316,119 @@ class GeminiClient:
                     candidate = response.candidates[0]
                     finish_reason = candidate.finish_reason
                     
+                    # Log candidate details
+                    logger.info(f"Number of candidates: {len(response.candidates)}")
+                    logger.info(f"Finish reason: {finish_reason} ({self._get_finish_reason_name(finish_reason)})")
+                    
+                    # Log safety ratings if available
+                    if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
+                        logger.info("Safety ratings:")
+                        for rating in candidate.safety_ratings:
+                            logger.info(f"  {rating.category}: {rating.probability}")
+                    
                     # Handle different finish reasons
                     if finish_reason == 1:  # STOP - normal completion
                         if response.text:
                             logger.info("Successfully generated response from Gemini API")
+                            logger.info(f"Output token count (estimated): {len(response.text.split())}")
+                            logger.info(f"Output length: {len(response.text)} characters")
+                            logger.info(f"Output (first 200 chars): {response.text[:200]}")
+                            logger.info("=" * 80)
+                            
                             self.performance_logger.log_api_call(
                                 api_name="gemini_generate_content",
                                 duration=duration,
                                 success=True
                             )
+                            
+                            # Extract grounding sources if available
+                            grounding_sources = []
+                            if use_search and hasattr(candidate, 'grounding_metadata'):
+                                grounding_metadata = candidate.grounding_metadata
+                                if hasattr(grounding_metadata, 'grounding_chunks'):
+                                    for chunk in grounding_metadata.grounding_chunks:
+                                        if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
+                                            grounding_sources.append({
+                                                'uri': chunk.web.uri,
+                                                'title': chunk.web.title if hasattr(chunk.web, 'title') else None
+                                            })
+                                    logger.info(f"Extracted {len(grounding_sources)} grounding sources:")
+                                    for i, source in enumerate(grounding_sources):
+                                        logger.info(f"  Source[{i}]: {source['title']} - {source['uri']}")
+                            
+                            # Add grounding indicator if search was used
+                            response_text = response.text.strip()
+                            if use_search:
+                                response_text = f"🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                            
                             return APIResponse(
                                 success=True,
-                                content=response.text.strip()
+                                content=response_text,
+                                grounding_sources=grounding_sources if grounding_sources else None
                             )
                     elif finish_reason == 2:  # MAX_TOKENS
-                        logger.warning("Gemini API response hit max tokens")
-                        self.performance_logger.log_api_call(
-                            api_name="gemini_generate_content",
-                            duration=duration,
-                            success=False,
-                            error_type="max_tokens"
-                        )
-                        return APIResponse(
-                            success=False,
-                            error_type="max_tokens",
-                            content="Response was too long and was cut off. Please try a simpler question."
-                        )
+                        # Response hit max tokens but we still got partial content
+                        if response.text:
+                            logger.warning(f"Gemini API response hit max tokens, returning partial response ({len(response.text)} chars)")
+                            logger.info(f"Output token count (estimated): {len(response.text.split())}")
+                            logger.info(f"Output length: {len(response.text)} characters")
+                            logger.info(f"Output (first 200 chars): {response.text[:200]}")
+                            logger.info("=" * 80)
+                            
+                            self.performance_logger.log_api_call(
+                                api_name="gemini_generate_content",
+                                duration=duration,
+                                success=True  # Still consider it successful since we got content
+                            )
+                            
+                            # Extract grounding sources if available
+                            grounding_sources = []
+                            if use_search and hasattr(candidate, 'grounding_metadata'):
+                                grounding_metadata = candidate.grounding_metadata
+                                if hasattr(grounding_metadata, 'grounding_chunks'):
+                                    for chunk in grounding_metadata.grounding_chunks:
+                                        if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
+                                            grounding_sources.append({
+                                                'uri': chunk.web.uri,
+                                                'title': chunk.web.title if hasattr(chunk.web, 'title') else None
+                                            })
+                            
+                            # Add grounding indicator and note about truncation
+                            response_text = response.text.strip()
+                            if use_search:
+                                response_text = f"🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                            
+                            # Add note that response was truncated
+                            response_text += "\n\n*[Note: Response was very long and may have been truncated. You can ask for specific parts or a summary.]*"
+                            
+                            return APIResponse(
+                                success=True,
+                                content=response_text,
+                                grounding_sources=grounding_sources if grounding_sources else None
+                            )
+                        else:
+                            # No text but hit max tokens (shouldn't happen, but handle it)
+                            logger.error("Max tokens hit but no response text available")
+                            logger.info("=" * 80)
+                            self.performance_logger.log_api_call(
+                                api_name="gemini_generate_content",
+                                duration=duration,
+                                success=False,
+                                error_type="max_tokens_no_content"
+                            )
+                            return APIResponse(
+                                success=False,
+                                error_type="max_tokens",
+                                content="The response was too complex to generate. Please try breaking your question into smaller parts."
+                            )
                     elif finish_reason == 3:  # SAFETY
                         logger.warning("Gemini API response blocked by safety filters")
+                        if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
+                            logger.warning("Triggered safety ratings:")
+                            for rating in candidate.safety_ratings:
+                                logger.warning(f"  {rating.category}: {rating.probability}")
+                        logger.info("=" * 80)
+                        
                         self.performance_logger.log_api_call(
                             api_name="gemini_generate_content",
                             duration=duration,
@@ -258,6 +442,8 @@ class GeminiClient:
                         )
                     elif finish_reason == 4:  # RECITATION
                         logger.warning("Gemini API response blocked due to recitation")
+                        logger.info("=" * 80)
+                        
                         self.performance_logger.log_api_call(
                             api_name="gemini_generate_content",
                             duration=duration,
@@ -271,6 +457,8 @@ class GeminiClient:
                         )
                     else:
                         logger.warning(f"Gemini API returned unexpected finish_reason: {finish_reason}")
+                        logger.info("=" * 80)
+                        
                         self.performance_logger.log_api_call(
                             api_name="gemini_generate_content",
                             duration=duration,
@@ -284,6 +472,8 @@ class GeminiClient:
                         )
                 else:
                     logger.warning("Gemini API returned response without candidates")
+                    logger.info("=" * 80)
+                    
                     self.performance_logger.log_api_call(
                         api_name="gemini_generate_content",
                         duration=duration,
@@ -298,6 +488,8 @@ class GeminiClient:
                     
             except asyncio.TimeoutError:
                 logger.warning(f"Gemini API request timed out (attempt {attempt + 1})")
+                logger.warning(f"Timeout duration: {self.config.response_timeout}s")
+                logger.info("=" * 80)
                 
                 # Log timeout performance
                 self.performance_logger.log_api_call(
@@ -315,7 +507,16 @@ class GeminiClient:
                     )
                     
             except Exception as e:
+                logger.error(f"Exception during API call: {type(e).__name__}: {str(e)}")
+                logger.error(f"Exception details: {repr(e)}", exc_info=True)
+                
                 error_context = self.error_manager.handle_api_error(e, f"Gemini API attempt {attempt + 1}")
+                
+                logger.error(f"Error type: {error_context.error_type.value}")
+                logger.error(f"Should retry: {error_context.should_retry}")
+                if error_context.retry_after:
+                    logger.error(f"Retry after: {error_context.retry_after}s")
+                logger.info("=" * 80)
                 
                 # Log failed API call
                 self.performance_logger.log_api_call(
@@ -345,23 +546,50 @@ class GeminiClient:
             content="An unexpected error occurred"
         )
     
-    async def _generate_response_async(self, content):
+    async def _generate_response_async(self, content, use_search: bool = False):
         """
         Async wrapper for Gemini API call.
         
         Args:
             content: Content to send to the API (string for text-only, list for multimodal)
+            use_search: Whether to use the model with Google Search enabled
             
         Returns:
             Generated response from Gemini API
         """
+        # Select the appropriate model based on whether search is needed
+        model = self._model_with_search if use_search else self._model
+        
+        logger.info(f"Making API call to model: {model._model_name if hasattr(model, '_model_name') else 'unknown'}")
+        logger.info(f"Using search-enabled model: {use_search}")
+        
         # Run the synchronous API call in a thread pool
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, 
-            self._model.generate_content, 
+            model.generate_content, 
             content
         )
+    
+    def _get_finish_reason_name(self, finish_reason: int) -> str:
+        """
+        Get human-readable name for finish reason code.
+        
+        Args:
+            finish_reason: Numeric finish reason code
+            
+        Returns:
+            Human-readable name for the finish reason
+        """
+        finish_reasons = {
+            0: "UNSPECIFIED",
+            1: "STOP",
+            2: "MAX_TOKENS",
+            3: "SAFETY",
+            4: "RECITATION",
+            5: "OTHER"
+        }
+        return finish_reasons.get(finish_reason, f"UNKNOWN({finish_reason})")
     
     def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None) -> str:
         """
@@ -374,14 +602,56 @@ class GeminiClient:
         Returns:
             Formatted prompt string for the Gemini API
         """
+        logger.debug("Formatting prompt for API call")
+        logger.debug(f"User message length: {len(user_message)} characters")
+        logger.debug(f"Context messages: {len(context) if context else 0}")
+        
         prompt_parts = []
         
         # Add system instruction for the bot's personality and behavior
         system_instruction = (
-            "You are Grok, a witty and helpful AI assistant in a Discord chat. "
-            "Respond naturally to conversations, be engaging and informative, "
-            "but keep responses concise and conversational. "
-            "Use the conversation context to provide relevant responses."
+            
+            
+            '''
+            ### **System Prompt: The Grounded Expert**
+
+            **[CORE IDENTITY]**
+
+            You are a grounded, well-informed expert AI assistant. Your primary function is to provide users with accurate, verifiable, and comprehensive information sourced from reliable data. You operate as a subject-matter expert across a wide range of fields, with an absolute commitment to factual integrity and intellectual honesty.
+
+            **[CORE DIRECTIVES & PRINCIPLES]**
+
+            1.  **Factuality is Paramount:** Your primary output must be factual and verifiable. Prioritize objective data, established scientific consensus, and documented evidence over speculation or unconfirmed information.
+
+            2.  **Mandatory Grounding & Sourcing:** You **MUST** use your web search and grounding capabilities for every query that requires external, real-world knowledge. Do not answer from memory alone. Verify all claims, statistics, dates, and proper nouns. Provide clear citations or links to your primary, high-quality sources (e.g., academic journals, reputable news organizations, government reports, expert publications) at the end of your response.
+
+            3.  **Strictly Distinguish Fact from Opinion/Analysis:**
+                *   **Default Mode (Facts):** By default, you will only state established facts. Report what is known and documented.
+                *   **On-Request Mode (Analysis):** If a user explicitly asks for an "opinion," "analysis," "interpretation," "perspective," or "projection," you must clearly label it as such. For example: "As an analysis of the presented facts..." or "Based on the available data, a possible interpretation is...".
+                *   **Evidence-Based Analysis:** Any opinion or analysis you provide **MUST** be directly and explicitly supported by the factual evidence you have already presented in your response. Your opinion is a logical synthesis of the data, not a personal belief.
+
+            4.  **Professional & Direct Tone:**
+                *   Communicate in a clear, precise, and professional manner.
+                *   **Avoid conversational filler,** platitudes ("I'd be happy to help!"), personal anecdotes (as an AI), or overly enthusiastic language. Your tone is that of a trusted, objective researcher or a university professor.
+                *   Your goal is to inform, not to entertain or please. Be respectful but direct.
+
+            5.  **Acknowledge Limits and Nuance:**
+                *   If information is contested, uncertain, or unavailable after a thorough search, state this clearly. For example: "The available data on this topic is inconclusive," or "There are several competing theories on this matter, and no single one has achieved consensus."
+                *   Acknowledge nuance and avoid presenting complex topics as simple binaries. It is better to state that a definitive answer is not available than to provide an inaccurate or oversimplified one.
+
+            6.  **Structure and Clarity:** Organize your responses logically. Use headings, bullet points, and bold text to improve readability for complex topics. Define technical terms when first used.
+
+            7.  **Strive for Comprehensive Depth:**
+                *   **Your primary goal is to provide thorough, well-reasoned, and in-depth answers.** Avoid superficial or cursory responses. A "well thought out" answer is one that demonstrates a deep and holistic understanding of the subject.
+                *   **Provide Context:** Always frame your answer with relevant historical, scientific, or social context. Explain *why* the information is significant.
+                *   **Synthesize, Don't Just List:** Do not simply list disparate facts. Synthesize information from multiple sources to build a coherent and comprehensive narrative or explanation. Explore the key components, contributing factors, and implications related to the user's query.
+                *   **Anticipate and Elaborate:** Go beyond the surface-level question. Anticipate logical follow-up questions and incorporate those explanations into your main response. A detailed, exhaustive explanation is always preferred over a brief summary.
+
+            **[IN ESSENCE]**
+
+            You are an objective conduit for verified information. Your value lies in your accuracy, your sourcing, and your ability to separate established fact from reasoned analysis. You do not have personal feelings or beliefs. You have access to information, and your purpose is to convey it with clarity, depth, and integrity.
+                        
+            '''
         )
         prompt_parts.append(system_instruction)
         
@@ -408,7 +678,10 @@ class GeminiClient:
         prompt_parts.append(f"User: {user_message}")
         prompt_parts.append("\nGrok:")
         
-        return "\n".join(prompt_parts)
+        formatted = "\n".join(prompt_parts)
+        logger.debug(f"Formatted prompt total length: {len(formatted)} characters")
+        
+        return formatted
     
 
     

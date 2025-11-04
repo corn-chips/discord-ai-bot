@@ -643,3 +643,1185 @@ ValueError: Invalid operation: The `response.text` quick accessor requires the r
 2025-11-04 06:34:59 | INFO     | src.bot.discord_bot  | Successfully generated AI response
 2025-11-04 06:34:59 | INFO     | discord_bot          | Message processing completed [user_id=816769366968369222, guild_id=1222771487753113650, duration=0.905s] [user_id=816769366968369222, guild_id=1222771487753113650, duration=0.905s]
 2025-11-04 06:35:00 | INFO     | src.bot.discord_bot  | Successfully sent response to ciel6226 in #grok
+2025-11-04 06:36:03 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155618410528768] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155618410528768]
+2025-11-04 06:36:03 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:36:03 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.250s] [channel_id=1435154218032824452, duration=0.250s]
+2025-11-04 06:36:03 | INFO     | src.bot.discord_bot  | Collected 19 messages for context
+2025-11-04 06:36:04 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:36:04 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=0.763s] [duration=0.763s]
+2025-11-04 06:36:04 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:36:04 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=0.765s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=0.765s]
+2025-11-04 06:36:04 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:36:22 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155698034933792] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155698034933792]
+2025-11-04 06:36:22 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:36:22 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.309s] [channel_id=1435154218032824452, duration=0.309s]
+2025-11-04 06:36:22 | INFO     | src.bot.discord_bot  | Collected 20 messages for context
+2025-11-04 06:36:24 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:36:24 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.171s] [duration=1.171s]
+2025-11-04 06:36:24 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:36:24 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.174s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.174s]
+2025-11-04 06:36:24 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:36:27 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:36:27 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:36:27 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:36:33 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:36:33 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:36:33 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:36:33 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:36:33 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 06:36:33 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:36:33 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:36:33 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:36:36 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155758806466561] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155758806466561]
+2025-11-04 06:36:36 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435155758806466561] [message_id=1435155758806466561]
+2025-11-04 06:36:37 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435155758806466561, duration=0.629s] [message_id=1435155758806466561, duration=0.629s]
+2025-11-04 06:36:37 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:36:37 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.284s] [channel_id=1435154218032824452, duration=0.284s]
+2025-11-04 06:36:37 | INFO     | src.bot.discord_bot  | Collected 22 messages for context
+2025-11-04 06:36:39 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:36:39 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.274s] [duration=1.274s]
+2025-11-04 06:36:39 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:36:39 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.276s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.276s]
+2025-11-04 06:36:39 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:36:39 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:36:40 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:37:09 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155897327554560] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155897327554560]
+2025-11-04 06:37:09 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:37:10 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.261s] [channel_id=1435154218032824452, duration=0.261s]
+2025-11-04 06:37:10 | INFO     | src.bot.discord_bot  | Collected 22 messages for context
+2025-11-04 06:37:11 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:37:11 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.422s] [duration=1.422s]
+2025-11-04 06:37:11 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:37:11 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.424s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.424s]
+2025-11-04 06:37:11 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:37:18 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155935449452625] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435155935449452625]
+2025-11-04 06:37:18 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435155935449452625] [message_id=1435155935449452625]
+2025-11-04 06:37:19 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435155935449452625, duration=0.478s] [message_id=1435155935449452625, duration=0.478s]
+2025-11-04 06:37:19 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:37:19 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.199s] [channel_id=1435154218032824452, duration=0.199s]
+2025-11-04 06:37:19 | INFO     | src.bot.discord_bot  | Collected 24 messages for context
+2025-11-04 06:37:27 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 06:37:27 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=7.524s, error_type=max_tokens] [duration=7.524s, error_type=max_tokens]
+2025-11-04 06:37:27 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 06:37:27 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 06:38:20 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156192526598314] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156192526598314]
+2025-11-04 06:38:20 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:38:20 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156192312954951] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156192312954951]
+2025-11-04 06:38:20 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:38:20 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.267s] [channel_id=1435154218032824452, duration=0.267s]
+2025-11-04 06:38:20 | INFO     | src.bot.discord_bot  | Collected 25 messages for context
+2025-11-04 06:38:20 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.255s] [channel_id=1435154218032824452, duration=0.255s]
+2025-11-04 06:38:20 | INFO     | src.bot.discord_bot  | Collected 25 messages for context
+2025-11-04 06:38:23 | INFO     | src.bot.discord_bot  | Bot mentioned by ciel6226 in #grok [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156205306777600] [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156205306777600]
+2025-11-04 06:38:23 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:38:23 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.220s] [channel_id=1435154218032824452, duration=0.220s]
+2025-11-04 06:38:23 | INFO     | src.bot.discord_bot  | Collected 26 messages for context
+2025-11-04 06:38:24 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:38:24 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.800s] [duration=3.800s]
+2025-11-04 06:38:24 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:38:24 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=3.805s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=3.805s]
+2025-11-04 06:38:24 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:38:28 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:38:28 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=5.135s] [duration=5.135s]
+2025-11-04 06:38:28 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:38:28 | INFO     | discord_bot          | Message processing completed [user_id=816769366968369222, guild_id=1222771487753113650, duration=5.151s] [user_id=816769366968369222, guild_id=1222771487753113650, duration=5.151s]
+2025-11-04 06:38:28 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:38:28 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=8.195s] [duration=8.195s]
+2025-11-04 06:38:28 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:38:28 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=8.215s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=8.215s]
+2025-11-04 06:38:29 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:38:29 | INFO     | src.bot.discord_bot  | Successfully sent response to ciel6226 in #grok
+2025-11-04 06:38:46 | INFO     | src.bot.discord_bot  | Bot mentioned by ciel6226 in #grok [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156304061665321] [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156304061665321]
+2025-11-04 06:38:46 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:38:47 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.275s] [channel_id=1435154218032824452, duration=0.275s]
+2025-11-04 06:38:47 | INFO     | src.bot.discord_bot  | Collected 28 messages for context
+2025-11-04 06:38:50 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:38:50 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=2.713s] [duration=2.713s]
+2025-11-04 06:38:50 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:38:50 | INFO     | discord_bot          | Message processing completed [user_id=816769366968369222, guild_id=1222771487753113650, duration=2.725s] [user_id=816769366968369222, guild_id=1222771487753113650, duration=2.725s]
+2025-11-04 06:38:50 | INFO     | src.bot.discord_bot  | Successfully sent response to ciel6226 in #grok
+2025-11-04 06:38:58 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156352841551903] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156352841551903]
+2025-11-04 06:38:58 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435156352841551903] [message_id=1435156352841551903]
+2025-11-04 06:38:58 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435156352841551903, duration=0.502s] [message_id=1435156352841551903, duration=0.502s]
+2025-11-04 06:38:58 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:38:59 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.186s] [channel_id=1435154218032824452, duration=0.186s]
+2025-11-04 06:38:59 | INFO     | src.bot.discord_bot  | Collected 30 messages for context
+2025-11-04 06:39:00 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:39:00 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.590s] [duration=1.590s]
+2025-11-04 06:39:00 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:39:00 | INFO     | discord_bot          | Message processing completed [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.592s] [user_id=447550931890864148, guild_id=1222771487753113650, duration=1.592s]
+2025-11-04 06:39:01 | INFO     | src.bot.discord_bot  | Successfully sent response to jordanlamb in #grok
+2025-11-04 06:39:04 | INFO     | src.bot.discord_bot  | Bot mentioned by ciel6226 in #grok [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156376555880548] [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156376555880548]
+2025-11-04 06:39:04 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:39:04 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.229s] [channel_id=1435154218032824452, duration=0.229s]
+2025-11-04 06:39:04 | INFO     | src.bot.discord_bot  | Collected 30 messages for context
+2025-11-04 06:39:05 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:39:05 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.288s] [duration=1.288s]
+2025-11-04 06:39:05 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:39:05 | INFO     | discord_bot          | Message processing completed [user_id=816769366968369222, guild_id=1222771487753113650, duration=1.290s] [user_id=816769366968369222, guild_id=1222771487753113650, duration=1.290s]
+2025-11-04 06:39:06 | INFO     | src.bot.discord_bot  | Successfully sent response to ciel6226 in #grok
+2025-11-04 06:39:06 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156385435353221] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156385435353221]
+2025-11-04 06:39:06 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435156385435353221] [message_id=1435156385435353221]
+2025-11-04 06:39:06 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435156385435353221, duration=0.563s] [message_id=1435156385435353221, duration=0.563s]
+2025-11-04 06:39:06 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:39:07 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.269s] [channel_id=1435154218032824452, duration=0.269s]
+2025-11-04 06:39:07 | INFO     | src.bot.discord_bot  | Collected 32 messages for context
+2025-11-04 06:39:14 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 06:39:14 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=7.259s, error_type=max_tokens] [duration=7.259s, error_type=max_tokens]
+2025-11-04 06:39:14 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 06:39:14 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 06:39:20 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:39:20 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:39:20 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:39:26 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:39:26 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:39:26 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:39:26 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:39:26 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash and Google Search grounding enabled
+2025-11-04 06:39:26 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:39:26 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:39:26 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:39:28 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:39:28 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:39:28 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:39:28 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:39:28 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:39:29 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:39:29 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:39:47 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156558073040948] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156558073040948]
+2025-11-04 06:39:47 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:39:47 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.295s] [channel_id=1435154218032824452, duration=0.295s]
+2025-11-04 06:39:47 | INFO     | src.bot.discord_bot  | Collected 32 messages for context
+2025-11-04 06:39:48 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:39:48 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:39:48 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:39:48 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:40:26 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156723458510868] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156723458510868]
+2025-11-04 06:40:26 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:40:27 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.370s] [channel_id=1435154218032824452, duration=0.370s]
+2025-11-04 06:40:27 | INFO     | src.bot.discord_bot  | Collected 33 messages for context
+2025-11-04 06:40:27 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:40:27 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:40:27 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:40:27 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:40:30 | INFO     | src.bot.discord_bot  | Bot mentioned by ciel6226 in #grok [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156737735786637] [user_id=816769366968369222, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156737735786637]
+2025-11-04 06:40:30 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:40:30 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.322s] [channel_id=1435154218032824452, duration=0.322s]
+2025-11-04 06:40:30 | INFO     | src.bot.discord_bot  | Collected 34 messages for context
+2025-11-04 06:40:30 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:40:30 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:40:30 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:40:30 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:40:36 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156764873199687] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156764873199687]
+2025-11-04 06:40:36 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:40:36 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.329s] [channel_id=1435154218032824452, duration=0.329s]
+2025-11-04 06:40:36 | INFO     | src.bot.discord_bot  | Collected 35 messages for context
+2025-11-04 06:40:37 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:40:37 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:40:37 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:40:37 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:40:59 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156861430267974] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435156861430267974]
+2025-11-04 06:40:59 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:41:00 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.344s] [channel_id=1435154218032824452, duration=0.344s]
+2025-11-04 06:41:00 | INFO     | src.bot.discord_bot  | Collected 36 messages for context
+2025-11-04 06:41:00 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:41:00 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:41:00 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:41:00 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:41:28 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:41:28 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:41:28 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:41:32 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:41:32 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:41:32 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:41:32 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:41:32 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash and Google Search grounding enabled
+2025-11-04 06:41:32 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:41:32 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:41:32 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:41:34 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:41:34 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:41:34 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:41:34 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:41:34 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:41:35 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:41:35 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:41:48 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157066149789796] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157066149789796]
+2025-11-04 06:41:48 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:41:48 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.305s] [channel_id=1435154218032824452, duration=0.305s]
+2025-11-04 06:41:48 | INFO     | src.bot.discord_bot  | Collected 37 messages for context
+2025-11-04 06:41:49 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:41:49 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:41:49 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:41:49 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:44:22 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:44:22 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:44:22 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:44:26 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:44:26 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:44:26 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:44:26 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:44:26 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash and Google Search grounding enabled
+2025-11-04 06:44:26 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:44:26 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:44:26 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:44:29 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:45:03 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157881862357055] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157881862357055]
+2025-11-04 06:45:03 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:45:03 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.545s] [channel_id=1435154218032824452, duration=0.545s]
+2025-11-04 06:45:03 | INFO     | src.bot.discord_bot  | Collected 38 messages for context
+2025-11-04 06:45:03 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:45:03 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:45:03 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:45:03 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:45:12 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157921339277394] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157921339277394]
+2025-11-04 06:45:12 | WARNING  | src.bot.discord_bot  | Empty prompt after removing mentions [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157921339277394] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157921339277394]
+2025-11-04 06:45:27 | INFO     | src.bot.discord_bot  | Bot mentioned by jordanlamb in #grok [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157986183090227] [user_id=447550931890864148, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435157986183090227]
+2025-11-04 06:45:27 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:45:28 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.339s] [channel_id=1435154218032824452, duration=0.339s]
+2025-11-04 06:45:28 | INFO     | src.bot.discord_bot  | Collected 40 messages for context
+2025-11-04 06:45:28 | ERROR    | src.utils.error_manager | Invalid API request format - API Error (Gemini API attempt 1)
+Traceback (most recent call last):
+  File "/app/src/services/gemini_client.py", line 206, in generate_response
+    response = await asyncio.wait_for(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 489, in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+  File "/app/src/services/gemini_client.py", line 373, in _generate_response_async
+    return await loop.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/generativeai/generative_models.py", line 331, in generate_content
+    response = self._client.generate_content(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/ai/generativelanguage_v1beta/services/generative_service/client.py", line 835, in generate_content
+    response = rpc(
+               ^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/gapic_v1/method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 147, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/grpc_helpers.py", line 77, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.InvalidArgument: 400 google_search_retrieval is not supported. Please use google_search tool instead.
+2025-11-04 06:45:28 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=0.000s, error_type=invalid_request] [duration=0.000s, error_type=invalid_request]
+2025-11-04 06:45:28 | ERROR    | src.bot.discord_bot  | Failed to generate response: invalid_request
+2025-11-04 06:45:28 | ERROR    | src.utils.error_manager | ❓ **Invalid Request**
+I had trouble understanding your request. Could you try asking differently?
+
+**Details:** `400 google_search_retrieval is not supported. Please use google_search tool instead.` - API Response Error: invalid_request
+2025-11-04 06:45:45 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:45:45 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:45:45 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:45:48 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:45:48 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:45:48 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:45:48 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:45:48 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash and Google Search grounding enabled
+2025-11-04 06:45:48 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:45:48 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:45:48 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:45:51 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:46:10 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:46:10 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:46:10 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:47:27 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:47:27 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:47:27 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:47:27 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:47:27 | ERROR    | src.services.gemini_client | Invalid Gemini API key format: The only string that can be passed as a tool is 'code_execution', or one of the specified values for the `mode` parameter for google_search_retrieval.
+2025-11-04 06:47:27 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:47:27 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:47:27 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:47:30 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:47:48 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435158574446940204] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435158574446940204]
+2025-11-04 06:47:48 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:47:48 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.360s] [channel_id=1435154218032824452, duration=0.360s]
+2025-11-04 06:47:48 | INFO     | src.bot.discord_bot  | Collected 41 messages for context
+2025-11-04 06:47:48 | ERROR    | src.services.gemini_client | Attempted to generate response but Gemini model is not configured
+2025-11-04 06:47:48 | ERROR    | src.bot.discord_bot  | Failed to generate response: configuration_error
+2025-11-04 06:47:48 | ERROR    | src.utils.error_manager | Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable. - API Response Error: configuration_error
+2025-11-04 06:50:15 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:50:15 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:50:15 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:50:16 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:50:16 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:50:16 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:50:16 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:50:16 | ERROR    | src.services.gemini_client | Invalid Gemini API key format: The only string that can be passed as a tool is 'code_execution', or one of the specified values for the `mode` parameter for google_search_retrieval.
+2025-11-04 06:50:16 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:50:16 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:50:16 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:50:19 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:50:35 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:50:35 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:50:35 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:50:39 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:50:39 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:50:39 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:50:39 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:50:39 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 06:50:39 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:50:39 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:50:39 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:50:41 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:50:41 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:50:41 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:50:41 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:50:41 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:51:12 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435159432840478751] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435159432840478751]
+2025-11-04 06:51:12 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:51:13 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.334s] [channel_id=1435154218032824452, duration=0.334s]
+2025-11-04 06:51:13 | INFO     | src.bot.discord_bot  | Collected 42 messages for context
+2025-11-04 06:51:19 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:51:19 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:51:19 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:51:19 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=6.597s] [duration=6.597s]
+2025-11-04 06:51:19 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:51:19 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=6.600s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=6.600s]
+2025-11-04 06:51:20 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:51:26 | INFO     | src.services.gemini_client | Switched model from gemini-2.5-flash to gemini-2.5-flash-lite
+2025-11-04 06:51:26 | INFO     | src.bot.commands     | User _giraffe changed model from gemini-2.5-flash to gemini-2.5-flash-lite
+2025-11-04 06:51:32 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435159516647002144] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435159516647002144]
+2025-11-04 06:51:32 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:51:33 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.328s] [channel_id=1435154218032824452, duration=0.328s]
+2025-11-04 06:51:33 | INFO     | src.bot.discord_bot  | Collected 43 messages for context
+2025-11-04 06:51:33 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 06:51:34 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:51:34 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=0.775s] [duration=0.775s]
+2025-11-04 06:51:34 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:51:34 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=0.780s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=0.780s]
+2025-11-04 06:51:34 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:55:02 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:55:02 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:55:02 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:55:08 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:55:08 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:55:08 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:55:08 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:55:08 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 06:55:08 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:55:08 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:55:08 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:55:10 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:55:10 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:55:10 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:55:10 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:55:10 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:55:11 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:55:11 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:55:51 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435160603055362099] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435160603055362099]
+2025-11-04 06:55:51 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:55:52 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.368s] [channel_id=1435154218032824452, duration=0.368s]
+2025-11-04 06:55:52 | INFO     | src.bot.discord_bot  | Collected 44 messages for context
+2025-11-04 06:55:52 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 06:55:56 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:55:56 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.921s] [duration=3.921s]
+2025-11-04 06:55:56 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:55:56 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.924s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.924s]
+2025-11-04 06:55:56 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:57:26 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 06:57:26 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 06:57:26 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 06:57:31 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 06:57:31 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 06:57:31 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 06:57:31 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 06:57:31 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 06:57:31 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 06:57:31 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 06:57:31 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 06:57:34 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 06:58:05 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161165356466197] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161165356466197]
+2025-11-04 06:58:05 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435161165356466197] [message_id=1435161165356466197]
+2025-11-04 06:58:06 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435161165356466197, duration=1.179s] [message_id=1435161165356466197, duration=1.179s]
+2025-11-04 06:58:06 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:58:07 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.254s] [channel_id=1435154218032824452, duration=0.254s]
+2025-11-04 06:58:07 | INFO     | src.bot.discord_bot  | Collected 47 messages for context
+2025-11-04 06:58:10 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:58:10 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=2.718s] [duration=2.718s]
+2025-11-04 06:58:10 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:58:10 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.720s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.720s]
+2025-11-04 06:58:10 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:58:15 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161207127408671] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161207127408671]
+2025-11-04 06:58:15 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435161207127408671] [message_id=1435161207127408671]
+2025-11-04 06:58:16 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435161207127408671, duration=0.326s] [message_id=1435161207127408671, duration=0.326s]
+2025-11-04 06:58:16 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:58:17 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=1.129s] [channel_id=1435154218032824452, duration=1.129s]
+2025-11-04 06:58:17 | INFO     | src.bot.discord_bot  | Collected 48 messages for context
+2025-11-04 06:58:19 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:58:19 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=2.526s] [duration=2.526s]
+2025-11-04 06:58:19 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:58:19 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.529s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=2.529s]
+2025-11-04 06:58:20 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:58:43 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161321959329792] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161321959329792]
+2025-11-04 06:58:43 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435161321959329792] [message_id=1435161321959329792]
+2025-11-04 06:58:43 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435161321959329792, duration=0.473s] [message_id=1435161321959329792, duration=0.473s]
+2025-11-04 06:58:43 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:58:44 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.393s] [channel_id=1435154218032824452, duration=0.393s]
+2025-11-04 06:58:44 | INFO     | src.bot.discord_bot  | Collected 49 messages for context
+2025-11-04 06:58:45 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:58:45 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=1.909s] [duration=1.909s]
+2025-11-04 06:58:45 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:58:45 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=1.913s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=1.913s]
+2025-11-04 06:58:46 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 06:58:56 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161378657669170] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435161378657669170]
+2025-11-04 06:58:56 | INFO     | src.services.context_collector | Starting Retrieving reply context [message_id=1435161378657669170] [message_id=1435161378657669170]
+2025-11-04 06:58:57 | INFO     | src.services.context_collector | Completed Retrieving reply context [message_id=1435161378657669170, duration=0.614s] [message_id=1435161378657669170, duration=0.614s]
+2025-11-04 06:58:57 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 06:58:57 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.323s] [channel_id=1435154218032824452, duration=0.323s]
+2025-11-04 06:58:57 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 06:58:57 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 06:59:01 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 06:59:01 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=4.210s] [duration=4.210s]
+2025-11-04 06:59:01 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 06:59:01 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.225s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.225s]
+2025-11-04 06:59:02 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 07:00:39 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:00:39 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:00:39 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:00:45 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:00:45 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:00:45 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:00:45 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:00:45 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 07:00:45 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:00:45 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:00:45 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:00:48 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:01:28 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435162015638229084] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435162015638229084]
+2025-11-04 07:01:28 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:01:28 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.375s] [channel_id=1435154218032824452, duration=0.375s]
+2025-11-04 07:01:28 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:01:29 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:01:32 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:01:32 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=3.808s] [duration=3.808s]
+2025-11-04 07:01:32 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:01:32 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.811s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=3.811s]
+2025-11-04 07:01:33 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 07:03:57 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:03:57 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:03:57 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:04:02 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:04:02 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:04:02 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:04:02 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:04:02 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 07:04:02 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:04:02 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:04:02 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:04:04 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:04:04 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:04:04 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:04:04 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:04:04 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:04:05 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:04:05 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:04:29 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435162773675053076] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435162773675053076]
+2025-11-04 07:04:29 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:04:29 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.405s] [channel_id=1435154218032824452, duration=0.405s]
+2025-11-04 07:04:29 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:04:29 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:04:33 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:04:33 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=4.058s] [duration=4.058s]
+2025-11-04 07:04:33 | INFO     | src.services.gemini_client | Extracted 0 grounding sources
+2025-11-04 07:04:33 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:04:33 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.062s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=4.062s]
+2025-11-04 07:04:34 | INFO     | src.bot.discord_bot  | Successfully sent response to dankmrpanda in #grok
+2025-11-04 07:08:02 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:08:02 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:08:02 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:08:05 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:08:05 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:08:05 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:08:05 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:08:05 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 07:08:05 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:08:05 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:08:05 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:08:08 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:09:57 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:09:57 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:09:57 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:10:42 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:10:42 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:10:42 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:10:42 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:10:42 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-2.5-flash
+2025-11-04 07:10:42 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:10:42 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:10:42 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:10:45 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:11:10 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:11:10 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:11:10 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:11:58 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:11:58 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:11:58 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:11:58 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:11:58 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:11:58 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:11:58 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:11:58 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:12:01 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:12:23 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435164761909231616] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435164761909231616]
+2025-11-04 07:12:23 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:12:23 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.384s] [channel_id=1435154218032824452, duration=0.384s]
+2025-11-04 07:12:23 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:12:23 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:12:29 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:12:29 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=5.680s, error_type=max_tokens] [duration=5.680s, error_type=max_tokens]
+2025-11-04 07:12:29 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:12:29 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:15:00 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:15:00 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:15:00 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:15:05 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:15:05 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:15:05 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:15:05 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:15:05 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:15:05 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:15:05 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:15:05 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:15:08 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:15:34 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:15:34 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:15:34 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:16:22 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:16:22 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:16:22 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:16:22 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:16:22 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:16:22 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:16:22 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:16:22 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:16:25 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:16:27 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435165786770640906] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435165786770640906]
+2025-11-04 07:16:27 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:16:27 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.307s] [channel_id=1435154218032824452, duration=0.307s]
+2025-11-04 07:16:27 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:16:28 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:16:34 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:16:34 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=6.437s, error_type=max_tokens] [duration=6.437s, error_type=max_tokens]
+2025-11-04 07:16:34 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:16:34 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:17:50 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:17:50 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:17:50 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:17:53 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:17:53 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:17:53 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:17:53 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:17:53 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:17:53 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:17:53 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:17:53 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:17:55 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:17:55 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:17:55 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:17:55 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:17:55 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:17:56 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:17:56 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:18:11 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #general [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166220969185330] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166220969185330]
+2025-11-04 07:18:11 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1222771488294310021] [channel_id=1222771488294310021]
+2025-11-04 07:18:11 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1222771488294310021, duration=0.330s] [channel_id=1222771488294310021, duration=0.330s]
+2025-11-04 07:18:11 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:18:11 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:18:18 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:18:18 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=6.390s, error_type=max_tokens] [duration=6.390s, error_type=max_tokens]
+2025-11-04 07:18:18 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:18:18 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:19:13 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:19:13 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:19:13 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:19:16 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:19:16 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:19:16 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:19:16 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:19:16 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:19:16 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:19:16 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:19:16 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:19:19 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:19:43 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:19:43 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:19:43 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:19:48 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:19:48 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:19:48 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:19:48 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:19:48 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:19:48 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:19:48 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:19:48 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:19:50 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:19:50 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:19:50 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:19:50 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:19:50 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:19:51 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:19:51 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:19:53 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #general [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166649085984901] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166649085984901]
+2025-11-04 07:19:53 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1222771488294310021] [channel_id=1222771488294310021]
+2025-11-04 07:19:53 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1222771488294310021, duration=0.282s] [channel_id=1222771488294310021, duration=0.282s]
+2025-11-04 07:19:53 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:19:53 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:19:59 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:19:59 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=6.207s, error_type=max_tokens] [duration=6.207s, error_type=max_tokens]
+2025-11-04 07:19:59 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:19:59 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:20:41 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #general [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166849317863514] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1222771488294310021, message_id=1435166849317863514]
+2025-11-04 07:20:41 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1222771488294310021] [channel_id=1222771488294310021]
+2025-11-04 07:20:41 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1222771488294310021, duration=0.374s] [channel_id=1222771488294310021, duration=0.374s]
+2025-11-04 07:20:41 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:20:47 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:20:47 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=6.265s, error_type=max_tokens] [duration=6.265s, error_type=max_tokens]
+2025-11-04 07:20:47 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:20:47 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:21:21 | INFO     | src.bot.discord_bot  | Bot mentioned by _giraffe in #grok [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435167017723232367] [user_id=614936365825654798, guild_id=1222771487753113650, channel_id=1435154218032824452, message_id=1435167017723232367]
+2025-11-04 07:21:21 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435154218032824452] [channel_id=1435154218032824452]
+2025-11-04 07:21:21 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435154218032824452, duration=0.311s] [channel_id=1435154218032824452, duration=0.311s]
+2025-11-04 07:21:21 | INFO     | src.bot.discord_bot  | Collected 50 messages for context
+2025-11-04 07:21:22 | INFO     | src.bot.discord_bot  | Loaded image from attachment: Screenshot_2025-07-05_110630.png (1802x1000)
+2025-11-04 07:21:22 | INFO     | src.services.gemini_client | Generating response with 1 image(s)
+2025-11-04 07:21:29 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:21:29 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=7.276s, error_type=max_tokens] [duration=7.276s, error_type=max_tokens]
+2025-11-04 07:21:29 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:21:29 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:25:09 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:25:09 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:25:09 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:28:28 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:28:28 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:28:28 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:28:29 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:28:29 | INFO     | src.services.gemini_client | Gemini API configured successfully with model: gemini-flash-latest
+2025-11-04 07:28:29 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:28:29 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:28:29 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:28:31 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:28:31 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:28:31 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:28:31 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:28:31 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:28:32 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:28:32 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:29:12 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok-test [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435168996130295839] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435168996130295839]
+2025-11-04 07:29:12 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 07:29:13 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.216s] [channel_id=1435167927513907241, duration=0.216s]
+2025-11-04 07:29:13 | INFO     | src.bot.discord_bot  | Collected 3 messages for context
+2025-11-04 07:29:13 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:29:19 | WARNING  | src.services.gemini_client | Gemini API response hit max tokens
+2025-11-04 07:29:19 | WARNING  | gemini_client        | API call to gemini_generate_content failed [duration=5.902s, error_type=max_tokens] [duration=5.902s, error_type=max_tokens]
+2025-11-04 07:29:19 | ERROR    | src.bot.discord_bot  | Failed to generate response: max_tokens
+2025-11-04 07:29:19 | ERROR    | src.utils.error_manager | Response was too long and was cut off. Please try a simpler question. - API Response Error: max_tokens
+2025-11-04 07:29:46 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:29:46 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:29:46 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:30:30 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:30:30 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:30:30 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:30:30 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:30:30 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:30:30 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:30:30 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:30:30 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:30:33 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:31:48 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:31:48 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:31:48 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:32:01 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:32:01 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:32:01 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:32:01 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:32:01 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:32:01 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:32:01 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:32:01 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:32:02 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-04 07:32:02 | INFO     | __main__             | Closing Discord connection...
+2025-11-04 07:32:02 | INFO     | __main__             | ✅ Bot shutdown complete
+2025-11-04 07:33:02 | INFO     | src.utils.logging_config | Logging configured - Level: INFO, Console: True, File: /app/logs/bot.log
+2025-11-04 07:33:02 | INFO     | __main__             | 🚀 Starting Discord Grok Bot...
+2025-11-04 07:33:02 | INFO     | __main__             | Configuration: Max context messages: 50, Reply context range: 10, Response timeout: 30s
+2025-11-04 07:33:02 | WARNING  | discord.client       | PyNaCl is not installed, voice will NOT be supported
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | CONFIGURING GEMINI API
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | API Key length: 39 characters
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | API Key (first 8 chars): AIzaSyAr...
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | Model name: gemini-flash-latest
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | Generation config: temperature=0.7, top_p=0.8, top_k=40, max_output_tokens=65536
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | Safety settings: All filters set to BLOCK_NONE
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | Gemini API configured successfully
+2025-11-04 07:33:02 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:33:02 | INFO     | src.bot.discord_bot  | DiscordBot initialized with configuration
+2025-11-04 07:33:02 | INFO     | __main__             | ✅ Bot instance created successfully
+2025-11-04 07:33:02 | INFO     | __main__             | 🔌 Connecting to Discord...
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | Synced 6 slash command(s)
+2025-11-04 07:33:05 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-04 07:33:08 | INFO     | src.bot.discord_bot  | Bot mentioned by dankmrpanda in #grok-test [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435169985449295943] [user_id=607323416395120640, guild_id=1222771487753113650, channel_id=1435167927513907241, message_id=1435169985449295943]
+2025-11-04 07:33:08 | INFO     | src.services.context_collector | Starting Retrieving 50 messages from channel [channel_id=1435167927513907241] [channel_id=1435167927513907241]
+2025-11-04 07:33:08 | INFO     | src.services.context_collector | Completed Retrieving 50 messages from channel [channel_id=1435167927513907241, duration=0.147s] [channel_id=1435167927513907241, duration=0.147s]
+2025-11-04 07:33:08 | INFO     | src.bot.discord_bot  | Collected 4 messages for context
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | API CALL INITIATED
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Model: gemini-flash-latest
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | API Key (last 4 chars): ...u0PY
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Google Search enabled for this request
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Input prompt length: 4995 characters
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Input prompt (first 200 chars): 
+            ### **System Prompt: The Grounded Expert**
+
+            **[CORE IDENTITY]**
+
+            You are a grounded, well-informed expert AI assistant. Your primary function is to provide users w
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Context messages provided: 4
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client |   Context[0]: Author=dank mr panda, Length=4 chars, Timestamp=2025-11-04 07:25:03.294000+00:00
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client |   Context[1]: Author=dank mr panda, Length=5 chars, Timestamp=2025-11-04 07:25:04.212000+00:00
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client |   Context[2]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:29:12.828000+00:00
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client |   Context[3]: Author=dank mr panda, Length=73 chars, Timestamp=2025-11-04 07:33:08.700000+00:00
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Making API call to model: models/gemini-flash-latest
+2025-11-04 07:33:08 | INFO     | src.services.gemini_client | Using search-enabled model: True
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | --------------------------------------------------------------------------------
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | API RESPONSE RECEIVED (Duration: 9.803s)
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Response object type: <class 'google.generativeai.types.generation_types.GenerateContentResponse'>
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Number of candidates: 1
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Finish reason: 1 (STOP)
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Safety ratings:
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client |   9: 1
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client |   8: 1
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client |   7: 1
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client |   10: 1
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Successfully generated response from Gemini API
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Output token count (estimated): 658
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Output length: 4526 characters
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Output (first 200 chars): Based on discussions within developer communities, including those frequently found on Reddit, the challenge of centering a `div` element in CSS is recognized as a fundamental and often-asked question
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | ================================================================================
+2025-11-04 07:33:18 | INFO     | gemini_client        | API call to gemini_generate_content completed [duration=9.803s] [duration=9.803s]
+2025-11-04 07:33:18 | INFO     | src.services.gemini_client | Extracted 0 grounding sources:
+2025-11-04 07:33:18 | INFO     | src.bot.discord_bot  | Successfully generated AI response
+2025-11-04 07:33:18 | INFO     | discord_bot          | Message processing completed [user_id=607323416395120640, guild_id=1222771487753113650, duration=9.826s] [user_id=607323416395120640, guild_id=1222771487753113650, duration=9.826s]
+2025-11-04 07:33:18 | INFO     | src.bot.discord_bot  | Response too long (4566 chars), splitting into multiple messages
+2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Sent message part 1/3
+2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Sent message part 2/3
+2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Sent message part 3/3
+2025-11-04 07:33:19 | INFO     | src.bot.discord_bot  | Successfully sent response in 3 parts

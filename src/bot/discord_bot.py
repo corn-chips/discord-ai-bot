@@ -378,7 +378,7 @@ class DiscordBot(discord.Client):
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
-        Check if the bot is mentioned in a Discord message.
+        Check if the bot is mentioned in a Discord message or if the message is a reply to the bot.
         
         Implements requirements 1.1, 1.2: Identify bot mentions in messages.
         
@@ -386,8 +386,16 @@ class DiscordBot(discord.Client):
             message: The Discord message to check
             
         Returns:
-            True if the bot is mentioned, False otherwise
+            True if the bot is mentioned or message is a reply to bot, False otherwise
         """
+        # Check if this is a reply to a bot message
+        if message.reference and message.reference.resolved:
+            replied_message = message.reference.resolved
+            if isinstance(replied_message, discord.Message):
+                # Check if the replied message is from the bot
+                if replied_message.author == self.user:
+                    return True
+        
         # Check if the bot user is in the message mentions
         if self.user in message.mentions:
             return True
@@ -516,7 +524,7 @@ class DiscordBot(discord.Client):
                             guild_id=message.guild.id if message.guild else None
                         )
                         
-                        await self._send_response_safely(message, api_response.content)
+                        await self._send_response_safely(message, api_response.content, api_response.grounding_sources)
                     else:
                         logger.error(f"Failed to generate response: {api_response.error_type}")
                         await self._handle_response_error(message, api_response)
@@ -568,7 +576,7 @@ class DiscordBot(discord.Client):
             self.error_manager.log_error(error_context, "Discord HTTP error")
             await self.error_manager.send_error_response(message, error_context)
     
-    async def _send_response_safely(self, message: discord.Message, response_content: str):
+    async def _send_response_safely(self, message: discord.Message, response_content: str, grounding_sources: list = None):
         """
         Safely send a response to Discord with error handling.
         
@@ -577,6 +585,7 @@ class DiscordBot(discord.Client):
         Args:
             message: The original Discord message to reply to
             response_content: The AI-generated response content
+            grounding_sources: Optional list of grounding sources from the API
         """
         try:
             # Validate response content
@@ -587,12 +596,23 @@ class DiscordBot(discord.Client):
             
             # Check if response is too long for Discord (2000 character limit)
             if len(response_content) > 2000:
-                logger.warning(f"Response too long ({len(response_content)} chars), truncating")
-                response_content = response_content[:1997] + "..."
+                logger.info(f"Response too long ({len(response_content)} chars), splitting into multiple messages")
+                sent_message = await self._send_split_response(message, response_content)
+            else:
+                # Send the response as a reply
+                sent_message = await message.reply(response_content)
+                logger.info(f"Successfully sent response to {message.author} in #{message.channel.name}")
             
-            # Send the response as a reply
-            await message.reply(response_content)
-            logger.info(f"Successfully sent response to {message.author} in #{message.channel.name}")
+            # Send grounding sources as a separate message if available
+            if grounding_sources and len(grounding_sources) > 0:
+                await self._send_grounding_sources(sent_message, grounding_sources)
+            
+            # Check if the response indicates the bot will provide more information
+            if self._should_generate_followup(response_content):
+                logger.info("Response indicates follow-up needed, generating continuation...")
+                await self._generate_and_send_followup(message, sent_message)
+            
+            return sent_message
             
         except discord.Forbidden as e:
             logger.error(f"Permission denied sending response in channel {message.channel.id}")
@@ -647,3 +667,196 @@ class DiscordBot(discord.Client):
                 error_context, 
                 fallback_reaction="⚠️"
             )
+    
+    async def _send_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
+        """
+        Split a long response into multiple messages and send them.
+        
+        Args:
+            message: The original Discord message to reply to
+            response_content: The long response content to split
+            
+        Returns:
+            The first sent message (for reply threading)
+        """
+        # Discord limit is 2000 chars, we'll use 1900 to be safe and leave room for continuation indicators
+        max_length = 1900
+        
+        # Split by paragraphs first to avoid breaking mid-sentence
+        parts = []
+        current_part = ""
+        
+        # Split by double newlines (paragraphs) or single newlines if no paragraphs
+        paragraphs = response_content.split('\n\n')
+        if len(paragraphs) == 1:
+            paragraphs = response_content.split('\n')
+        
+        for paragraph in paragraphs:
+            # If a single paragraph is too long, split it by sentences
+            if len(paragraph) > max_length:
+                sentences = paragraph.replace('. ', '.|').replace('! ', '!|').replace('? ', '?|').split('|')
+                for sentence in sentences:
+                    if len(current_part) + len(sentence) + 2 > max_length:
+                        if current_part:
+                            parts.append(current_part.strip())
+                            current_part = sentence
+                    else:
+                        current_part += sentence + " "
+            else:
+                # Check if adding this paragraph exceeds the limit
+                if len(current_part) + len(paragraph) + 2 > max_length:
+                    if current_part:
+                        parts.append(current_part.strip())
+                        current_part = paragraph
+                else:
+                    current_part += paragraph + "\n\n"
+        
+        # Add any remaining content
+        if current_part.strip():
+            parts.append(current_part.strip())
+        
+        # Send the parts
+        first_message = None
+        last_message = message
+        
+        for idx, part in enumerate(parts):
+            # Add continuation indicator
+            if idx > 0:
+                part = f"*(continued...)*\n\n{part}"
+            if idx < len(parts) - 1:
+                part = f"{part}\n\n*(continues...)*"
+            
+            # Reply to the last message to create a thread
+            sent = await last_message.reply(part)
+            
+            if idx == 0:
+                first_message = sent
+            last_message = sent
+            
+            logger.info(f"Sent message part {idx + 1}/{len(parts)}")
+        
+        logger.info(f"Successfully sent response in {len(parts)} parts")
+        return first_message
+    
+    async def _send_grounding_sources(self, reply_message: discord.Message, grounding_sources: list):
+        """
+        Send grounding sources as a separate reply message.
+        
+        Args:
+            reply_message: The bot's response message to reply to
+            grounding_sources: List of grounding source dictionaries with 'uri' and optional 'title'
+        """
+        try:
+            if not grounding_sources:
+                return
+            
+            # Format sources into a message
+            sources_text = "📚 **Sources:**\n"
+            for idx, source in enumerate(grounding_sources[:10], 1):  # Limit to 10 sources
+                uri = source.get('uri', '')
+                title = source.get('title')
+                
+                if title:
+                    sources_text += f"{idx}. [{title}]({uri})\n"
+                else:
+                    sources_text += f"{idx}. {uri}\n"
+            
+            # Check length and truncate if needed
+            if len(sources_text) > 2000:
+                sources_text = sources_text[:1997] + "..."
+            
+            # Reply to the bot's own message with sources
+            await reply_message.reply(sources_text)
+            logger.info(f"Successfully sent {len(grounding_sources)} grounding sources")
+            
+        except discord.Forbidden:
+            logger.warning("No permission to send grounding sources message")
+        except discord.HTTPException as e:
+            logger.error(f"Failed to send grounding sources: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error sending grounding sources: {e}", exc_info=True)
+    
+    def _should_generate_followup(self, response: str) -> bool:
+        """
+        Determine if a response indicates the bot will provide follow-up information.
+        
+        Args:
+            response: The bot's initial response content
+            
+        Returns:
+            True if a follow-up should be generated
+        """
+        response_lower = response.lower()
+        
+        # Keywords/phrases that indicate the bot is going to do something and report back
+        followup_indicators = [
+            "give me a sec",
+            "let me check",
+            "let me search",
+            "let me look",
+            "one moment",
+            "just a moment",
+            "hold on",
+            "searching for",
+            "looking up",
+            "checking on",
+            "dig up",
+            "find out",
+            "i'll search",
+            "i'll check",
+            "i'll look",
+            "i will search",
+            "i will check",
+            "i will look"
+        ]
+        
+        return any(indicator in response_lower for indicator in followup_indicators)
+    
+    async def _generate_and_send_followup(self, original_message: discord.Message, initial_response: discord.Message):
+        """
+        Generate and send a follow-up response when the initial response indicated more info would come.
+        
+        Args:
+            original_message: The user's original message
+            initial_response: The bot's initial response message
+        """
+        try:
+            # Wait a moment to simulate "working on it"
+            await asyncio.sleep(2)
+            
+            # Show typing indicator
+            async with original_message.channel.typing():
+                # Extract the original user prompt
+                user_prompt = self._extract_user_prompt(original_message)
+                
+                # Create a modified prompt that asks for the actual information
+                followup_prompt = f"Now provide the actual detailed information for: {user_prompt}"
+                
+                # Collect fresh context including the initial response
+                try:
+                    context = await self.context_collector.get_channel_context(original_message.channel)
+                except Exception as e:
+                    logger.error(f"Failed to collect context for follow-up: {e}")
+                    context = []
+                
+                # Generate the follow-up response
+                api_response = await asyncio.wait_for(
+                    self.gemini_client.generate_response(followup_prompt, context),
+                    timeout=self.config.response_timeout + 5
+                )
+                
+                if api_response.success and api_response.content:
+                    # Send as a reply to the initial response
+                    if len(api_response.content) > 2000:
+                        api_response.content = api_response.content[:1997] + "..."
+                    
+                    await initial_response.reply(api_response.content)
+                    logger.info("Successfully sent follow-up response")
+                else:
+                    logger.error(f"Failed to generate follow-up: {api_response.error_type}")
+                    # Don't send an error for follow-up failures, just log them
+                    
+        except asyncio.TimeoutError:
+            logger.error("Follow-up response generation timed out")
+        except Exception as e:
+            logger.error(f"Error generating follow-up response: {e}", exc_info=True)

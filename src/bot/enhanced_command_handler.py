@@ -104,34 +104,48 @@ class EnhancedCommandHandler:
             re.IGNORECASE
         )
     
-    async def _check_image_generation_intent(self, message_content: str) -> bool:
+    async def _check_image_generation_intent_and_complexity(self, message_content: str) -> Tuple[bool, str]:
         """
-        Use Gemini Flash Lite to determine if the user is requesting image generation.
+        Use Gemini 2.0 Flash Lite to determine if the user is requesting image generation
+        and what model complexity level is needed.
         
         Args:
             message_content: The message content to analyze
             
         Returns:
-            True if the user wants image generation, False otherwise
+            Tuple of (is_image_generation, complexity_level)
+            - is_image_generation: True if the user wants image generation, False otherwise
+            - complexity_level: "low", "medium", or "high" for model selection
         """
         try:
-            # Create a simple prompt for Gemini to classify the intent
-            classification_prompt = f"""Analyze this user message and determine if they are requesting image generation or creation.
+            # Create a prompt for Gemini to classify both intent and complexity
+            classification_prompt = f"""Analyze this user message and determine two things:
+1. Is the user requesting image generation or creation?
+2. What level of AI model complexity is needed for this request?
 
 User message: "{message_content}"
 
-Respond with ONLY one word:
-- "yes" if the user is asking to generate, create, make, draw, or produce an image/picture
-- "no" if the user is NOT asking for image generation
+Respond with EXACTLY two lines:
+Line 1: "yes" if the user is asking to generate, create, make, draw, or produce an image/picture, OR "no" if they are NOT asking for image generation
+Line 2: The complexity level needed:
+- "low" for simple questions, basic information, quick facts, or straightforward requests (use gemini-2.5-flash without thinking)
+- "medium" for moderate complexity requiring reasoning, analysis, or detailed explanations (use gemini-2.5-flash with extended thinking)
+- "high" for complex tasks requiring deep analysis, creative writing, coding, or advanced reasoning (use gemini-2.5-pro)
 
-Your response:"""
+Examples:
+User: "What's 2+2?" -> no, low
+User: "Create an image of a sunset" -> yes, low
+User: "Explain quantum mechanics" -> no, medium
+User: "Write a complex algorithm" -> no, high
+
+Your response (two lines only):"""
 
             # Create a simple model instance for classification
             model = genai.GenerativeModel(
                 model_name="gemini-2.0-flash-lite",
                 generation_config={
                     "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_output_tokens": 10,  # Only need one word
+                    "max_output_tokens": 20,  # Need two words
                 }
             )
             
@@ -143,19 +157,31 @@ Your response:"""
             
             # Extract and normalize the response
             result = response.text.strip().lower()
+            lines = [line.strip() for line in result.split('\n') if line.strip()]
             
-            # Check if response is "yes"
-            is_generation = result == "yes"
+            # Parse the response
+            is_generation = False
+            complexity_level = "medium"  # Default to medium
             
-            logger.info(f"Image generation intent check: '{message_content[:50]}...' -> {is_generation} (raw: '{result}')")
-            return is_generation
+            if len(lines) >= 1:
+                is_generation = lines[0] == "yes"
+            
+            if len(lines) >= 2:
+                # Validate complexity level
+                if lines[1] in ["low", "medium", "high"]:
+                    complexity_level = lines[1]
+                else:
+                    logger.warning(f"Invalid complexity level '{lines[1]}', defaulting to 'medium'")
+            
+            logger.info(f"Intent & Complexity check: '{message_content[:50]}...' -> image_gen={is_generation}, complexity={complexity_level} (raw: '{result}')")
+            return is_generation, complexity_level
             
         except Exception as e:
-            logger.error(f"Error checking image generation intent: {e}", exc_info=True)
-            # On error, default to False (not image generation)
-            return False
+            logger.error(f"Error checking image generation intent and complexity: {e}", exc_info=True)
+            # On error, default to False (not image generation) and medium complexity
+            return False, "medium"
     
-    async def handle_message(self, message: discord.Message) -> bool:
+    async def handle_message(self, message: discord.Message) -> Tuple[bool, str]:
         """
         Handle a Discord message and determine if it contains commands.
         
@@ -163,7 +189,9 @@ Your response:"""
             message: The Discord message to process
             
         Returns:
-            True if the message was handled as a command, False otherwise
+            Tuple of (handled, complexity_level)
+            - handled: True if the message was handled as a command, False otherwise
+            - complexity_level: "low", "medium", or "high" for model selection
         """
         try:
             # Check for image attachments
@@ -172,37 +200,37 @@ Your response:"""
                 for attachment in message.attachments
             )
             
-            # Parse the message for command intent
-            intent, confidence = await self.parse_natural_language_command(message.content)
+            # Parse the message for command intent and complexity
+            intent, confidence, complexity_level = await self.parse_natural_language_command(message.content)
             
             # CONTEXT-AWARE LOGIC: If there's an image attached and ANY kind of action keyword,
             # treat it as an edit request (not generation)
             if has_images and intent in [CommandIntent.IMAGE_GENERATE, CommandIntent.IMAGE_EDIT]:
                 # Image is present, so this should be an edit operation
                 await self.handle_image_edit_command(message)
-                return True
+                return True, complexity_level
             
             # Handle image generation commands (no image attached)
             if intent == CommandIntent.IMAGE_GENERATE and not has_images:
                 await self.handle_image_generation_command(message)
-                return True
+                return True, complexity_level
             
             # Handle image edit commands (with image attached) - redundant now but kept for clarity
             elif intent == CommandIntent.IMAGE_EDIT and has_images:
                 await self.handle_image_edit_command(message)
-                return True
+                return True, complexity_level
             
             # Handle help requests
             elif intent == CommandIntent.HELP:
                 await self.handle_contextual_help(message)
-                return True
+                return True, complexity_level
             
             # If image edit intent but no images, provide guidance
             elif intent == CommandIntent.IMAGE_EDIT and not has_images:
                 await self._suggest_image_upload(message)
-                return True
+                return True, complexity_level
             
-            return False
+            return False, complexity_level
             
         except Exception as e:
             logger.error(f"Error handling message in enhanced command handler: {e}", exc_info=True)
@@ -210,37 +238,39 @@ Your response:"""
                 e, "I had trouble processing your command. Please try again!"
             )
             await self.error_manager.send_error_response(message, error_context)
-            return True
+            return True, "medium"  # Default to medium on error
     
-    async def parse_natural_language_command(self, message_content: str) -> Tuple[CommandIntent, float]:
+    async def parse_natural_language_command(self, message_content: str) -> Tuple[CommandIntent, float, str]:
         """
-        Parse natural language message to determine command intent.
+        Parse natural language message to determine command intent and complexity.
         
-        Uses Gemini Flash Lite to detect image generation requests instead of keyword matching.
+        Uses Gemini 2.0 Flash Lite to detect image generation requests and determine
+        the appropriate model complexity level.
         
         Args:
             message_content: The message content to parse
             
         Returns:
-            Tuple of (CommandIntent, confidence_score)
+            Tuple of (CommandIntent, confidence_score, complexity_level)
+            - complexity_level: "low", "medium", or "high"
         """
         content_lower = message_content.lower().strip()
         
         # Check for help intent
         if self.help_pattern.search(content_lower):
-            return CommandIntent.HELP, 0.9
+            return CommandIntent.HELP, 0.9, "low"
         
-        # Use Gemini to check for image generation intent
-        is_generation = await self._check_image_generation_intent(message_content)
+        # Use Gemini to check for image generation intent and complexity
+        is_generation, complexity_level = await self._check_image_generation_intent_and_complexity(message_content)
         if is_generation:
-            return CommandIntent.IMAGE_GENERATE, 0.95
+            return CommandIntent.IMAGE_GENERATE, 0.95, complexity_level
         
         # Check for image edit intent
         edit_matches = self.edit_pattern.findall(content_lower)
         if edit_matches:
             # Calculate confidence based on number of matches and message length
             confidence = min(0.9, len(edit_matches) * 0.3 + 0.4)
-            return CommandIntent.IMAGE_EDIT, confidence
+            return CommandIntent.IMAGE_EDIT, confidence, complexity_level
         
         # Check for specific image editing phrases
         image_edit_phrases = [
@@ -250,9 +280,9 @@ Your response:"""
         
         for phrase in image_edit_phrases:
             if phrase in content_lower:
-                return CommandIntent.IMAGE_EDIT, 0.8
+                return CommandIntent.IMAGE_EDIT, 0.8, complexity_level
         
-        return CommandIntent.UNKNOWN, 0.0
+        return CommandIntent.UNKNOWN, 0.0, complexity_level
     
     def detect_edit_type(self, instruction: str) -> EditType:
         """

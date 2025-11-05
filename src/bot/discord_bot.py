@@ -284,10 +284,14 @@ class DiscordBot(discord.Client):
         try:
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:
-                handled = await self.enhanced_command_handler.handle_message(message)
+                handled, complexity_level = await self.enhanced_command_handler.handle_message(message)
                 if handled:
                     context_logger.info("Message handled by enhanced command handler")
                     return
+                
+                # If not fully handled, use the complexity level to set the model
+                context_logger.info(f"Setting model based on complexity level: {complexity_level}")
+                self.gemini_client.set_model_by_complexity(complexity_level)
             
             # Fallback: Check if this is an image edit request using legacy method
             if self.image_processing_service and self._detect_image_edit_request(message):
@@ -1329,10 +1333,35 @@ class DiscordBot(discord.Client):
                             logger.info(f"    • {f['name']}")
                     logger.info("=" * 80)
                     
+                    # Get estimated response time and show it to user
+                    estimated_time = self.gemini_client.get_estimated_response_time()
+                    model_name = self.gemini_client.get_current_model()
+                    
+                    # Send status message for longer processing times
+                    status_message = None
+                    if self.gemini_client.get_timeout_for_current_model() > 30:
+                        try:
+                            status_message = await message.reply(
+                                f"⏳ Processing your request with {model_name}...\n"
+                                f"*Estimated time: {estimated_time}*"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send status message: {e}")
+                    
+                    # Use dynamic timeout based on model complexity
+                    api_timeout = self.gemini_client.get_timeout_for_current_model() + 10  # Add buffer
+                    
                     api_response = await asyncio.wait_for(
                         self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None),
-                        timeout=self.config.response_timeout + 5  # Add buffer to client timeout
+                        timeout=api_timeout
                     )
+                    
+                    # Delete status message if it was sent
+                    if status_message:
+                        try:
+                            await status_message.delete()
+                        except Exception:
+                            pass  # Ignore deletion errors
                     
                     duration = time.time() - start_time
                     
@@ -1363,11 +1392,19 @@ class DiscordBot(discord.Client):
                         await self._handle_response_error(message, api_response)
                         
                 except asyncio.TimeoutError:
-                    logger.error(f"Response generation timed out for message {message.id} after {self.config.response_timeout}s")
+                    # Delete status message if it exists
+                    if status_message:
+                        try:
+                            await status_message.delete()
+                        except Exception:
+                            pass
+                    
+                    timeout_used = self.gemini_client.get_timeout_for_current_model()
+                    logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
                     timeout_response = APIResponse(
                         success=False,
                         error_type="timeout",
-                        content=f"Response generation timed out after {self.config.response_timeout} seconds"
+                        content=f"Response generation timed out after {timeout_used} seconds. The model may be overloaded. Please try again or use a simpler question."
                     )
                     await self._handle_response_error(message, timeout_response)
                     

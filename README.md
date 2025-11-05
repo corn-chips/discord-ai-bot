@@ -160,13 +160,13 @@ docker-compose up -d
 docker system prune -a
 ```
 
-**Advanced Deployment:**
+**Quick Build Script:**
 ```bash
 # Linux/Mac
-./scripts/deploy.sh docker
+./scripts/docker-build.sh
 
 # Windows
-scripts\deploy.bat docker
+scripts\docker-build.bat
 ```
 
 **Docker Benefits:**
@@ -246,16 +246,7 @@ The bot will start and connect to Discord. Press `Ctrl+C` to stop the bot gracef
 
 #### Using Docker (Recommended)
 
-Quick deployment:
-```bash
-# Linux/Mac
-./scripts/deploy.sh docker
-
-# Windows
-scripts\deploy.bat docker
-```
-
-Manual Docker deployment:
+Quick build and start:
 ```bash
 # Build the image
 docker-compose build --no-cache
@@ -263,14 +254,6 @@ docker-compose build --no-cache
 # Run the bot
 docker-compose up -d
 ```
-
-#### Using systemd (Linux)
-
-```bash
-sudo ./scripts/deploy.sh systemd
-```
-
-This creates and enables a systemd service for automatic startup.
 
 #### Environment Variables for Production
 
@@ -450,12 +433,6 @@ docker-compose up -d
 
 ### Health Checks
 ```bash
-# Linux/Mac
-./scripts/deploy.sh health
-
-# Windows
-scripts\deploy.bat health
-
 # Docker
 docker-compose exec discord-grok-bot python scripts/health_check.py
 
@@ -464,16 +441,12 @@ python scripts/health_check.py
 ```
 
 ### Monitoring
-```bash
-# Linux/Mac
-./scripts/deploy.sh monitor
+Use the bot's built-in slash commands:
+- `/api-usage` - Real-time API usage and rate limits
+- `/usage-report` - Downloadable usage report (CSV + Markdown)
+- `/stats` - Bot statistics and performance metrics
 
-# Windows
-scripts\deploy.bat monitor
-
-# Or directly with options
-python scripts/monitor.py --hours 24 --json
-```
+See [SLASH_COMMANDS.md](SLASH_COMMANDS.md) for details.
 
 ### Docker Health Checks
 When running with Docker, the container includes automatic health checks:

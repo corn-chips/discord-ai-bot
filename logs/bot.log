@@ -5657,3 +5657,42 @@ RuntimeError: Image editing service is currently unavailable
 2025-11-04 23:31:54 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /api-usage - Display API usage statistics and rate limit information
 2025-11-04 23:31:54 | INFO     | src.bot.discord_bot  |   ✓ Command synced: /usage-report - Generate a downloadable usage report (CSV + Markdown)
 2025-11-04 23:31:54 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-05 00:05:50 | WARNING  | src.bot.discord_bot  | 🔌 Bot disconnected from Discord
+2025-11-05 00:05:50 | WARNING  | src.bot.discord_bot  | 🔌 Bot disconnected from Discord
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | 🤖 grok#7239 has connected to Discord!
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | Bot ID: 1142103557747785758
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | Connected to 1 guild(s):
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • tuyitgiuyguyig (ID: 1222771487753113650) - 14 members
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | Total users across all guilds: 14
+2025-11-05 00:05:58 | WARNING  | src.services.image_processing_service | Image processing service is already running
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | ✅ Image processing service started
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | 🔧 Service initialization status:
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Context Collector: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Gemini Client: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Message Splitter: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • User Experience Service: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Help System: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Image Processing: ✅ Active
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  |   • Enhanced Commands: ✅ Active
+2025-11-05 00:05:58 | ERROR    | src.bot.discord_bot  | Failed to sync slash commands: Command 'ping' already registered.
+Traceback (most recent call last):
+  File "/app/src/bot/discord_bot.py", line 160, in on_ready
+    await setup_commands(self, self.config, self.gemini_client, self.performance_logger)
+  File "/app/src/bot/commands.py", line 54, in setup_commands
+    @bot.tree.command(name="ping", description="Check if the bot is responsive")
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/discord/app_commands/tree.py", line 931, in decorator
+    self.add_command(command, guild=guild, guilds=guilds)
+  File "/usr/local/lib/python3.11/site-packages/discord/app_commands/tree.py", line 407, in add_command
+    raise CommandAlreadyRegistered(name, None)
+discord.app_commands.errors.CommandAlreadyRegistered: Command 'ping' already registered.
+2025-11-05 00:05:58 | INFO     | src.bot.discord_bot  | ✅ Bot is ready and listening for mentions!
+2025-11-05 00:33:45 | INFO     | __main__             | Received signal 15, initiating graceful shutdown...
+2025-11-05 00:33:45 | INFO     | __main__             | Closing Discord connection...
+2025-11-05 00:33:45 | INFO     | src.bot.discord_bot  | 🛑 Bot shutting down, cleaning up resources...
+2025-11-05 00:33:45 | INFO     | src.services.image_processing_service | Stopping image processing service
+2025-11-05 00:33:45 | INFO     | src.services.image_processing_service | Image processing service stopped
+2025-11-05 00:33:45 | INFO     | src.bot.discord_bot  | ✅ Image processing service stopped
+2025-11-05 00:33:45 | INFO     | src.bot.discord_bot  | ✅ User experience service cleaned up
+2025-11-05 00:33:45 | INFO     | src.bot.discord_bot  | ✅ Bot shutdown complete
+2025-11-05 00:33:45 | INFO     | __main__             | ✅ Bot shutdown complete

@@ -36,11 +36,13 @@ class TestEnhancedCommandHandler(unittest.TestCase):
         # Mock services
         self.mock_image_service = MagicMock(spec=ImageProcessingService)
         self.mock_error_manager = MagicMock(spec=ErrorManager)
+        self.mock_gemini_client = MagicMock()
         
         # Create handler instance
         self.handler = EnhancedCommandHandler(
             image_processing_service=self.mock_image_service,
-            error_manager=self.mock_error_manager
+            error_manager=self.mock_error_manager,
+            gemini_client=self.mock_gemini_client
         )
         
         # Mock Discord objects
@@ -78,11 +80,16 @@ class TestEnhancedCommandHandler(unittest.TestCase):
             ("delete the person in red", CommandIntent.IMAGE_EDIT),
         ]
         
-        for message_content, expected_intent in test_cases:
-            with self.subTest(message=message_content):
-                intent, confidence = self.handler.parse_natural_language_command(message_content)
+        async def test_case(message_content, expected_intent):
+            # Mock the image generation check to return False (not image generation)
+            with patch.object(self.handler, '_check_image_generation_intent', return_value=False):
+                intent, confidence = await self.handler.parse_natural_language_command(message_content)
                 self.assertEqual(intent, expected_intent)
                 self.assertGreater(confidence, 0.0)
+        
+        for message_content, expected_intent in test_cases:
+            with self.subTest(message=message_content):
+                run_async_test(test_case(message_content, expected_intent))
 
     def test_parse_natural_language_command_help(self):
         """Test parsing natural language for help commands."""
@@ -94,11 +101,16 @@ class TestEnhancedCommandHandler(unittest.TestCase):
             ("usage guide please", CommandIntent.HELP),
         ]
         
-        for message_content, expected_intent in test_cases:
-            with self.subTest(message=message_content):
-                intent, confidence = self.handler.parse_natural_language_command(message_content)
+        async def test_case(message_content, expected_intent):
+            # Mock the image generation check to return False
+            with patch.object(self.handler, '_check_image_generation_intent', return_value=False):
+                intent, confidence = await self.handler.parse_natural_language_command(message_content)
                 self.assertEqual(intent, expected_intent)
                 self.assertGreater(confidence, 0.0)
+        
+        for message_content, expected_intent in test_cases:
+            with self.subTest(message=message_content):
+                run_async_test(test_case(message_content, expected_intent))
 
     def test_parse_natural_language_command_unknown(self):
         """Test parsing natural language for unknown commands."""
@@ -109,11 +121,36 @@ class TestEnhancedCommandHandler(unittest.TestCase):
             "random conversation",
         ]
         
-        for message_content in test_cases:
-            with self.subTest(message=message_content):
-                intent, confidence = self.handler.parse_natural_language_command(message_content)
+        async def test_case(message_content):
+            # Mock the image generation check to return False
+            with patch.object(self.handler, '_check_image_generation_intent', return_value=False):
+                intent, confidence = await self.handler.parse_natural_language_command(message_content)
                 self.assertEqual(intent, CommandIntent.UNKNOWN)
                 self.assertEqual(confidence, 0.0)
+        
+        for message_content in test_cases:
+            with self.subTest(message=message_content):
+                run_async_test(test_case(message_content))
+
+    def test_parse_natural_language_command_image_generation(self):
+        """Test parsing natural language for image generation commands."""
+        test_cases = [
+            "generate an image of a cat",
+            "create a picture of a sunset",
+            "make me an image of a robot",
+            "draw a picture of mountains",
+        ]
+        
+        async def test_case(message_content):
+            # Mock the image generation check to return True
+            with patch.object(self.handler, '_check_image_generation_intent', return_value=True):
+                intent, confidence = await self.handler.parse_natural_language_command(message_content)
+                self.assertEqual(intent, CommandIntent.IMAGE_GENERATE)
+                self.assertGreater(confidence, 0.0)
+        
+        for message_content in test_cases:
+            with self.subTest(message=message_content):
+                run_async_test(test_case(message_content))
 
     def test_detect_edit_type_object_removal(self):
         """Test detection of object removal edit type."""

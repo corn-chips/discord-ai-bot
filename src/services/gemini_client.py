@@ -38,7 +38,7 @@ class GeminiClient:
             config: Bot configuration containing API key and settings
         """
         self.config = config
-        self.error_manager = ErrorManager()
+        self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("gemini_client")
         self._model = None
         self._model_with_search = None
@@ -214,7 +214,8 @@ class GeminiClient:
         
         valid_models = [
             "gemini-2.5-flash",
-            "gemini-2.5-flash-lite", 
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
             "gemini-2.0-flash-exp",
             "gemini-2.0-flash-lite",
             "gemini-flash-latest",
@@ -271,6 +272,95 @@ class GeminiClient:
             self._current_model_name = old_model
             logger.info("=" * 80)
             return False
+    
+    def get_timeout_for_current_model(self) -> int:
+        """
+        Get the appropriate timeout duration based on current model and mode.
+        
+        Returns:
+            Timeout in seconds
+        """
+        # Pro model or thinking mode requires much longer timeout
+        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+            return 120  # 2 minutes for complex models
+        else:
+            return 30  # 30 seconds for standard models
+    
+    def get_estimated_response_time(self) -> str:
+        """
+        Get a user-friendly estimated response time for the current model.
+        
+        Returns:
+            Human-readable time estimate
+        """
+        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+            return "30-60 seconds (using advanced model with extended thinking)"
+        else:
+            return "5-15 seconds"
+    
+    def set_model_by_complexity(self, complexity_level: str) -> bool:
+        """
+        Select and switch to the appropriate model based on complexity level.
+        
+        Args:
+            complexity_level: "low", "medium", or "high"
+            - low: Use gemini-2.5-flash without thinking mode (fast, simple tasks)
+            - medium: Use gemini-2.5-flash with thinking mode (moderate complexity)
+            - high: Use gemini-2.5-pro (complex tasks requiring deep reasoning)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        logger.info(f"Setting model based on complexity level: {complexity_level}")
+        
+        if complexity_level == "low":
+            # Use flash without thinking
+            self.set_prompt_mode("short")
+            return self.set_model("gemini-2.5-flash")
+        elif complexity_level == "medium":
+            # Use flash with thinking
+            self.set_prompt_mode("thinking")
+            return self.set_model("gemini-2.5-flash")
+        elif complexity_level == "high":
+            # Use pro model
+            self.set_prompt_mode("short")  # Pro doesn't need thinking mode
+            # Note: gemini-2.5-pro may not be available in the model list yet
+            # If it fails, we'll fall back to flash with thinking
+            success = self.set_model("gemini-2.5-pro")
+            if not success:
+                logger.warning("gemini-2.5-pro not available, falling back to gemini-2.5-flash with thinking")
+                self.set_prompt_mode("thinking")
+                return self.set_model("gemini-2.5-flash")
+            return success
+        else:
+            logger.error(f"Invalid complexity level: {complexity_level}. Must be 'low', 'medium', or 'high'")
+            return False
+    
+    def _get_model_display_name(self) -> str:
+        """
+        Get a user-friendly display name for the current model and mode.
+        
+        Returns:
+            Display name string (e.g., "Gemini 2.5 Flash", "Gemini 2.5 Flash + Thinking")
+        """
+        # Map model names to display names
+        model_display_names = {
+            "gemini-2.5-flash": "Gemini 2.5 Flash",
+            "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+            "gemini-2.5-pro": "Gemini 2.5 Pro",
+            "gemini-2.0-flash-exp": "Gemini 2.0 Flash Experimental",
+            "gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite",
+            "gemini-flash-latest": "Gemini Flash Latest",
+            "gemini-flash-lite-latest": "Gemini Flash Lite Latest"
+        }
+        
+        display_name = model_display_names.get(self._current_model_name, self._current_model_name)
+        
+        # Add thinking mode indicator if enabled
+        if self._prompt_mode == "thinking":
+            display_name += " + Extended Thinking"
+        
+        return display_name
     
     def _should_use_search(self, prompt: str) -> bool:
         """
@@ -352,6 +442,10 @@ class GeminiClient:
         else:
             logger.info("No context messages provided")
         
+        # Get dynamic timeout based on current model
+        timeout_duration = self.get_timeout_for_current_model()
+        logger.info(f"Using timeout: {timeout_duration}s for model {self._current_model_name} (mode: {self._prompt_mode})")
+        
         for attempt in range(self.config.max_retries + 1):
             try:
                 logger.debug(f"Generating response (attempt {attempt + 1}/{self.config.max_retries + 1})")
@@ -362,7 +456,7 @@ class GeminiClient:
                 
                 response = await asyncio.wait_for(
                     self._generate_response_async(content, use_search),
-                    timeout=self.config.response_timeout
+                    timeout=timeout_duration
                 )
                 
                 duration = time.time() - start_time
@@ -435,8 +529,15 @@ class GeminiClient:
                             
                             # Add grounding indicator if search was used
                             response_text = response.text.strip()
+                            
+                            # Add model information header
+                            model_info = self._get_model_display_name()
+                            model_header = f"🤖 *[Model: {model_info}]*"
+                            
                             if use_search:
-                                response_text = f"🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                                response_text = f"{model_header}\n🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                            else:
+                                response_text = f"{model_header}\n\n{response_text}"
                             
                             # Auto-revert thinking mode to short after single use
                             if self._prompt_mode == "thinking" and self._thinking_single_use:
@@ -477,8 +578,15 @@ class GeminiClient:
                             
                             # Add grounding indicator and note about truncation
                             response_text = response.text.strip()
+                            
+                            # Add model information header
+                            model_info = self._get_model_display_name()
+                            model_header = f"🤖 *[Model: {model_info}]*"
+                            
                             if use_search:
-                                response_text = f"🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                                response_text = f"{model_header}\n🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
+                            else:
+                                response_text = f"{model_header}\n\n{response_text}"
                             
                             # Add note that response was truncated
                             response_text += "\n\n*[Note: Response was very long and may have been truncated. You can ask for specific parts or a summary.]*"
@@ -575,13 +683,13 @@ class GeminiClient:
                     
             except asyncio.TimeoutError:
                 logger.warning(f"Gemini API request timed out (attempt {attempt + 1})")
-                logger.warning(f"Timeout duration: {self.config.response_timeout}s")
+                logger.warning(f"Timeout duration: {timeout_duration}s")
                 logger.info("=" * 80)
                 
                 # Log timeout performance
                 self.performance_logger.log_api_call(
                     api_name="gemini_generate_content",
-                    duration=self.config.response_timeout,
+                    duration=timeout_duration,
                     success=False,
                     error_type="timeout"
                 )
@@ -678,28 +786,18 @@ class GeminiClient:
         }
         return finish_reasons.get(finish_reason, f"UNKNOWN({finish_reason})")
     
-    def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None) -> str:
+    def _get_system_instruction(self) -> str:
         """
-        Format the user message and context into an optimal prompt for Gemini API.
+        Get the appropriate system instruction based on current model and mode.
         
-        Args:
-            user_message: The user's message/question
-            context: Optional conversation context
-            
         Returns:
-            Formatted prompt string for the Gemini API
+            System instruction string tailored to the model complexity
         """
-        logger.debug("Formatting prompt for API call")
-        logger.debug(f"User message length: {len(user_message)} characters")
-        logger.debug(f"Context messages: {len(context) if context else 0}")
-        
-        prompt_parts = []
-        
-        # Add system instruction based on the current prompt mode
-        if self._prompt_mode == "thinking":
-            # Detailed, comprehensive analysis mode (long output)
-            system_instruction = '''
-### **System Prompt: The Grounded Expert**
+        # Determine which system prompt to use based on model and thinking mode
+        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+            # HIGH COMPLEXITY: Pro model or Flash with thinking - Deep analysis and comprehensive responses
+            logger.info("Using HIGH COMPLEXITY system prompt (The Grounded Expert)")
+            return '''### **System Prompt: The Grounded Expert**
 
 **[CORE IDENTITY]**
 
@@ -735,36 +833,82 @@ You are a grounded, well-informed expert AI assistant. Your primary function is 
 
 **[IN ESSENCE]**
 
-You are an objective conduit for verified information. Your value lies in your accuracy, your sourcing, and your ability to separate established fact from reasoned analysis. You do not have personal feelings or beliefs. You have access to information, and your purpose is to convey it with clarity, depth, and integrity.
-'''
-        else:  # short mode
-            # Concise, direct response mode (short output)
-            system_instruction = '''
-### **System Prompt: The Concise Expert**
+You are an objective conduit for verified information. Your value lies in your accuracy, your sourcing, and your ability to separate established fact from reasoned analysis. You do not have personal feelings or beliefs. You have access to information, and your purpose is to convey it with clarity, depth, and integrity.'''
+        
+        elif self._current_model_name in ["gemini-2.5-flash", "gemini-flash-latest"]:
+            # LOW COMPLEXITY: Flash without thinking - Quick, concise responses
+            logger.info("Using LOW COMPLEXITY system prompt (The Quick Helper)")
+            return '''### **System Prompt: The Quick Helper**
 
 **[CORE IDENTITY]**
 
-You are a helpful AI assistant focused on providing clear, accurate, and concise responses. You communicate efficiently while maintaining accuracy and relevance.
+You are a friendly, efficient AI assistant designed for quick interactions. You provide accurate answers in a conversational and concise manner.
 
 **[CORE DIRECTIVES]**
 
-1.  **Be Concise:** Keep responses brief and to the point. Avoid unnecessary elaboration unless specifically requested.
+1.  **Be Brief:** Keep responses short and to the point. Users want quick answers.
 
-2.  **Prioritize Clarity:** Use simple, direct language. Get straight to the answer without lengthy preambles.
+2.  **Stay Natural:** Use a friendly, conversational tone. It's okay to use casual language while remaining helpful.
 
-3.  **Stay Accurate:** Provide factual information. If you're uncertain about something, acknowledge it briefly.
+3.  **Answer First:** Lead with the direct answer, then provide minimal supporting details only if necessary.
 
-4.  **Be Conversational:** Maintain a friendly, helpful tone while remaining professional.
+4.  **Use Simple Language:** Avoid jargon and technical terms unless the user's question specifically requires them.
 
-5.  **Format for Readability:** Use short paragraphs, bullet points when appropriate, and clear structure.
+5.  **Be Helpful:** If the question is simple, give a simple answer. Don't over-explain.
 
-6.  **Answer Directly:** Start with the core answer, then provide brief supporting details if needed.
+6.  **Format Smart:** Use bullet points for lists, keep paragraphs short (1-2 sentences).
 
 **[IN ESSENCE]**
 
-You provide quick, accurate, and helpful responses without unnecessary verbosity. You respect the user's time by being efficient and direct.
-'''
+You're the fast, friendly assistant for everyday questions. Quick, accurate, and approachable - like a helpful friend who knows a lot.'''
         
+        else:
+            # MEDIUM/DEFAULT: Balanced approach
+            logger.info("Using MEDIUM COMPLEXITY system prompt (The Balanced Assistant)")
+            return '''### **System Prompt: The Balanced Assistant**
+
+**[CORE IDENTITY]**
+
+You are a helpful AI assistant that balances depth with efficiency. You provide accurate, well-structured responses that are thorough without being overwhelming.
+
+**[CORE DIRECTIVES]**
+
+1.  **Be Clear and Accurate:** Provide factual information with appropriate detail. Verify important claims.
+
+2.  **Find the Right Balance:** Give enough detail to be helpful, but avoid unnecessary elaboration. Match the depth to the question's complexity.
+
+3.  **Professional yet Friendly:** Maintain a professional tone while being approachable and conversational.
+
+4.  **Structure Well:** Use headings, bullet points, and formatting to make responses easy to scan and understand.
+
+5.  **Context Matters:** Provide relevant context and explanations, but keep them focused on what the user needs to know.
+
+6.  **Be Thorough When Needed:** For complex questions, provide comprehensive answers. For simple questions, keep it concise.
+
+**[IN ESSENCE]**
+
+You adapt your response style to the question's needs - concise for simple queries, detailed for complex ones. Always clear, accurate, and helpful.'''
+    
+    def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None) -> str:
+        """
+        Format the user message and context into an optimal prompt for Gemini API.
+        
+        Args:
+            user_message: The user's message/question
+            context: Optional conversation context
+            
+        Returns:
+            Formatted prompt string for the Gemini API
+        """
+        logger.debug("Formatting prompt for API call")
+        logger.debug(f"User message length: {len(user_message)} characters")
+        logger.debug(f"Context messages: {len(context) if context else 0}")
+        
+        prompt_parts = []
+        
+        # Add system instruction based on the current model and mode
+        system_instruction = self._get_system_instruction()
+        logger.debug(f"Using system instruction for model: {self._current_model_name}, mode: {self._prompt_mode}")
         prompt_parts.append(system_instruction)
         
         # Add conversation context if provided

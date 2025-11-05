@@ -1,7 +1,0 @@
-2025-11-03 20:42:20,958 - __main__ - INFO - Starting Discord Grok Bot...
-2025-11-03 20:42:20,958 - root - ERROR - Missing required environment variables: DISCORD_BOT_TOKEN
-2025-11-03 20:42:20,959 - root - ERROR - Please check your .env file or environment configuration
-2025-11-03 20:44:16,975 - __main__ - INFO - Starting Discord Grok Bot...
-2025-11-03 20:44:16,975 - __main__ - INFO - Configuration: Max context messages: 100, Reply context range: 10, Response timeout: 30s
-2025-11-03 20:44:16,975 - __main__ - INFO - Bot initialization placeholder - implementation pending
-2025-11-03 20:44:16,975 - __main__ - INFO - Discord Grok Bot setup complete

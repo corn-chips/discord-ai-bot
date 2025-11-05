@@ -1,13 +1,30 @@
 # Git
 .git
 .gitignore
+.gitattributes
 
 # Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 env
 pip-log.txt
 pip-delete-this-directory.txt
@@ -18,8 +35,8 @@ pip-delete-this-directory.txt
 nosetests.xml
 coverage.xml
 *.cover
+*.py,cover
 *.log
-.git
 .mypy_cache
 .pytest_cache
 .hypothesis
@@ -28,6 +45,9 @@ coverage.xml
 venv/
 env/
 ENV/
+.venv/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -46,20 +66,55 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-.env
 .env.local
 .env.*.local
 logs/
-*.log
+temp/
+tmp/
+cache/
 
 # Documentation
 README.md
 docs/
 *.md
+SLASH_COMMANDS.md
+PDF_SUPPORT.md
+FILE_UPLOAD_FEATURE.md
+FILE_UPLOAD_DEBUGGING.md
+IMAGE_GENERATION.md
+NANO_BANANA_FIX.md
+DOCKER.md
 
-# Tests
+# Tests (exclude from production builds)
 tests/
-.pytest_cache/
+test_*.py
+*_test.py
 
-# Kiro specs
+# Kiro development files
 .kiro/
+
+# Docker files (don't copy into container)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Development scripts
+scripts/deploy.sh
+scripts/deploy.bat
+
+# Large files that shouldn't be in container
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.zip
+*.tar.gz
+*.rar
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Monitoring configs (will be mounted as volumes)
+monitoring/

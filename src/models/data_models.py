@@ -7,7 +7,8 @@ for handling message context and API responses.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from enum import Enum
+from typing import Optional, Dict, Any
 
 
 @dataclass
@@ -59,3 +60,89 @@ class APIResponse:
             raise ValueError("Failed responses must have an error_type")
         if self.retry_after is not None and self.retry_after < 0:
             raise ValueError("retry_after must be non-negative")
+
+
+class EditType(Enum):
+    """Enumeration of supported image edit types."""
+    OBJECT_REMOVAL = "object_removal"
+    BACKGROUND_REPLACEMENT = "background_replacement"
+    STYLE_TRANSFER = "style_transfer"
+    COLOR_ADJUSTMENT = "color_adjustment"
+    GENERAL_EDIT = "general_edit"
+
+
+@dataclass
+class ImageEditRequest:
+    """
+    Represents a request to edit an image using AI.
+    
+    Contains all necessary information for processing an image edit request,
+    including the image data, edit instructions, and metadata.
+    """
+    user_id: str
+    image_data: bytes
+    instruction: str
+    edit_type: EditType
+    timestamp: datetime
+    channel_id: str
+    original_filename: Optional[str] = None
+    
+    def __post_init__(self):
+        """Validate the image edit request after initialization."""
+        if not self.user_id:
+            raise ValueError("User ID cannot be empty")
+        if not self.image_data:
+            raise ValueError("Image data cannot be empty")
+        if not self.instruction.strip():
+            raise ValueError("Edit instruction cannot be empty")
+        if not self.channel_id:
+            raise ValueError("Channel ID cannot be empty")
+
+
+@dataclass
+class ImageEditResult:
+    """
+    Represents the result of an image editing operation.
+    
+    Contains the edited image data, processing metadata, and any error information.
+    """
+    success: bool
+    edited_image: Optional[bytes] = None
+    processing_time: float = 0.0
+    error_message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """Validate the image edit result after initialization."""
+        if self.success and not self.edited_image:
+            raise ValueError("Successful results must have edited image data")
+        if not self.success and not self.error_message:
+            raise ValueError("Failed results must have an error message")
+        if self.processing_time < 0:
+            raise ValueError("Processing time must be non-negative")
+
+
+@dataclass
+class ValidationResult:
+    """
+    Represents the result of image validation.
+    
+    Contains validation status and any error messages or warnings.
+    """
+    is_valid: bool
+    error_message: Optional[str] = None
+    warnings: Optional[list[str]] = None
+    file_size_mb: Optional[float] = None
+    format: Optional[str] = None
+    dimensions: Optional[tuple[int, int]] = None
+    
+    def __post_init__(self):
+        """Validate the validation result after initialization."""
+        if not self.is_valid and not self.error_message:
+            raise ValueError("Invalid results must have an error message")
+        if self.file_size_mb is not None and self.file_size_mb < 0:
+            raise ValueError("File size must be non-negative")
+        if self.dimensions is not None:
+            width, height = self.dimensions
+            if width <= 0 or height <= 0:
+                raise ValueError("Image dimensions must be positive")

@@ -69,11 +69,31 @@ class StructuredFormatter(logging.Formatter):
             if hasattr(record, 'api_calls'):
                 extra_fields.append(f"api_calls={record.api_calls}")
             
+            # Add image processing context if available
+            if hasattr(record, 'image_size'):
+                extra_fields.append(f"image_size={record.image_size}")
+            if hasattr(record, 'edit_type'):
+                extra_fields.append(f"edit_type={record.edit_type}")
+            if hasattr(record, 'operation_type'):
+                extra_fields.append(f"operation={record.operation_type}")
+            
+            # Add message formatting context if available
+            if hasattr(record, 'original_length'):
+                extra_fields.append(f"original_length={record.original_length}")
+            if hasattr(record, 'split_count'):
+                extra_fields.append(f"split_count={record.split_count}")
+            if hasattr(record, 'markdown_blocks'):
+                extra_fields.append(f"markdown_blocks={record.markdown_blocks}")
+            
             # Add error context if available
             if hasattr(record, 'error_type'):
                 extra_fields.append(f"error_type={record.error_type}")
             if hasattr(record, 'retry_count'):
                 extra_fields.append(f"retry_count={record.retry_count}")
+            if hasattr(record, 'action'):
+                extra_fields.append(f"action={record.action}")
+            if hasattr(record, 'success'):
+                extra_fields.append(f"success={record.success}")
             
             if extra_fields:
                 record.msg = f"{record.msg} [{', '.join(extra_fields)}]"
@@ -102,7 +122,13 @@ class PerformanceLogger:
             'total_api_time': 0.0,
             'total_tokens': 0,
             'input_tokens': 0,
-            'output_tokens': 0
+            'output_tokens': 0,
+            'image_processing_count': 0,
+            'total_image_processing_time': 0.0,
+            'image_processing_failures': 0,
+            'message_splits_count': 0,
+            'total_message_split_time': 0.0,
+            'message_split_failures': 0
         }
     
     def log_api_call(
@@ -204,7 +230,158 @@ class PerformanceLogger:
         else:
             stats['avg_api_time'] = 0.0
         
+        # Calculate image processing averages
+        if stats['image_processing_count'] > 0:
+            stats['avg_image_processing_time'] = stats['total_image_processing_time'] / stats['image_processing_count']
+            stats['image_processing_success_rate'] = ((stats['image_processing_count'] - stats['image_processing_failures']) / stats['image_processing_count']) * 100
+        else:
+            stats['avg_image_processing_time'] = 0.0
+            stats['image_processing_success_rate'] = 100.0
+        
+        # Calculate message splitting averages
+        if stats['message_splits_count'] > 0:
+            stats['avg_message_split_time'] = stats['total_message_split_time'] / stats['message_splits_count']
+            stats['message_split_success_rate'] = ((stats['message_splits_count'] - stats['message_split_failures']) / stats['message_splits_count']) * 100
+        else:
+            stats['avg_message_split_time'] = 0.0
+            stats['message_split_success_rate'] = 100.0
+        
         return stats
+    
+    def log_image_processing(
+        self,
+        duration: float,
+        success: bool,
+        image_size: Optional[int] = None,
+        edit_type: Optional[str] = None,
+        user_id: Optional[int] = None,
+        error_type: Optional[str] = None
+    ) -> None:
+        """
+        Log image processing performance and outcomes.
+        
+        Args:
+            duration: Processing duration in seconds
+            success: Whether processing was successful
+            image_size: Optional size of processed image in bytes
+            edit_type: Optional type of edit performed
+            user_id: Optional user ID
+            error_type: Optional error type if processing failed
+        """
+        extra = {
+            'duration': duration,
+            'success': success,
+            'operation_type': 'image_processing'
+        }
+        
+        if image_size:
+            extra['image_size'] = image_size
+        if edit_type:
+            extra['edit_type'] = edit_type
+        if user_id:
+            extra['user_id'] = user_id
+        if error_type:
+            extra['error_type'] = error_type
+        
+        if success:
+            self.logger.info("Image processing completed", extra=extra)
+        else:
+            self.logger.warning("Image processing failed", extra=extra)
+            self._stats['image_processing_failures'] += 1
+        
+        # Update statistics
+        self._stats['image_processing_count'] += 1
+        self._stats['total_image_processing_time'] += duration
+    
+    def log_message_splitting(
+        self,
+        duration: float,
+        success: bool,
+        original_length: int,
+        split_count: int,
+        markdown_blocks: Optional[int] = None,
+        user_id: Optional[int] = None,
+        error_type: Optional[str] = None
+    ) -> None:
+        """
+        Log message splitting performance and outcomes.
+        
+        Args:
+            duration: Splitting duration in seconds
+            success: Whether splitting was successful
+            original_length: Length of original message
+            split_count: Number of message parts created
+            markdown_blocks: Optional number of markdown blocks processed
+            user_id: Optional user ID
+            error_type: Optional error type if splitting failed
+        """
+        extra = {
+            'duration': duration,
+            'success': success,
+            'original_length': original_length,
+            'split_count': split_count,
+            'operation_type': 'message_splitting'
+        }
+        
+        if markdown_blocks:
+            extra['markdown_blocks'] = markdown_blocks
+        if user_id:
+            extra['user_id'] = user_id
+        if error_type:
+            extra['error_type'] = error_type
+        
+        if success:
+            self.logger.info("Message splitting completed", extra=extra)
+        else:
+            self.logger.warning("Message splitting failed", extra=extra)
+            self._stats['message_split_failures'] += 1
+        
+        # Update statistics
+        self._stats['message_splits_count'] += 1
+        self._stats['total_message_split_time'] += duration
+    
+    def log_user_action(
+        self,
+        user_id: int,
+        action: str,
+        duration: Optional[float] = None,
+        success: bool = True,
+        guild_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        additional_context: Optional[dict] = None
+    ) -> None:
+        """
+        Log user actions for debugging and monitoring.
+        
+        Args:
+            user_id: ID of the user performing the action
+            action: Type of action performed
+            duration: Optional duration of the action
+            success: Whether the action was successful
+            guild_id: Optional guild ID where action occurred
+            channel_id: Optional channel ID where action occurred
+            additional_context: Optional additional context information
+        """
+        extra = {
+            'user_id': user_id,
+            'action': action,
+            'success': success,
+            'operation_type': 'user_action'
+        }
+        
+        if duration:
+            extra['duration'] = duration
+        if guild_id:
+            extra['guild_id'] = guild_id
+        if channel_id:
+            extra['channel_id'] = channel_id
+        if additional_context:
+            extra.update(additional_context)
+        
+        log_level = logging.INFO if success else logging.WARNING
+        message = f"User action: {action}"
+        
+        self.logger.log(log_level, message, extra=extra)
     
     def clear_cache(self) -> None:
         """Clear all cached statistics."""
@@ -216,7 +393,13 @@ class PerformanceLogger:
             'total_api_time': 0.0,
             'total_tokens': 0,
             'input_tokens': 0,
-            'output_tokens': 0
+            'output_tokens': 0,
+            'image_processing_count': 0,
+            'total_image_processing_time': 0.0,
+            'image_processing_failures': 0,
+            'message_splits_count': 0,
+            'total_message_split_time': 0.0,
+            'message_split_failures': 0
         }
         self.logger.info("Performance statistics cache cleared")
 
@@ -317,6 +500,213 @@ def get_logger_with_context(name: str, **context) -> logging.LoggerAdapter:
     """
     logger = logging.getLogger(name)
     return logging.LoggerAdapter(logger, context)
+
+
+class ImageProcessingLogger:
+    """
+    Specialized logger for image processing operations.
+    """
+    
+    def __init__(self, logger_name: str = "image_processing"):
+        """
+        Initialize the image processing logger.
+        
+        Args:
+            logger_name: Name of the logger to use
+        """
+        self.logger = logging.getLogger(logger_name)
+    
+    def log_image_validation(
+        self,
+        success: bool,
+        image_size: int,
+        image_format: str,
+        user_id: Optional[int] = None,
+        error_details: Optional[str] = None
+    ) -> None:
+        """
+        Log image validation results.
+        
+        Args:
+            success: Whether validation was successful
+            image_size: Size of the image in bytes
+            image_format: Format of the image
+            user_id: Optional user ID
+            error_details: Optional error details if validation failed
+        """
+        extra = {
+            'operation_type': 'image_validation',
+            'success': success,
+            'image_size': image_size,
+            'image_format': image_format
+        }
+        
+        if user_id:
+            extra['user_id'] = user_id
+        if error_details:
+            extra['error_details'] = error_details
+        
+        if success:
+            self.logger.info("Image validation successful", extra=extra)
+        else:
+            self.logger.warning("Image validation failed", extra=extra)
+    
+    def log_api_request(
+        self,
+        api_name: str,
+        duration: float,
+        success: bool,
+        edit_type: str,
+        image_size: int,
+        user_id: Optional[int] = None,
+        error_details: Optional[str] = None
+    ) -> None:
+        """
+        Log API requests for image processing.
+        
+        Args:
+            api_name: Name of the API (e.g., 'nano-banana')
+            duration: Request duration in seconds
+            success: Whether the request was successful
+            edit_type: Type of edit requested
+            image_size: Size of the image being processed
+            user_id: Optional user ID
+            error_details: Optional error details if request failed
+        """
+        extra = {
+            'operation_type': 'api_request',
+            'api_name': api_name,
+            'duration': duration,
+            'success': success,
+            'edit_type': edit_type,
+            'image_size': image_size
+        }
+        
+        if user_id:
+            extra['user_id'] = user_id
+        if error_details:
+            extra['error_details'] = error_details
+        
+        if success:
+            self.logger.info(f"API request to {api_name} successful", extra=extra)
+        else:
+            self.logger.error(f"API request to {api_name} failed", extra=extra)
+    
+    def log_processing_queue(
+        self,
+        queue_size: int,
+        processing_count: int,
+        user_id: Optional[int] = None
+    ) -> None:
+        """
+        Log image processing queue status.
+        
+        Args:
+            queue_size: Current size of the processing queue
+            processing_count: Number of images currently being processed
+            user_id: Optional user ID for context
+        """
+        extra = {
+            'operation_type': 'queue_status',
+            'queue_size': queue_size,
+            'processing_count': processing_count
+        }
+        
+        if user_id:
+            extra['user_id'] = user_id
+        
+        self.logger.info("Processing queue status", extra=extra)
+
+
+class MessageFormattingLogger:
+    """
+    Specialized logger for message formatting operations.
+    """
+    
+    def __init__(self, logger_name: str = "message_formatting"):
+        """
+        Initialize the message formatting logger.
+        
+        Args:
+            logger_name: Name of the logger to use
+        """
+        self.logger = logging.getLogger(logger_name)
+    
+    def log_markdown_processing(
+        self,
+        success: bool,
+        block_count: int,
+        processing_time: float,
+        user_id: Optional[int] = None,
+        error_details: Optional[str] = None
+    ) -> None:
+        """
+        Log markdown processing results.
+        
+        Args:
+            success: Whether processing was successful
+            block_count: Number of markdown blocks processed
+            processing_time: Time taken to process in seconds
+            user_id: Optional user ID
+            error_details: Optional error details if processing failed
+        """
+        extra = {
+            'operation_type': 'markdown_processing',
+            'success': success,
+            'block_count': block_count,
+            'duration': processing_time
+        }
+        
+        if user_id:
+            extra['user_id'] = user_id
+        if error_details:
+            extra['error_details'] = error_details
+        
+        if success:
+            self.logger.info("Markdown processing successful", extra=extra)
+        else:
+            self.logger.warning("Markdown processing failed", extra=extra)
+    
+    def log_message_split(
+        self,
+        success: bool,
+        original_length: int,
+        split_count: int,
+        processing_time: float,
+        preserved_formatting: bool = True,
+        user_id: Optional[int] = None,
+        error_details: Optional[str] = None
+    ) -> None:
+        """
+        Log message splitting results.
+        
+        Args:
+            success: Whether splitting was successful
+            original_length: Length of original message
+            split_count: Number of parts the message was split into
+            processing_time: Time taken to split in seconds
+            preserved_formatting: Whether formatting was preserved
+            user_id: Optional user ID
+            error_details: Optional error details if splitting failed
+        """
+        extra = {
+            'operation_type': 'message_split',
+            'success': success,
+            'original_length': original_length,
+            'split_count': split_count,
+            'duration': processing_time,
+            'preserved_formatting': preserved_formatting
+        }
+        
+        if user_id:
+            extra['user_id'] = user_id
+        if error_details:
+            extra['error_details'] = error_details
+        
+        if success:
+            self.logger.info("Message splitting successful", extra=extra)
+        else:
+            self.logger.warning("Message splitting failed", extra=extra)
 
 
 class TimingContext:

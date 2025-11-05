@@ -17,12 +17,18 @@ from PIL import Image
 import fitz  # PyMuPDF
 
 from ..config import BotConfig
-from ..models.data_models import APIResponse
+from ..models.data_models import APIResponse, ImageEditRequest, EditType
 from ..services.context_collector import ContextCollector
 from ..services.gemini_client import GeminiClient
+from ..services.message_splitter import MessageSplitter
+from ..services.image_processing_service import ImageProcessingService
+from ..services.nano_banana_client import NanoBananaClient
+from ..services.user_experience_service import UserExperienceService
+from ..services.help_system import HelpSystem
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
+from .enhanced_command_handler import EnhancedCommandHandler
 
 
 logger = logging.getLogger(__name__)
@@ -51,13 +57,48 @@ class DiscordBot(discord.Client):
         super().__init__(intents=intents)
         
         self.config = config
-        self.error_manager = ErrorManager()
+        self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("discord_bot")
+        
+        # Initialize core services
         self.context_collector = ContextCollector(
             max_context_messages=config.max_context_messages,
             reply_context_range=config.reply_context_range
         )
         self.gemini_client = GeminiClient(config)
+        self.message_splitter = MessageSplitter(
+            max_length=config.message_split_length,
+            preserve_formatting=config.preserve_code_blocks
+        )
+        
+        # Initialize UX enhancement services
+        self.user_experience_service = UserExperienceService(config)
+        self.help_system = HelpSystem(config, self.user_experience_service)
+        
+        # Initialize image processing service if configured
+        self.image_processing_service = None
+        if hasattr(config, 'nano_banana_api_key') and config.nano_banana_api_key:
+            try:
+                self.image_processing_service = ImageProcessingService(config)
+                logger.info("✅ Image processing service initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize image processing service: {e}")
+                logger.warning("Image editing features will be disabled")
+        
+        # Initialize enhanced command handler
+        self.enhanced_command_handler = None
+        if self.image_processing_service:
+            try:
+                self.enhanced_command_handler = EnhancedCommandHandler(
+                    self.image_processing_service, 
+                    self.error_manager,
+                    self.gemini_client
+                )
+                logger.info("✅ Enhanced command handler initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize enhanced command handler: {e}")
+                logger.warning("Enhanced command features will be disabled")
+        
         self.start_time = datetime.now()
         
         # Set up command tree for slash commands
@@ -87,6 +128,27 @@ class DiscordBot(discord.Client):
         
         logger.info(f"Total users across all guilds: {total_members}")
         
+        # Start image processing service if available
+        if self.image_processing_service:
+            try:
+                await self.image_processing_service.start()
+                logger.info("✅ Image processing service started")
+            except Exception as e:
+                logger.error(f"Failed to start image processing service: {e}")
+                self.image_processing_service = None
+                # Disable enhanced command handler if image service fails
+                self.enhanced_command_handler = None
+        
+        # Log service initialization status
+        logger.info("🔧 Service initialization status:")
+        logger.info(f"  • Context Collector: ✅ Active")
+        logger.info(f"  • Gemini Client: ✅ Active")
+        logger.info(f"  • Message Splitter: ✅ Active")
+        logger.info(f"  • User Experience Service: ✅ Active")
+        logger.info(f"  • Help System: ✅ Active")
+        logger.info(f"  • Image Processing: {'✅ Active' if self.image_processing_service else '❌ Disabled'}")
+        logger.info(f"  • Enhanced Commands: {'✅ Active' if self.enhanced_command_handler else '❌ Disabled'}")
+        
         # Set bot status
         activity = discord.Activity(
             type=discord.ActivityType.listening,
@@ -111,6 +173,41 @@ class DiscordBot(discord.Client):
         
         logger.info("✅ Bot is ready and listening for mentions!")
     
+    async def get_service_health_status(self) -> Dict[str, str]:
+        """
+        Get current health status of all services.
+        
+        Returns:
+            Dictionary mapping service names to their status
+        """
+        status = {}
+        
+        # Core services (always available)
+        status['discord_connection'] = "✅ Connected" if not self.is_closed() else "❌ Disconnected"
+        status['gemini_client'] = "✅ Available"
+        status['context_collector'] = "✅ Available"
+        status['message_splitter'] = "✅ Available"
+        status['user_experience'] = "✅ Available"
+        status['help_system'] = "✅ Available"
+        
+        # Optional services
+        if self.image_processing_service:
+            try:
+                # Check if image service is responsive
+                health = await self.image_processing_service.get_service_health()
+                status['image_processing'] = "✅ Available" if health else "⚠️ Degraded"
+            except Exception:
+                status['image_processing'] = "❌ Unavailable"
+        else:
+            status['image_processing'] = "⚪ Not configured"
+        
+        if self.enhanced_command_handler:
+            status['enhanced_commands'] = "✅ Available"
+        else:
+            status['enhanced_commands'] = "❌ Unavailable"
+        
+        return status
+    
     async def on_error(self, event: str, *args, **kwargs):
         """
         Global error handler for Discord events.
@@ -129,6 +226,30 @@ class DiscordBot(discord.Client):
     async def on_resumed(self):
         """Event handler called when the bot resumes connection to Discord."""
         logger.info("🔄 Bot resumed connection to Discord")
+    
+    async def close(self):
+        """Clean up resources when the bot is shutting down."""
+        logger.info("🛑 Bot shutting down, cleaning up resources...")
+        
+        # Stop image processing service
+        if self.image_processing_service:
+            try:
+                await self.image_processing_service.stop()
+                logger.info("✅ Image processing service stopped")
+            except Exception as e:
+                logger.error(f"Error stopping image processing service: {e}")
+        
+        # Clean up user experience service
+        if self.user_experience_service:
+            try:
+                await self.user_experience_service.cleanup_typing_indicators()
+                logger.info("✅ User experience service cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up user experience service: {e}")
+        
+        # Call parent close method
+        await super().close()
+        logger.info("✅ Bot shutdown complete")
     
     async def on_message(self, message: discord.Message):
         """
@@ -161,6 +282,23 @@ class DiscordBot(discord.Client):
         logger.debug(f"Message content: {message.content}")
         
         try:
+            # Try enhanced command handler first if available
+            if self.enhanced_command_handler:
+                handled, complexity_level = await self.enhanced_command_handler.handle_message(message)
+                if handled:
+                    context_logger.info("Message handled by enhanced command handler")
+                    return
+                
+                # If not fully handled, use the complexity level to set the model
+                context_logger.info(f"Setting model based on complexity level: {complexity_level}")
+                self.gemini_client.set_model_by_complexity(complexity_level)
+            
+            # Fallback: Check if this is an image edit request using legacy method
+            if self.image_processing_service and self._detect_image_edit_request(message):
+                context_logger.info("Detected image edit request (legacy method)")
+                await self._handle_image_edit_request(message)
+                return
+            
             # Extract the user's prompt by removing bot mentions
             user_prompt = self._extract_user_prompt(message)
             if not user_prompt.strip():
@@ -667,6 +805,372 @@ class DiscordBot(discord.Client):
         
         return False
     
+    def _detect_image_edit_request(self, message: discord.Message) -> bool:
+        """
+        Detect if a message contains an image edit request.
+        
+        Args:
+            message: The Discord message to analyze
+            
+        Returns:
+            True if the message appears to be an image edit request
+        """
+        # Check if message has image attachments
+        has_images = any(
+            attachment.content_type and attachment.content_type.startswith('image/')
+            for attachment in message.attachments
+        )
+        
+        # Also check replied message for images
+        if not has_images and message.reference and message.reference.resolved:
+            replied_message = message.reference.resolved
+            if isinstance(replied_message, discord.Message):
+                has_images = any(
+                    attachment.content_type and attachment.content_type.startswith('image/')
+                    for attachment in replied_message.attachments
+                )
+        
+        if not has_images:
+            return False
+        
+        # Check for image editing keywords in the message content
+        content_lower = message.content.lower()
+        
+        # Image editing keywords and phrases
+        edit_keywords = [
+            # Object removal
+            'remove', 'delete', 'erase', 'eliminate', 'take out', 'get rid of', 'clear away',
+            # Background changes
+            'change background', 'replace background', 'swap background', 'new background',
+            # Style transfer
+            'style', 'artistic', 'make it look like', 'convert to', 'transform',
+            # Color adjustments
+            'adjust color', 'change color', 'brighter', 'darker', 'more colorful', 'contrast',
+            'brightness', 'saturation', 'enhance',
+            # General editing
+            'edit', 'modify', 'alter', 'fix', 'improve', 'enhance', 'retouch'
+        ]
+        
+        # Check if any edit keywords are present
+        for keyword in edit_keywords:
+            if keyword in content_lower:
+                return True
+        
+        # Check for imperative phrases that suggest editing
+        imperative_patterns = [
+            'make this', 'make it', 'turn this', 'turn it', 'change this', 'change it',
+            'fix this', 'fix it', 'improve this', 'improve it'
+        ]
+        
+        for pattern in imperative_patterns:
+            if pattern in content_lower:
+                return True
+        
+        return False
+    
+    def _extract_edit_instruction(self, message: discord.Message) -> str:
+        """
+        Extract the edit instruction from a message.
+        
+        Args:
+            message: The Discord message containing the edit request
+            
+        Returns:
+            The extracted edit instruction text
+        """
+        # Start with the user prompt (mentions removed)
+        instruction = self._extract_user_prompt(message)
+        
+        # If the instruction is empty or very short, provide a default
+        if not instruction.strip() or len(instruction.strip()) < 5:
+            instruction = "Edit this image as requested"
+        
+        return instruction.strip()
+    
+    async def _handle_image_edit_request(self, message: discord.Message):
+        """
+        Handle an image edit request by processing it through the image processing service.
+        
+        Args:
+            message: The Discord message containing the image edit request
+        """
+        context_logger = get_logger_with_context(
+            __name__,
+            user_id=message.author.id,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=message.channel.id,
+            message_id=message.id
+        )
+        
+        try:
+            # Extract images from the message
+            images = await self._extract_images_from_message(message)
+            
+            if not images:
+                await message.reply("I don't see any images to edit! Please attach an image and try again. 🖼️")
+                return
+            
+            if len(images) > 1:
+                await message.reply("I can only edit one image at a time. Please send one image per edit request. 📸")
+                return
+            
+            # Get the first (and only) image
+            image = images[0]
+            
+            # Convert PIL Image to bytes
+            import io
+            image_bytes = io.BytesIO()
+            image.save(image_bytes, format='PNG')
+            image_data = image_bytes.getvalue()
+            
+            # Extract edit instruction
+            instruction = self._extract_edit_instruction(message)
+            
+            # Create image edit request
+            edit_request = ImageEditRequest(
+                user_id=str(message.author.id),
+                image_data=image_data,
+                instruction=instruction,
+                edit_type=EditType.GENERAL_EDIT,  # Will be auto-detected by the service
+                timestamp=datetime.now(),
+                channel_id=str(message.channel.id)
+            )
+            
+            context_logger.info(f"Processing image edit request: '{instruction}'")
+            
+            # Check service availability first
+            if not self.image_processing_service:
+                await message.reply("❌ Image editing is not available. The service is not configured.")
+                return
+            
+            # Check user rate limits
+            try:
+                rate_limit_info = await self.image_processing_service.get_user_rate_limit_info(str(message.author.id))
+                if rate_limit_info['requests_remaining'] <= 0:
+                    reset_time = rate_limit_info.get('reset_time')
+                    if reset_time:
+                        await message.reply(f"⏳ You've reached your image editing limit. Try again after {reset_time}.")
+                    else:
+                        await message.reply("⏳ You've reached your image editing limit. Please try again later.")
+                    return
+            except Exception as e:
+                context_logger.warning(f"Could not check rate limits: {e}")
+            
+            # Show typing indicator while processing
+            async with message.channel.typing():
+                # Send initial response with estimated time
+                estimated_time = 30  # Default estimate
+                try:
+                    from ..utils.image_utils import estimate_processing_time
+                    estimated_time = estimate_processing_time(image_data, EditType.GENERAL_EDIT.value)
+                except Exception:
+                    pass
+                
+                initial_response = await message.reply(
+                    f"🎨 I'm working on editing your image! This should take about {estimated_time:.0f} seconds..."
+                )
+                
+                # Add reaction to show we're processing
+                try:
+                    await message.add_reaction("🎨")
+                except Exception:
+                    pass  # Ignore reaction failures
+                
+                # Submit to image processing service
+                try:
+                    # Create progress callback
+                    last_progress_update = 0
+                    
+                    def progress_callback(job_id: str, progress: float):
+                        nonlocal last_progress_update
+                        # Only update every 20% to avoid spam
+                        progress_percent = int(progress * 100)
+                        if progress_percent >= last_progress_update + 20:
+                            last_progress_update = progress_percent
+                            # Schedule the update (can't await in callback)
+                            asyncio.create_task(self._update_progress_message(
+                                initial_response, progress_percent
+                            ))
+                    
+                    job_id = await self.image_processing_service.process_image_edit(
+                        edit_request, progress_callback
+                    )
+                    context_logger.info(f"Image edit job submitted: {job_id}")
+                    
+                    # Wait for completion (with timeout)
+                    max_wait_time = max(120, estimated_time * 2)  # At least 2 minutes or 2x estimated time
+                    check_interval = 3   # Check every 3 seconds
+                    elapsed_time = 0
+                    last_status_update = 0
+                    
+                    while elapsed_time < max_wait_time:
+                        job_status = await self.image_processing_service.get_job_status(job_id)
+                        
+                        if not job_status:
+                            await initial_response.edit(content="❌ Image editing job was lost. Please try again.")
+                            await self._add_error_reaction(message)
+                            return
+                        
+                        if job_status.status.value == "completed":
+                            if job_status.result and job_status.result.success:
+                                # Send the edited image
+                                edited_image_file = discord.File(
+                                    io.BytesIO(job_status.result.edited_image),
+                                    filename=f"edited_{message.author.id}_{int(datetime.now().timestamp())}.png"
+                                )
+                                
+                                processing_time = job_status.result.processing_time
+                                await initial_response.edit(
+                                    content=f"✅ Image editing complete! (Processed in {processing_time:.1f}s)"
+                                )
+                                
+                                # Send the edited image as a reply
+                                await message.reply(
+                                    content=f"Here's your edited image! 🎨",
+                                    file=edited_image_file
+                                )
+                                
+                                # Add success reaction
+                                try:
+                                    await message.add_reaction("✅")
+                                except Exception:
+                                    pass
+                                
+                                context_logger.info(f"Image edit completed successfully in {processing_time:.1f}s")
+                                return
+                            else:
+                                error_msg = job_status.result.error_message if job_status.result else "Unknown error"
+                                await initial_response.edit(
+                                    content=f"❌ Image editing failed: {error_msg}"
+                                )
+                                await self._add_error_reaction(message)
+                                context_logger.error(f"Image edit failed: {error_msg}")
+                                return
+                        
+                        elif job_status.status.value == "failed":
+                            error_msg = job_status.error_message or "Unknown error"
+                            user_friendly_error = self._get_user_friendly_error_message(error_msg)
+                            await initial_response.edit(
+                                content=f"❌ {user_friendly_error}"
+                            )
+                            await self._add_error_reaction(message)
+                            context_logger.error(f"Image edit job failed: {error_msg}")
+                            return
+                        
+                        elif job_status.status.value == "cancelled":
+                            await initial_response.edit(content="⏹️ Image editing was cancelled.")
+                            return
+                        
+                        # Update status message periodically
+                        if elapsed_time - last_status_update >= 15:  # Every 15 seconds
+                            if job_status.status.value == "queued":
+                                queue_info = self.image_processing_service.get_queue_info()
+                                queue_position = queue_info.get('queue_size', 0)
+                                if queue_position > 0:
+                                    await initial_response.edit(
+                                        content=f"⏳ Your image is in the queue (position: {queue_position})"
+                                    )
+                            elif job_status.status.value == "processing":
+                                progress_percent = int(job_status.progress * 100) if job_status.progress > 0 else 0
+                                await initial_response.edit(
+                                    content=f"🎨 Editing your image... {progress_percent}% complete"
+                                )
+                            last_status_update = elapsed_time
+                        
+                        # Wait before next check
+                        await asyncio.sleep(check_interval)
+                        elapsed_time += check_interval
+                    
+                    # Timeout reached
+                    await initial_response.edit(
+                        content="⏰ Image editing is taking longer than expected. The job is still running in the background."
+                    )
+                    await self._add_error_reaction(message)
+                    context_logger.warning(f"Image edit job {job_id} timed out after {max_wait_time}s")
+                    
+                except RuntimeError as e:
+                    # Handle rate limiting and service unavailable errors
+                    if "rate limit" in str(e).lower():
+                        await initial_response.edit(content=f"⏳ {str(e)}")
+                    elif "unavailable" in str(e).lower():
+                        await initial_response.edit(content="❌ Image editing service is currently unavailable. Please try again later.")
+                    else:
+                        await initial_response.edit(content=f"❌ {str(e)}")
+                    await self._add_error_reaction(message)
+                    context_logger.error(f"Runtime error processing image edit: {e}")
+                    
+                except ValueError as e:
+                    # Handle validation errors
+                    await initial_response.edit(content=f"❌ {str(e)}")
+                    await self._add_error_reaction(message)
+                    context_logger.error(f"Validation error processing image edit: {e}")
+                    
+                except Exception as e:
+                    await initial_response.edit(
+                        content=f"❌ An unexpected error occurred while processing your image. Please try again."
+                    )
+                    await self._add_error_reaction(message)
+                    context_logger.error(f"Unexpected error processing image edit: {e}", exc_info=True)
+        
+        except Exception as e:
+            context_logger.error(f"Error handling image edit request: {e}", exc_info=True)
+            try:
+                await message.reply(f"❌ Sorry, I encountered an error while trying to edit your image: {str(e)}")
+            except Exception as reply_error:
+                context_logger.error(f"Failed to send error reply: {reply_error}")
+    
+    async def _update_progress_message(self, message: discord.Message, progress_percent: int):
+        """
+        Update progress message with current percentage.
+        
+        Args:
+            message: The message to update
+            progress_percent: Progress percentage (0-100)
+        """
+        try:
+            await message.edit(content=f"🎨 Editing your image... {progress_percent}% complete")
+        except Exception as e:
+            logger.warning(f"Failed to update progress message: {e}")
+    
+    async def _add_error_reaction(self, message: discord.Message):
+        """
+        Add an error reaction to a message.
+        
+        Args:
+            message: The message to add reaction to
+        """
+        try:
+            await message.add_reaction("❌")
+        except Exception:
+            pass  # Ignore reaction failures
+    
+    def _get_user_friendly_error_message(self, error_msg: str) -> str:
+        """
+        Convert technical error messages to user-friendly ones.
+        
+        Args:
+            error_msg: Technical error message
+            
+        Returns:
+            User-friendly error message
+        """
+        error_lower = error_msg.lower()
+        
+        if "rate limit" in error_lower:
+            return "You're making requests too quickly. Please wait a moment and try again."
+        elif "timeout" in error_lower:
+            return "The image editing service timed out. Please try again with a smaller image."
+        elif "invalid" in error_lower and "format" in error_lower:
+            return "The image format is not supported. Please use PNG, JPEG, or GIF."
+        elif "too large" in error_lower or "size" in error_lower:
+            return "The image is too large. Please use an image smaller than 10MB."
+        elif "service unavailable" in error_lower:
+            return "The image editing service is temporarily unavailable. Please try again later."
+        elif "authentication" in error_lower:
+            return "There's an issue with the image editing service configuration. Please contact support."
+        else:
+            return f"Image editing failed: {error_msg}"
+    
     async def _handle_response_error(self, message: discord.Message, api_response):
         """
         Handle API response errors with user-friendly messages.
@@ -829,10 +1333,35 @@ class DiscordBot(discord.Client):
                             logger.info(f"    • {f['name']}")
                     logger.info("=" * 80)
                     
+                    # Get estimated response time and show it to user
+                    estimated_time = self.gemini_client.get_estimated_response_time()
+                    model_name = self.gemini_client.get_current_model()
+                    
+                    # Send status message for longer processing times
+                    status_message = None
+                    if self.gemini_client.get_timeout_for_current_model() > 30:
+                        try:
+                            status_message = await message.reply(
+                                f"⏳ Processing your request with {model_name}...\n"
+                                f"*Estimated time: {estimated_time}*"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send status message: {e}")
+                    
+                    # Use dynamic timeout based on model complexity
+                    api_timeout = self.gemini_client.get_timeout_for_current_model() + 10  # Add buffer
+                    
                     api_response = await asyncio.wait_for(
                         self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None),
-                        timeout=self.config.response_timeout + 5  # Add buffer to client timeout
+                        timeout=api_timeout
                     )
+                    
+                    # Delete status message if it was sent
+                    if status_message:
+                        try:
+                            await status_message.delete()
+                        except Exception:
+                            pass  # Ignore deletion errors
                     
                     duration = time.time() - start_time
                     
@@ -863,11 +1392,19 @@ class DiscordBot(discord.Client):
                         await self._handle_response_error(message, api_response)
                         
                 except asyncio.TimeoutError:
-                    logger.error(f"Response generation timed out for message {message.id} after {self.config.response_timeout}s")
+                    # Delete status message if it exists
+                    if status_message:
+                        try:
+                            await status_message.delete()
+                        except Exception:
+                            pass
+                    
+                    timeout_used = self.gemini_client.get_timeout_for_current_model()
+                    logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
                     timeout_response = APIResponse(
                         success=False,
                         error_type="timeout",
-                        content=f"Response generation timed out after {self.config.response_timeout} seconds"
+                        content=f"Response generation timed out after {timeout_used} seconds. The model may be overloaded. Please try again or use a simpler question."
                     )
                     await self._handle_response_error(message, timeout_response)
                     
@@ -1003,7 +1540,53 @@ class DiscordBot(discord.Client):
     
     async def _send_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
         """
-        Split a long response into multiple messages and send them.
+        Split a long response into multiple messages and send them using intelligent splitting.
+        
+        Args:
+            message: The original Discord message to reply to
+            response_content: The long response content to split
+            
+        Returns:
+            The first sent message (for reply threading)
+        """
+        try:
+            # Use the intelligent message splitter
+            message_parts = self.message_splitter.split_message(response_content)
+            
+            # Log split statistics
+            stats = self.message_splitter.get_split_statistics(message_parts)
+            logger.info(f"Message split statistics: {stats}")
+            
+            # Validate split integrity
+            if not self.message_splitter.validate_split_integrity(response_content, message_parts):
+                logger.warning("Split integrity validation failed, falling back to simple split")
+                return await self._send_simple_split_response(message, response_content)
+            
+            # Send the parts
+            first_message = None
+            last_message = message
+            
+            for part in message_parts:
+                # Reply to the last message to create a thread
+                sent = await last_message.reply(part.content)
+                
+                if part.part_number == 1:
+                    first_message = sent
+                last_message = sent
+                
+                logger.info(f"Sent message part {part.part_number}/{part.total_parts} ({len(part.content)} chars)")
+            
+            logger.info(f"Successfully sent response in {len(message_parts)} parts with intelligent splitting")
+            return first_message
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent message splitting: {e}", exc_info=True)
+            logger.info("Falling back to simple message splitting")
+            return await self._send_simple_split_response(message, response_content)
+    
+    async def _send_simple_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
+        """
+        Fallback method for simple message splitting when intelligent splitting fails.
         
         Args:
             message: The original Discord message to reply to
@@ -1068,7 +1651,7 @@ class DiscordBot(discord.Client):
             
             logger.info(f"Sent message part {idx + 1}/{len(parts)}")
         
-        logger.info(f"Successfully sent response in {len(parts)} parts")
+        logger.info(f"Successfully sent response in {len(parts)} parts using simple splitting")
         return first_message
     
     async def _send_grounding_sources(self, reply_message: discord.Message, grounding_sources: list):

@@ -91,7 +91,8 @@ class DiscordBot(discord.Client):
             try:
                 self.enhanced_command_handler = EnhancedCommandHandler(
                     self.image_processing_service, 
-                    self.error_manager
+                    self.error_manager,
+                    self.gemini_client
                 )
                 logger.info("✅ Enhanced command handler initialized")
             except Exception as e:

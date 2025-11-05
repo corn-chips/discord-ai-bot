@@ -5,6 +5,7 @@ This module extends the existing command system with natural language
 command recognition, image editing capabilities, and improved user experience.
 """
 
+import asyncio
 import logging
 import re
 from typing import Optional, Dict, List, Tuple
@@ -12,6 +13,7 @@ from enum import Enum
 
 import discord
 from discord.ext import commands
+import google.generativeai as genai
 
 from ..models.data_models import ImageEditRequest, EditType, ImageEditResult
 from ..services.image_processing_service import ImageProcessingService, ProcessingStatus
@@ -38,26 +40,18 @@ class EnhancedCommandHandler:
     natural language parsing, and integration with image processing service.
     """
     
-    def __init__(self, image_processing_service: ImageProcessingService, error_manager: ErrorManager):
+    def __init__(self, image_processing_service: ImageProcessingService, error_manager: ErrorManager, gemini_client):
         """
         Initialize the enhanced command handler.
         
         Args:
             image_processing_service: Service for processing image edits
             error_manager: Error management service
+            gemini_client: Gemini client for intent detection
         """
         self.image_processing_service = image_processing_service
         self.error_manager = error_manager
-        
-        # Image generation keywords for natural language detection
-        self.image_generation_keywords = [
-            'generate', 'create', 'make', 'draw', 'produce', 'build',
-            'generate a', 'generate an', 'create a', 'create an', 
-            'make a', 'make an', 'draw a', 'draw an',
-            'generate image', 'create image', 'generate picture', 'create picture',
-            'show me a', 'show me an', 'picture of', 'image of',
-            'paint', 'illustrate', 'design', 'render'
-        ]
+        self.gemini_client = gemini_client
         
         # Image editing keywords for natural language detection
         self.image_edit_keywords = {
@@ -93,12 +87,6 @@ class EnhancedCommandHandler:
     
     def _compile_patterns(self):
         """Compile regex patterns for efficient matching."""
-        # Pattern for detecting image generation requests
-        self.generation_pattern = re.compile(
-            r'\b(?:' + '|'.join(re.escape(word) for word in self.image_generation_keywords) + r')\b',
-            re.IGNORECASE
-        )
-        
         # Pattern for detecting image edit requests
         edit_words = []
         for edit_type, keywords in self.image_edit_keywords.items():
@@ -115,6 +103,57 @@ class EnhancedCommandHandler:
             r'\b(?:help|how\s+(?:do|to)|what\s+(?:can|commands?|is)|commands?|usage|guide|tutorial)\b',
             re.IGNORECASE
         )
+    
+    async def _check_image_generation_intent(self, message_content: str) -> bool:
+        """
+        Use Gemini Flash Lite to determine if the user is requesting image generation.
+        
+        Args:
+            message_content: The message content to analyze
+            
+        Returns:
+            True if the user wants image generation, False otherwise
+        """
+        try:
+            # Create a simple prompt for Gemini to classify the intent
+            classification_prompt = f"""Analyze this user message and determine if they are requesting image generation or creation.
+
+User message: "{message_content}"
+
+Respond with ONLY one word:
+- "yes" if the user is asking to generate, create, make, draw, or produce an image/picture
+- "no" if the user is NOT asking for image generation
+
+Your response:"""
+
+            # Create a simple model instance for classification
+            model = genai.GenerativeModel(
+                model_name="gemini-2.0-flash-lite",
+                generation_config={
+                    "temperature": 0.1,  # Low temperature for consistent classification
+                    "max_output_tokens": 10,  # Only need one word
+                }
+            )
+            
+            # Generate response
+            response = await asyncio.to_thread(
+                model.generate_content,
+                classification_prompt
+            )
+            
+            # Extract and normalize the response
+            result = response.text.strip().lower()
+            
+            # Check if response is "yes"
+            is_generation = result == "yes"
+            
+            logger.info(f"Image generation intent check: '{message_content[:50]}...' -> {is_generation} (raw: '{result}')")
+            return is_generation
+            
+        except Exception as e:
+            logger.error(f"Error checking image generation intent: {e}", exc_info=True)
+            # On error, default to False (not image generation)
+            return False
     
     async def handle_message(self, message: discord.Message) -> bool:
         """
@@ -134,7 +173,7 @@ class EnhancedCommandHandler:
             )
             
             # Parse the message for command intent
-            intent, confidence = self.parse_natural_language_command(message.content)
+            intent, confidence = await self.parse_natural_language_command(message.content)
             
             # CONTEXT-AWARE LOGIC: If there's an image attached and ANY kind of action keyword,
             # treat it as an edit request (not generation)
@@ -173,12 +212,11 @@ class EnhancedCommandHandler:
             await self.error_manager.send_error_response(message, error_context)
             return True
     
-    def parse_natural_language_command(self, message_content: str) -> Tuple[CommandIntent, float]:
+    async def parse_natural_language_command(self, message_content: str) -> Tuple[CommandIntent, float]:
         """
         Parse natural language message to determine command intent.
         
-        Implements requirement 5.1: Recognize image editing/generation keywords in natural language
-        without specific command syntax.
+        Uses Gemini Flash Lite to detect image generation requests instead of keyword matching.
         
         Args:
             message_content: The message content to parse
@@ -192,12 +230,10 @@ class EnhancedCommandHandler:
         if self.help_pattern.search(content_lower):
             return CommandIntent.HELP, 0.9
         
-        # Check for image generation intent (prioritize this for no-attachment scenarios)
-        generation_matches = self.generation_pattern.findall(content_lower)
-        if generation_matches:
-            # Calculate confidence based on number of matches
-            confidence = min(0.95, len(generation_matches) * 0.4 + 0.5)
-            return CommandIntent.IMAGE_GENERATE, confidence
+        # Use Gemini to check for image generation intent
+        is_generation = await self._check_image_generation_intent(message_content)
+        if is_generation:
+            return CommandIntent.IMAGE_GENERATE, 0.95
         
         # Check for image edit intent
         edit_matches = self.edit_pattern.findall(content_lower)

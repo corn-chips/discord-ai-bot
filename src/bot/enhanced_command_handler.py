@@ -27,7 +27,6 @@ class CommandIntent(Enum):
     """Enumeration of recognized command intents."""
     IMAGE_EDIT = "image_edit"
     IMAGE_GENERATE = "image_generate"
-    HELP = "help"
     STATUS = "status"
     UNKNOWN = "unknown"
 
@@ -95,12 +94,6 @@ class EnhancedCommandHandler:
         # Create pattern that matches any edit keyword
         self.edit_pattern = re.compile(
             r'\b(?:' + '|'.join(re.escape(word) for word in edit_words) + r')\b',
-            re.IGNORECASE
-        )
-        
-        # Pattern for help requests (more specific)
-        self.help_pattern = re.compile(
-            r'\b(?:help|how\s+(?:do|to)|what\s+(?:can|commands?|is)|commands?|usage|guide|tutorial)\b',
             re.IGNORECASE
         )
     
@@ -220,11 +213,6 @@ Your response (two lines only):"""
                 await self.handle_image_edit_command(message)
                 return True, complexity_level
             
-            # Handle help requests
-            elif intent == CommandIntent.HELP:
-                await self.handle_contextual_help(message)
-                return True, complexity_level
-            
             # If image edit intent but no images, provide guidance
             elif intent == CommandIntent.IMAGE_EDIT and not has_images:
                 await self._suggest_image_upload(message)
@@ -255,10 +243,6 @@ Your response (two lines only):"""
             - complexity_level: "low", "medium", or "high"
         """
         content_lower = message_content.lower().strip()
-        
-        # Check for help intent
-        if self.help_pattern.search(content_lower):
-            return CommandIntent.HELP, 0.9, "low"
         
         # Use Gemini to check for image generation intent and complexity
         is_generation, complexity_level = await self._check_image_generation_intent_and_complexity(message_content)
@@ -535,84 +519,6 @@ Your response (two lines only):"""
         content = re.sub(r'\s+', ' ', content).strip()
         
         return content
-    
-    async def handle_contextual_help(self, message: discord.Message):
-        """
-        Provide contextual help based on the user's message.
-        
-        Implements requirement 5.2: Provide contextual help when users mention
-        capabilities incorrectly.
-        
-        Args:
-            message: The Discord message requesting help
-        """
-        try:
-            # Analyze the help request for specific topics
-            content_lower = message.content.lower()
-            
-            # Create base help embed
-            embed = discord.Embed(
-                title="🤖 Bot Help",
-                description="Here's how you can use me:",
-                color=discord.Color.blue()
-            )
-            
-            # Check for specific help topics
-            if any(word in content_lower for word in ['image', 'edit', 'photo', 'picture']):
-                embed.add_field(
-                    name="🖼️ Image Editing",
-                    value="Upload an image and mention me with instructions like:\n"
-                          "• `@bot remove the background`\n"
-                          "• `@bot make it look like a painting`\n"
-                          "• `@bot brighten this image`\n"
-                          "• `@bot replace background with beach scene`",
-                    inline=False
-                )
-            
-            if any(word in content_lower for word in ['command', 'slash', 'function']):
-                embed.add_field(
-                    name="⚡ Slash Commands",
-                    value="`/help` - Show detailed help\n"
-                          "`/ping` - Check bot status\n"
-                          "`/model` - Switch AI models\n"
-                          "`/stats` - View usage statistics",
-                    inline=False
-                )
-            
-            # General usage if no specific topic
-            if not any(word in content_lower for word in ['image', 'command', 'slash']):
-                embed.add_field(
-                    name="💬 General Usage",
-                    value="Simply mention me (@bot) in any message to get an AI response!\n"
-                          "I can help with questions, analysis, and image editing.",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="🖼️ Image Editing",
-                    value="Upload images with natural language instructions:\n"
-                          "`@bot edit this image` - General editing\n"
-                          "`@bot remove the person` - Object removal\n"
-                          "`@bot change background` - Background replacement",
-                    inline=False
-                )
-            
-            embed.add_field(
-                name="💡 Tips",
-                value="• Be specific with your requests\n"
-                      "• Use natural language - no special syntax needed\n"
-                      "• For image editing, attach the image to your message",
-                inline=False
-            )
-            
-            await message.reply(embed=embed)
-            
-        except Exception as e:
-            logger.error(f"Error providing contextual help: {e}", exc_info=True)
-            await message.reply(
-                "I'd love to help, but I'm having trouble right now. "
-                "Try using `/help` for detailed information! 🤖"
-            )
     
     async def _suggest_image_upload(self, message: discord.Message):
         """

@@ -281,6 +281,19 @@ class DiscordBot(discord.Client):
         context_logger.info(f"Bot mentioned by {message.author} in #{message.channel.name}")
         logger.debug(f"Message content: {message.content}")
         
+        # Check if user is asking for help - direct them to /help command
+        user_prompt = self._extract_user_prompt(message)
+        help_keywords = ['help', 'how do', 'how to', 'what can', 'commands', 'usage', 'guide', 'tutorial']
+        if any(keyword in user_prompt.lower() for keyword in help_keywords):
+            context_logger.info("Help request detected - directing user to /help command")
+            try:
+                await message.reply(
+                    "For help and information about my features, please use the `/help` command! 📚"
+                )
+            except Exception as e:
+                context_logger.error(f"Failed to send help redirect message: {e}")
+            return
+        
         try:
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:

@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     # Load environment variables from .env file
     # Required: DISCORD_BOT_TOKEN, GEMINI_API_KEY
+    # GEMINI_API_KEY enables: chat, image generation, and Google Search grounding
     # Optional: NANO_BANANA_API_KEY (defaults to GEMINI_API_KEY for image generation)
     env_file:
       - .env

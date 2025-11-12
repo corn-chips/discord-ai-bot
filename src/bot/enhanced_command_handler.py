@@ -43,6 +43,9 @@ class EnhancedCommandHandler:
         """
         Initialize the enhanced command handler.
         
+        Uses AI router model (Gemini 2.0 Flash Lite) for ALL decisions.
+        NO keyword matching or regex patterns.
+        
         Args:
             image_processing_service: Service for processing image edits
             error_manager: Error management service
@@ -51,94 +54,57 @@ class EnhancedCommandHandler:
         self.image_processing_service = image_processing_service
         self.error_manager = error_manager
         self.gemini_client = gemini_client
-        
-        # Image editing keywords for natural language detection
-        self.image_edit_keywords = {
-            EditType.OBJECT_REMOVAL: [
-                'remove', 'delete', 'erase', 'take out', 'get rid of',
-                'eliminate', 'clear', 'clean up', 'cut out'
-            ],
-            EditType.BACKGROUND_REPLACEMENT: [
-                'background', 'replace background', 'change background',
-                'new background', 'backdrop', 'scene', 'setting',
-                'put', 'place', 'position', 'move', 'relocate',
-                'put on', 'place on', 'on top of', 'in front of',
-                'behind', 'next to', 'beside', 'above', 'below',
-                'add', 'insert', 'include', 'add to', 'add in'
-            ],
-            EditType.STYLE_TRANSFER: [
-                'style', 'artistic', 'painting', 'sketch', 'cartoon',
-                'art style', 'make it look like', 'transform to',
-                'fly', 'flying', 'make fly', 'make it fly'
-            ],
-            EditType.COLOR_ADJUSTMENT: [
-                'color', 'brightness', 'contrast', 'saturation', 'hue',
-                'darker', 'lighter', 'brighter', 'brighten', 'more colorful', 'vibrant'
-            ],
-            EditType.GENERAL_EDIT: [
-                'edit', 'modify', 'change', 'alter', 'adjust', 'fix',
-                'improve', 'enhance', 'update'
-            ]
-        }
-        
-        # Compiled regex patterns for better performance
-        self._compile_patterns()
     
-    def _compile_patterns(self):
-        """Compile regex patterns for efficient matching."""
-        # Pattern for detecting image edit requests
-        edit_words = []
-        for edit_type, keywords in self.image_edit_keywords.items():
-            edit_words.extend(keywords)
-        
-        # Create pattern that matches any edit keyword
-        self.edit_pattern = re.compile(
-            r'\b(?:' + '|'.join(re.escape(word) for word in edit_words) + r')\b',
-            re.IGNORECASE
-        )
-    
-    async def _check_image_generation_intent_and_complexity(self, message_content: str) -> Tuple[bool, str]:
+    async def _check_intent_and_complexity(self, message_content: str, has_images: bool) -> Tuple[CommandIntent, str]:
         """
-        Use Gemini 2.0 Flash Lite to determine if the user is requesting image generation
-        and what model complexity level is needed.
+        Use Gemini 2.0 Flash Lite router model to determine user intent and complexity.
+        
+        This is the ONLY decision-making function - no keyword matching is used.
         
         Args:
             message_content: The message content to analyze
+            has_images: Whether the message has image attachments
             
         Returns:
-            Tuple of (is_image_generation, complexity_level)
-            - is_image_generation: True if the user wants image generation, False otherwise
+            Tuple of (CommandIntent, complexity_level)
+            - CommandIntent: The detected intent (IMAGE_GENERATE, IMAGE_EDIT, or UNKNOWN)
             - complexity_level: "low", "medium", or "high" for model selection
         """
         try:
-            # Create a prompt for Gemini to classify both intent and complexity
-            classification_prompt = f"""Analyze this user message and determine two things:
-1. Is the user requesting image generation or creation?
-2. What level of AI model complexity is needed for this request?
+            # Create a prompt for Gemini router to classify intent and complexity
+            classification_prompt = f"""Analyze this user message and determine the intent and complexity.
 
 User message: "{message_content}"
+Has image attachments: {"yes" if has_images else "no"}
 
 Respond with EXACTLY two lines:
-Line 1: "yes" if the user is asking to generate, create, make, draw, or produce an image/picture, OR "no" if they are NOT asking for image generation
-Line 2: The complexity level needed:
-- "low" for simple questions, basic information, quick facts, or straightforward requests (use gemini-2.5-flash without thinking)
-- "medium" for moderate complexity requiring reasoning, analysis, or detailed explanations (use gemini-2.5-flash with extended thinking)
-- "high" for complex tasks requiring deep analysis, creative writing, coding, or advanced reasoning (use gemini-2.5-pro)
+
+Line 1 - Intent (choose ONE):
+- "image_generate" if user wants to CREATE/GENERATE a new image
+- "image_edit" if user wants to EDIT/MODIFY an existing image (only if has_images=yes)
+- "text" for any other request (questions, conversations, help requests, etc.)
+
+Line 2 - Complexity level:
+- "low" for simple questions, basic info, quick facts, straightforward requests
+- "medium" for moderate complexity needing reasoning, analysis, or detailed explanations
+- "high" for complex tasks needing deep analysis, creative writing, coding, or advanced reasoning
 
 Examples:
-User: "What's 2+2?" -> no, low
-User: "Create an image of a sunset" -> yes, low
-User: "Explain quantum mechanics" -> no, medium
-User: "Write a complex algorithm" -> no, high
+"Create an image of a sunset" (no images) -> image_generate, low
+"Remove the background" (has images) -> image_edit, low
+"What's 2+2?" (no images) -> text, low
+"Explain quantum mechanics" (no images) -> text, medium
+"Write a complex sorting algorithm" (no images) -> text, high
+"Help me understand this bot" (no images) -> text, low
 
 Your response (two lines only):"""
 
-            # Create a simple model instance for classification
+            # Create router model instance for classification
             model = genai.GenerativeModel(
                 model_name="gemini-2.0-flash-lite",
                 generation_config={
                     "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_output_tokens": 20,  # Need two words
+                    "max_output_tokens": 30,  # Enough for two lines
                 }
             )
             
@@ -153,11 +119,17 @@ Your response (two lines only):"""
             lines = [line.strip() for line in result.split('\n') if line.strip()]
             
             # Parse the response
-            is_generation = False
+            intent = CommandIntent.UNKNOWN
             complexity_level = "medium"  # Default to medium
             
             if len(lines) >= 1:
-                is_generation = lines[0] == "yes"
+                intent_str = lines[0]
+                if intent_str == "image_generate":
+                    intent = CommandIntent.IMAGE_GENERATE
+                elif intent_str == "image_edit":
+                    intent = CommandIntent.IMAGE_EDIT
+                else:  # "text" or anything else
+                    intent = CommandIntent.UNKNOWN
             
             if len(lines) >= 2:
                 # Validate complexity level
@@ -166,17 +138,20 @@ Your response (two lines only):"""
                 else:
                     logger.warning(f"Invalid complexity level '{lines[1]}', defaulting to 'medium'")
             
-            logger.info(f"Intent & Complexity check: '{message_content[:50]}...' -> image_gen={is_generation}, complexity={complexity_level} (raw: '{result}')")
-            return is_generation, complexity_level
+            logger.info(f"🔍 Router decision: '{message_content[:50]}...' -> intent={intent.value}, complexity={complexity_level} (raw: '{result}')")
+            return intent, complexity_level
             
         except Exception as e:
-            logger.error(f"Error checking image generation intent and complexity: {e}", exc_info=True)
-            # On error, default to False (not image generation) and medium complexity
-            return False, "medium"
+            logger.error(f"Error in router model: {e}", exc_info=True)
+            # On error, default to unknown intent and medium complexity
+            return CommandIntent.UNKNOWN, "medium"
     
     async def handle_message(self, message: discord.Message) -> Tuple[bool, str]:
         """
         Handle a Discord message and determine if it contains commands.
+        
+        All decisions are made by the router model (Gemini 2.0 Flash Lite).
+        NO keyword matching is used.
         
         Args:
             message: The Discord message to process
@@ -193,31 +168,29 @@ Your response (two lines only):"""
                 for attachment in message.attachments
             )
             
-            # Parse the message for command intent and complexity
-            intent, confidence, complexity_level = await self.parse_natural_language_command(message.content)
+            # Use router model to determine intent and complexity - NO KEYWORD MATCHING
+            intent, complexity_level = await self._check_intent_and_complexity(message.content, has_images)
             
-            # CONTEXT-AWARE LOGIC: If there's an image attached and ANY kind of action keyword,
-            # treat it as an edit request (not generation)
-            if has_images and intent in [CommandIntent.IMAGE_GENERATE, CommandIntent.IMAGE_EDIT]:
-                # Image is present, so this should be an edit operation
-                await self.handle_image_edit_command(message)
+            logger.info(f"📋 Handler routing: intent={intent.value}, has_images={has_images}, complexity={complexity_level}")
+            
+            # Route based on router model decision
+            if intent == CommandIntent.IMAGE_GENERATE:
+                if has_images:
+                    # User wants to generate but has images attached - might be confused
+                    # Let router handle it as edit since images are present
+                    await self.handle_image_edit_command(message)
+                else:
+                    await self.handle_image_generation_command(message)
                 return True, complexity_level
             
-            # Handle image generation commands (no image attached)
-            if intent == CommandIntent.IMAGE_GENERATE and not has_images:
-                await self.handle_image_generation_command(message)
+            elif intent == CommandIntent.IMAGE_EDIT:
+                if has_images:
+                    await self.handle_image_edit_command(message)
+                else:
+                    await self._suggest_image_upload(message)
                 return True, complexity_level
             
-            # Handle image edit commands (with image attached) - redundant now but kept for clarity
-            elif intent == CommandIntent.IMAGE_EDIT and has_images:
-                await self.handle_image_edit_command(message)
-                return True, complexity_level
-            
-            # If image edit intent but no images, provide guidance
-            elif intent == CommandIntent.IMAGE_EDIT and not has_images:
-                await self._suggest_image_upload(message)
-                return True, complexity_level
-            
+            # UNKNOWN intent - let main bot handle it with the determined complexity
             return False, complexity_level
             
         except Exception as e:
@@ -228,51 +201,13 @@ Your response (two lines only):"""
             await self.error_manager.send_error_response(message, error_context)
             return True, "medium"  # Default to medium on error
     
-    async def parse_natural_language_command(self, message_content: str) -> Tuple[CommandIntent, float, str]:
-        """
-        Parse natural language message to determine command intent and complexity.
-        
-        Uses Gemini 2.0 Flash Lite to detect image generation requests and determine
-        the appropriate model complexity level.
-        
-        Args:
-            message_content: The message content to parse
-            
-        Returns:
-            Tuple of (CommandIntent, confidence_score, complexity_level)
-            - complexity_level: "low", "medium", or "high"
-        """
-        content_lower = message_content.lower().strip()
-        
-        # Use Gemini to check for image generation intent and complexity
-        is_generation, complexity_level = await self._check_image_generation_intent_and_complexity(message_content)
-        if is_generation:
-            return CommandIntent.IMAGE_GENERATE, 0.95, complexity_level
-        
-        # Check for image edit intent
-        edit_matches = self.edit_pattern.findall(content_lower)
-        if edit_matches:
-            # Calculate confidence based on number of matches and message length
-            confidence = min(0.9, len(edit_matches) * 0.3 + 0.4)
-            return CommandIntent.IMAGE_EDIT, confidence, complexity_level
-        
-        # Check for specific image editing phrases
-        image_edit_phrases = [
-            'edit this image', 'modify the picture', 'change the photo',
-            'can you edit', 'please edit', 'image editing'
-        ]
-        
-        for phrase in image_edit_phrases:
-            if phrase in content_lower:
-                return CommandIntent.IMAGE_EDIT, 0.8, complexity_level
-        
-        return CommandIntent.UNKNOWN, 0.0, complexity_level
+
     
-    def detect_edit_type(self, instruction: str) -> EditType:
+    async def detect_edit_type(self, instruction: str) -> EditType:
         """
-        Detect the type of image edit requested from the instruction.
+        Use AI router model to detect the type of image edit requested.
         
-        Implements requirement 2.1: Support different types of image edits.
+        NO keyword matching - relies entirely on Gemini 2.0 Flash Lite.
         
         Args:
             instruction: The natural language edit instruction
@@ -280,27 +215,51 @@ Your response (two lines only):"""
         Returns:
             The detected EditType
         """
-        instruction_lower = instruction.lower()
-        
-        # Score each edit type based on keyword matches
-        type_scores = {}
-        
-        for edit_type, keywords in self.image_edit_keywords.items():
-            score = 0
-            for keyword in keywords:
-                if keyword in instruction_lower:
-                    # Longer keywords get higher scores
-                    score += len(keyword.split())
-            type_scores[edit_type] = score
-        
-        # Return the edit type with the highest score
-        if type_scores:
-            best_type = max(type_scores, key=type_scores.get)
-            if type_scores[best_type] > 0:
-                return best_type
-        
-        # Default to general edit if no specific type detected
-        return EditType.GENERAL_EDIT
+        try:
+            classification_prompt = f"""Classify this image editing instruction into ONE category.
+
+Instruction: "{instruction}"
+
+Categories:
+- "object_removal" - removing, deleting, erasing objects or elements
+- "background" - changing, replacing, or modifying backgrounds
+- "style" - artistic style changes, filters, painting effects
+- "color" - color adjustments, brightness, contrast, saturation
+- "general" - any other editing task or unclear request
+
+Respond with EXACTLY one word (the category name):"""
+
+            model = genai.GenerativeModel(
+                model_name="gemini-2.0-flash-lite",
+                generation_config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 10,
+                }
+            )
+            
+            response = await asyncio.to_thread(
+                model.generate_content,
+                classification_prompt
+            )
+            
+            result = response.text.strip().lower()
+            
+            # Map response to EditType
+            edit_type_map = {
+                "object_removal": EditType.OBJECT_REMOVAL,
+                "background": EditType.BACKGROUND_REPLACEMENT,
+                "style": EditType.STYLE_TRANSFER,
+                "color": EditType.COLOR_ADJUSTMENT,
+                "general": EditType.GENERAL_EDIT
+            }
+            
+            edit_type = edit_type_map.get(result, EditType.GENERAL_EDIT)
+            logger.info(f"🎨 Edit type detection: '{instruction[:50]}...' -> {edit_type.value}")
+            return edit_type
+            
+        except Exception as e:
+            logger.error(f"Error detecting edit type with AI: {e}", exc_info=True)
+            return EditType.GENERAL_EDIT
     
     async def handle_image_edit_command(self, message: discord.Message):
         """
@@ -329,8 +288,8 @@ Your response (two lines only):"""
                 )
                 return
             
-            # Detect edit type
-            edit_type = self.detect_edit_type(instruction)
+            # Detect edit type using AI router
+            edit_type = await self.detect_edit_type(instruction)
             
             # Download image data
             try:

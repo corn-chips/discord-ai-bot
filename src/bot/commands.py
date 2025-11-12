@@ -64,7 +64,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
         embed.add_field(name="Latency", value=f"{latency}ms", inline=True)
         embed.add_field(name="Status", value="✅ Operational", inline=True)
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed)
     
     
     @bot.tree.command(name="model", description="Switch between Gemini Flash AI models")
@@ -98,17 +98,15 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 )
                 
                 logger.info(f"User {interaction.user} changed model from {old_model} to {model_name.value}")
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(embed=embed)
             else:
                 await interaction.response.send_message(
-                    "❌ Failed to change model. Please try again later.",
-                    ephemeral=True
+                    "❌ Failed to change model. Please try again later."
                 )
         except Exception as e:
             logger.error(f"Error changing model: {e}")
             await interaction.response.send_message(
-                f"❌ Error: {str(e)}",
-                ephemeral=True
+                f"❌ Error: {str(e)}"
             )
     
     
@@ -147,17 +145,15 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 )
                 
                 logger.info(f"User {interaction.user} changed prompt mode from {old_mode} to {mode.value}")
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(embed=embed)
             else:
                 await interaction.response.send_message(
-                    "❌ Failed to change prompt mode. Please try again later.",
-                    ephemeral=True
+                    "❌ Failed to change prompt mode. Please try again later."
                 )
         except Exception as e:
             logger.error(f"Error changing prompt mode: {e}")
             await interaction.response.send_message(
-                f"❌ Error: {str(e)}",
-                ephemeral=True
+                f"❌ Error: {str(e)}"
             )
     
     
@@ -254,154 +250,13 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             
             embed.set_footer(text=f"Requested by {interaction.user.display_name}")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             logger.error(f"Error generating stats: {e}", exc_info=True)
             await interaction.response.send_message(
-                "❌ Failed to generate statistics. Please try again later.",
-                ephemeral=True
+                "❌ Failed to generate statistics. Please try again later."
             )
-    
-    
-    @bot.tree.command(name="help", description="Show comprehensive help information and available commands")
-    @app_commands.describe(
-        topic="Specific help topic (optional)"
-    )
-    @app_commands.choices(topic=[
-        app_commands.Choice(name="General Usage", value="general"),
-        app_commands.Choice(name="Image Editing", value="image_editing"),
-        app_commands.Choice(name="Slash Commands", value="commands"),
-        app_commands.Choice(name="Advanced Features", value="advanced"),
-        app_commands.Choice(name="Troubleshooting", value="troubleshooting")
-    ])
-    async def help_command(interaction: discord.Interaction, topic: Optional[app_commands.Choice[str]] = None):
-        """Display comprehensive help information about the bot."""
-        
-        # Use help system if available for contextual help
-        if hasattr(bot, 'help_system') and bot.help_system and topic:
-            try:
-                help_embed = await bot.help_system.provide_contextual_help(
-                    message=None,  # We'll create a mock message context
-                    query=topic.value
-                )
-                await interaction.response.send_message(embed=help_embed, ephemeral=True)
-                return
-            except Exception as e:
-                logger.error(f"Error using help system: {e}")
-                # Fall back to basic help
-        
-        # Create comprehensive help embed
-        embed = discord.Embed(
-            title="🤖 Discord Grok Bot - Enhanced Help",
-            description="AI-powered conversational bot with advanced image editing and UX features",
-            color=discord.Color.blue()
-        )
-        
-        # Basic usage section
-        embed.add_field(
-            name="💬 Basic Usage",
-            value="• **Mention me** in any message: `@bot your question`\n"
-                  "• **Reply to my messages** for context-aware conversations\n"
-                  "• **Upload files** (PDFs, text files) for analysis\n"
-                  "• **Use natural language** - no special syntax needed!",
-            inline=False
-        )
-        
-        # Image editing section (if available)
-        if hasattr(bot, 'image_processing_service') and bot.image_processing_service:
-            embed.add_field(
-                name="🖼️ Image Editing",
-                value="Upload an image and mention me with instructions:\n"
-                      "• `@bot remove the background`\n"
-                      "• `@bot make this look like a painting`\n"
-                      "• `@bot brighten this image`\n"
-                      "• `@bot replace background with beach scene`\n"
-                      "• `@bot remove the person in red`",
-                inline=False
-            )
-        
-        # Build command list based on available features
-        command_list = [
-            "`/help [topic]` - Show help (with optional topic)",
-            "`/ping` - Check bot status and latency",
-            "`/model` - Switch between AI models", 
-            "`/prompt-mode` - Switch response modes",
-            "`/stats` - View usage statistics",
-            "`/config` - View current configuration"
-        ]
-        
-        # Add image editing commands if available
-        if hasattr(bot, 'image_processing_service') and bot.image_processing_service:
-            command_list.extend([
-                "`/edit-image` - Edit uploaded images with AI",
-                "`/image-queue` - Check processing queue status"
-            ])
-        
-        embed.add_field(
-            name="⚡ Slash Commands",
-            value="\n".join(command_list),
-            inline=False
-        )
-        
-        # Build enhanced features list
-        features = [
-            "✅ **Context-aware responses** - Remembers conversation history",
-            "✅ **Smart message splitting** - Long responses split intelligently", 
-            "✅ **Multiple AI models** - Choose the best model for your needs",
-            "✅ **Enhanced error handling** - Helpful error messages and suggestions",
-            "✅ **Rich embeds and reactions** - Beautiful, interactive responses",
-            "✅ **File analysis** - Upload PDFs and text files for analysis"
-        ]
-        
-        # Add image editing feature if available
-        if hasattr(bot, 'image_processing_service') and bot.image_processing_service:
-            features.append("✅ **AI-powered image editing** - Remove objects, change backgrounds, apply styles")
-        
-        # Add enhanced UX features if available
-        if hasattr(bot, 'user_experience_service') and bot.user_experience_service:
-            features.append("✅ **Enhanced UX** - Typing indicators, progress updates, and rich feedback")
-        
-        embed.add_field(
-            name="🎯 Enhanced Features",
-            value="\n".join(features),
-            inline=False
-        )
-        
-        # Advanced tips
-        embed.add_field(
-            name="💡 Pro Tips",
-            value="• **Be specific** with image editing requests for better results\n"
-                  "• **Reply to messages** to maintain conversation context\n"
-                  "• **Try different AI models** for varied response styles\n"
-                  "• **Use thinking mode** for detailed analysis (reverts after one use)\n"
-                  "• **Upload multiple images** for comparison and analysis",
-            inline=False
-        )
-        
-        # Help topics
-        embed.add_field(
-            name="📚 Need More Help?",
-            value="Use `/help` with these topics for detailed information:\n"
-                  "• `general` - Basic usage and getting started\n"
-                  "• `image_editing` - Image editing capabilities and examples\n"
-                  "• `commands` - Complete command reference\n"
-                  "• `advanced` - Advanced features and capabilities\n"
-                  "• `troubleshooting` - Common issues and solutions",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🔗 Links & Support",
-            value="[Documentation](https://github.com/dankmrpanda/discord-ai-bot) • "
-                  "[Report Issues](https://github.com/dankmrpanda/discord-ai-bot/issues) • "
-                  "[Feature Requests](https://github.com/dankmrpanda/discord-ai-bot/discussions)",
-            inline=False
-        )
-        
-        embed.set_footer(text="Made with ❤️ using discord.py, Google Gemini, and nano-banana AI")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
     
     
     @bot.tree.command(name="config", description="View current bot configuration and feature status")
@@ -536,23 +391,14 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
         
         embed.set_footer(text=f"Configuration loaded at startup • Use /help for usage information")
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed)
     
     
     @bot.tree.command(name="features", description="Discover all available bot features and capabilities")
     async def features_command(interaction: discord.Interaction):
         """Display feature discovery information."""
         
-        # Use help system if available
-        if hasattr(bot, 'help_system') and bot.help_system:
-            try:
-                feature_embed = await bot.help_system.provide_feature_discovery(interaction)
-                await interaction.response.send_message(embed=feature_embed, ephemeral=True)
-                return
-            except Exception as e:
-                logger.error(f"Error using help system for features: {e}")
-        
-        # Fallback feature discovery
+        # Feature discovery
         embed = discord.Embed(
             title="✨ Bot Features & Capabilities",
             description="Discover everything this bot can do for you!",
@@ -606,7 +452,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
         
         embed.set_footer(text="Use /help for detailed instructions • Try mentioning the bot to get started!")
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed)
     
     
     # Image editing commands (only if image processing is available)
@@ -632,8 +478,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 # Validate image attachment
                 if not image.content_type or not image.content_type.startswith('image/'):
                     await interaction.response.send_message(
-                        "❌ Please upload a valid image file (PNG, JPEG, GIF).",
-                        ephemeral=True
+                        "❌ Please upload a valid image file (PNG, JPEG, GIF)."
                     )
                     return
                 
@@ -641,8 +486,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 max_size_bytes = bot.config.max_image_size_mb * 1024 * 1024
                 if image.size > max_size_bytes:
                     await interaction.response.send_message(
-                        f"❌ Image is too large. Maximum size is {bot.config.max_image_size_mb}MB.",
-                        ephemeral=True
+                        f"❌ Image is too large. Maximum size is {bot.config.max_image_size_mb}MB."
                     )
                     return
                 
@@ -751,7 +595,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 try:
                     await interaction.followup.send(f"❌ An error occurred: {str(e)}")
                 except:
-                    await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+                    await interaction.response.send_message(f"❌ An error occurred: {str(e)}")
         
         
         @bot.tree.command(name="image-queue", description="Check the image processing queue status")
@@ -800,13 +644,12 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                     inline=False
                 )
                 
-                await interaction.response.send_message(embed=embed, ephemeral=False)
+                await interaction.response.send_message(embed=embed)
                 
             except Exception as e:
                 logger.error(f"Error in image-queue command: {e}")
                 await interaction.response.send_message(
-                    "❌ Failed to get queue information. Please try again later.",
-                    ephemeral=True
+                    "❌ Failed to get queue information. Please try again later."
                 )
     
     
@@ -831,13 +674,12 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             )
             
             logger.info(f"Admin {interaction.user} cleared bot cache")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             logger.error(f"Error clearing cache: {e}")
             await interaction.response.send_message(
-                "❌ Failed to clear cache. Please check logs.",
-                ephemeral=True
+                "❌ Failed to clear cache. Please check logs."
             )
     
     
@@ -879,13 +721,12 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
                 )
             
             logger.info(f"Admin {interaction.user} {status} developer mode")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed)
             
         except Exception as e:
             logger.error(f"Error toggling dev mode: {e}")
             await interaction.response.send_message(
-                "❌ Failed to toggle developer mode. Please check logs.",
-                ephemeral=True
+                "❌ Failed to toggle developer mode. Please check logs."
             )
     
     
@@ -1025,14 +866,13 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             
             embed.set_footer(text=f"Requested by {interaction.user.display_name}")
             
-            await interaction.response.send_message(embed=embed, ephemeral=False)
+            await interaction.response.send_message(embed=embed)
             logger.info(f"User {interaction.user} viewed API usage statistics")
             
         except Exception as e:
             logger.error(f"Error generating API usage stats: {e}", exc_info=True)
             await interaction.response.send_message(
-                "❌ Failed to generate API usage statistics. Please try again later.",
-                ephemeral=True
+                "❌ Failed to generate API usage statistics. Please try again later."
             )
 
 
@@ -1191,14 +1031,13 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
 
             embed.set_footer(text=f"Requested by {interaction.user.display_name}")
 
-            await interaction.response.send_message(embed=embed, files=[md_file, csv_file], ephemeral=False)
+            await interaction.response.send_message(embed=embed, files=[md_file, csv_file])
             logger.info(f"User {interaction.user} generated usage report")
 
         except Exception as e:
             logger.error(f"Error generating usage report: {e}", exc_info=True)
             await interaction.response.send_message(
-                "❌ Failed to generate the usage report. Please try again later.",
-                ephemeral=True
+                "❌ Failed to generate the usage report. Please try again later."
             )
 
 

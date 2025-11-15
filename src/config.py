@@ -26,6 +26,7 @@ class BotConfig:
     log_level: str = "INFO"
     log_file: Optional[str] = None
     enable_performance_logging: bool = True
+    token_db_path: str = "data/token_usage.db"
     
     # Image processing configuration (uses Gemini 2.5 Flash Image model)
     # Note: nano_banana_api_key should be the same as gemini_api_key
@@ -61,6 +62,7 @@ class BotConfig:
             log_level=os.getenv('LOG_LEVEL', 'INFO'),
             log_file=os.getenv('LOG_FILE'),
             enable_performance_logging=os.getenv('ENABLE_PERFORMANCE_LOGGING', 'true').lower() == 'true',
+            token_db_path=os.getenv('TOKEN_DB_PATH', 'data/token_usage.db'),
             
             # Image processing configuration (uses Gemini 2.5 Flash Image)
             # If not set, falls back to GEMINI_API_KEY
@@ -98,6 +100,9 @@ class BotConfig:
         # Core bot settings validation
         if self.max_context_messages <= 0:
             errors.append("MAX_CONTEXT_MESSAGES must be positive")
+
+        if not self.token_db_path or not self.token_db_path.strip():
+            errors.append("TOKEN_DB_PATH must be a valid filesystem path")
         
         if self.reply_context_range <= 0:
             errors.append("REPLY_CONTEXT_RANGE must be positive")

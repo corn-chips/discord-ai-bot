@@ -48,8 +48,8 @@ RUN useradd --create-home --shell /bin/bash botuser && \
     chown -R botuser:botuser /app
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/logs /app/temp /app/cache && \
-    chown -R botuser:botuser /app/logs /app/temp /app/cache
+RUN mkdir -p /app/logs /app/temp /app/cache /app/data && \
+    chown -R botuser:botuser /app/logs /app/temp /app/cache /app/data
 
 USER botuser
 

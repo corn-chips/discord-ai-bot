@@ -15,7 +15,7 @@ import discord
 from discord.ext import commands
 import google.generativeai as genai
 
-from ..models.data_models import ImageEditRequest, EditType, ImageEditResult
+from ..models.data_models import ImageEditRequest, EditType, ImageEditResult, TokenUsage
 from ..services.image_processing_service import ImageProcessingService, ProcessingStatus
 from ..utils.error_manager import ErrorManager
 
@@ -39,7 +39,7 @@ class EnhancedCommandHandler:
     natural language parsing, and integration with image processing service.
     """
     
-    def __init__(self, image_processing_service: ImageProcessingService, error_manager: ErrorManager, gemini_client):
+    def __init__(self, bot, image_processing_service: ImageProcessingService, error_manager: ErrorManager, gemini_client):
         """
         Initialize the enhanced command handler.
         
@@ -47,10 +47,12 @@ class EnhancedCommandHandler:
         NO keyword matching or regex patterns.
         
         Args:
+            bot: Discord bot instance for shared helpers (token tracking, logging)
             image_processing_service: Service for processing image edits
             error_manager: Error management service
             gemini_client: Gemini client for intent detection
         """
+        self.bot = bot
         self.image_processing_service = image_processing_service
         self.error_manager = error_manager
         self.gemini_client = gemini_client
@@ -348,6 +350,8 @@ Respond with EXACTLY one word (the category name):"""
                 
                 await message.reply(embed=embed, file=edited_file)
                 
+                await self._record_token_usage(message, result.token_usage)
+
                 logger.info(f"Successfully processed image edit for user {message.author.id}")
                 
             else:
@@ -430,6 +434,8 @@ Respond with EXACTLY one word (the category name):"""
                 embed.set_footer(text="Generated with SynthID watermark • AI-generated content")
                 
                 await message.reply(embed=embed, file=image_file)
+
+                await self._record_token_usage(message, result.token_usage)
                 
                 logger.info(f"Successfully generated image for user {message.author.id}")
                 
@@ -457,6 +463,19 @@ Respond with EXACTLY one word (the category name):"""
                 e, "I encountered an error while trying to generate your image. Please try again!"
             )
             await self.error_manager.send_error_response(message, error_context)
+
+    async def _record_token_usage(self, message: discord.Message, token_usage: Optional[TokenUsage]):
+        """Forward token usage data to the main bot's tracker."""
+
+        if not token_usage:
+            return
+        if not self.bot or not hasattr(self.bot, "_record_token_usage"):
+            return
+
+        try:
+            await self.bot._record_token_usage(message, token_usage)
+        except Exception as exc:
+            logger.error(f"Failed to record token usage for image command: {exc}")
     
     def _extract_edit_instruction(self, message_content: str) -> str:
         """
@@ -572,7 +591,9 @@ Respond with EXACTLY one word (the category name):"""
                 return ImageEditResult(
                     success=False,
                     error_message=job.error_message or "Image processing failed",
-                    processing_time=0.0
+                    processing_time=0.0,
+                    metadata=None,
+                    token_usage=None,
                 )
             
             # Wait a bit before checking again

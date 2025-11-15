@@ -15,6 +15,7 @@ from discord import app_commands
 
 from ..config import BotConfig
 from ..services.gemini_client import GeminiClient
+from ..services.token_tracker import TokenTracker
 
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,13 @@ class BotCommands(app_commands.CommandTree):
         self.client = client
         
 
-async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, performance_logger):
+async def setup_commands(
+    bot,
+    config: BotConfig,
+    gemini_client: GeminiClient,
+    performance_logger,
+    token_tracker: Optional[TokenTracker],
+):
     """
     Set up all slash commands for the bot.
     
@@ -49,6 +56,7 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
         config: Bot configuration
         gemini_client: Gemini API client
         performance_logger: Performance logging instance
+        token_tracker: Token tracking service (optional)
     """
     
     @bot.tree.command(name="ping", description="Check if the bot is responsive")
@@ -259,6 +267,59 @@ async def setup_commands(bot, config: BotConfig, gemini_client: GeminiClient, pe
             )
     
     
+    @bot.tree.command(name="token-leaderboard", description="See the top token users in this server")
+    async def token_leaderboard(interaction: discord.Interaction):
+        """Display top 10 token consumers for the current guild."""
+
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "This command can only be used inside a server.",
+                ephemeral=True,
+            )
+            return
+
+        if not token_tracker:
+            await interaction.response.send_message(
+                "Token tracking is not configured for this bot.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            entries = await token_tracker.get_top_users(interaction.guild.id, limit=10)
+        except Exception as exc:
+            logger.error("Failed to load token leaderboard: %s", exc, exc_info=True)
+            await interaction.response.send_message(
+                "❌ Unable to load the token leaderboard right now.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"🎟️ Token Leaderboard — {interaction.guild.name}",
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(),
+        )
+
+        if not entries:
+            embed.description = "No token usage has been recorded yet. Be the first to talk to the bot!"
+        else:
+            lines = []
+            for idx, entry in enumerate(entries, start=1):
+                mention = f"<@{entry.user_id}>"
+                display = entry.username or mention
+                line = (
+                    f"**{idx}.** {display} ({mention}) — {entry.total_tokens:,} tokens"
+                    f" • {entry.request_count:,} requests"
+                )
+                lines.append(line)
+            embed.description = "\n".join(lines)
+
+        embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+
+        await interaction.response.send_message(embed=embed)
+
+
     @bot.tree.command(name="config", description="View current bot configuration and feature status")
     async def config_command(interaction: discord.Interaction):
         """Display current bot configuration and feature availability."""

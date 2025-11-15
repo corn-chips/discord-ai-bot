@@ -17,13 +17,14 @@ from PIL import Image
 import fitz  # PyMuPDF
 
 from ..config import BotConfig
-from ..models.data_models import APIResponse, ImageEditRequest, EditType
+from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage
 from ..services.context_collector import ContextCollector
 from ..services.gemini_client import GeminiClient
 from ..services.message_splitter import MessageSplitter
 from ..services.image_processing_service import ImageProcessingService
 from ..services.nano_banana_client import NanoBananaClient
 from ..services.user_experience_service import UserExperienceService
+from ..services.token_tracker import TokenTracker
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
@@ -58,6 +59,13 @@ class DiscordBot(discord.Client):
         self.config = config
         self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("discord_bot")
+        self.token_tracker = None
+        try:
+            self.token_tracker = TokenTracker(config.token_db_path)
+            logger.info("✅ Token tracker initialized")
+        except Exception as exc:
+            logger.error(f"Failed to initialize token tracker: {exc}", exc_info=True)
+            self.token_tracker = None
         
         # Initialize core services
         self.context_collector = ContextCollector(
@@ -88,9 +96,10 @@ class DiscordBot(discord.Client):
         if self.image_processing_service:
             try:
                 self.enhanced_command_handler = EnhancedCommandHandler(
-                    self.image_processing_service, 
+                    self,
+                    self.image_processing_service,
                     self.error_manager,
-                    self.gemini_client
+                    self.gemini_client,
                 )
                 logger.info("✅ Enhanced command handler initialized")
             except Exception as e:
@@ -155,7 +164,7 @@ class DiscordBot(discord.Client):
         
         # Set up slash commands
         try:
-            await setup_commands(self, self.config, self.gemini_client, self.performance_logger)
+            await setup_commands(self, self.config, self.gemini_client, self.performance_logger, self.token_tracker)
             
             # Sync commands globally
             synced = await self.tree.sync()
@@ -1063,6 +1072,8 @@ class DiscordBot(discord.Client):
                             guild_id=message.guild.id if message.guild else None
                         )
                         
+                        await self._record_token_usage(message, api_response.token_usage)
+
                         await self._send_response_safely(message, api_response.content, api_response.grounding_sources)
                     else:
                         logger.error(f"Failed to generate response: {api_response.error_type}")
@@ -1123,6 +1134,37 @@ class DiscordBot(discord.Client):
             self.error_manager.log_error(error_context, "Discord HTTP error")
             await self.error_manager.send_error_response(message, error_context)
     
+    async def _record_token_usage(self, message: discord.Message, token_usage: Optional[TokenUsage]):
+        """Persist token usage stats for the current request."""
+
+        if not token_usage:
+            return
+        if not self.token_tracker:
+            return
+        if not message.guild:
+            return
+
+        username = (
+            message.author.display_name
+            or getattr(message.author, "global_name", None)
+            or message.author.name
+            or str(message.author)
+        )
+        username = username[:80]  # Avoid storing excessively long names
+
+        try:
+            await self.token_tracker.record_usage(
+                user_id=message.author.id,
+                username=username,
+                guild_id=message.guild.id,
+                guild_name=message.guild.name,
+                input_tokens=token_usage.input_tokens,
+                output_tokens=token_usage.output_tokens,
+                total_tokens=token_usage.total_tokens,
+            )
+        except Exception as exc:
+            logger.error(f"Failed to record token usage for user {message.author.id}: {exc}")
+
     async def _send_response_safely(self, message: discord.Message, response_content: str, grounding_sources: list = None):
         """
         Safely send a response to Discord with error handling.

@@ -71,6 +71,7 @@ docker-compose exec discord-grok-bot python scripts/health_check.py
 The bot uses several directories for different purposes:
 
 - `./logs` - Bot log files (persistent, mounted from host)
+- `./data` - SQLite token-tracker database (persistent, mounted from host)
 - `./src` - Source code (mounted for live editing during development)
 - `bot-temp` - Temporary files (Docker volume)
   - Image processing cache
@@ -99,6 +100,7 @@ MAX_CONTEXT_MESSAGES=100
 IMAGE_PROCESSING_TIMEOUT=60
 MAX_CONCURRENT_IMAGE_EDITS=3
 LOG_LEVEL=INFO
+TOKEN_DB_PATH=data/token_usage.db
 ```
 
 See `.env.example` for all available options.

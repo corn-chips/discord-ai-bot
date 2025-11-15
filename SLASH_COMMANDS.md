@@ -100,6 +100,28 @@ This document describes all available slash commands for the Discord Grok Bot.
 
 ---
 
+### `/token-leaderboard` - View Guild Token Leaders
+**Description:** Show the top 10 users in the current guild ranked by total Gemini tokens consumed.
+
+**Usage:**
+```
+/token-leaderboard
+```
+
+**Information Displayed:**
+- Lists each user's display name and mention
+- Total tokens consumed (input + output)
+- Breakdown of input and output tokens
+- Number of requests counted for each user
+
+**Notes:**
+- Relies on the on-disk SQLite database configured via `TOKEN_DB_PATH`
+- Only available in guild channels (not DMs)
+
+**Permissions:** None required (Everyone)
+
+---
+
 ### `/api-usage` - API Usage & Rate Limits
 **Description:** Show real-time API usage, free-tier rate limits, model capabilities, and performance metrics.
 

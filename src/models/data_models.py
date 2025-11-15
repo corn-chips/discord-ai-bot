@@ -39,6 +39,22 @@ class MessageContext:
 
 
 @dataclass
+class TokenUsage:
+    """Represents concrete token usage numbers returned by the LLM."""
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+    def __post_init__(self):
+        if self.input_tokens < 0 or self.output_tokens < 0 or self.total_tokens < 0:
+            raise ValueError("Token counts must be non-negative")
+        # Guard against obviously incorrect totals
+        if self.total_tokens < max(self.input_tokens, 0) + max(self.output_tokens, 0):
+            raise ValueError("total_tokens must be at least the sum of input and output tokens")
+
+
+@dataclass
 class APIResponse:
     """
     Represents a response from the Gemini API.
@@ -51,6 +67,7 @@ class APIResponse:
     error_type: Optional[str] = None
     retry_after: Optional[int] = None
     grounding_sources: Optional[list] = None
+    token_usage: Optional[TokenUsage] = None
 
     def __post_init__(self):
         """Validate the API response after initialization."""
@@ -60,6 +77,8 @@ class APIResponse:
             raise ValueError("Failed responses must have an error_type")
         if self.retry_after is not None and self.retry_after < 0:
             raise ValueError("retry_after must be non-negative")
+        if self.token_usage and not self.success:
+            raise ValueError("token_usage may only be attached to successful responses")
 
 
 class EditType(Enum):
@@ -111,6 +130,7 @@ class ImageEditResult:
     processing_time: float = 0.0
     error_message: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    token_usage: Optional[TokenUsage] = None
     
     def __post_init__(self):
         """Validate the image edit result after initialization."""

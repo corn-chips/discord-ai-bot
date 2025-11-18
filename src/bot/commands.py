@@ -116,6 +116,64 @@ async def setup_commands(
             await interaction.response.send_message(
                 f"❌ Error: {str(e)}"
             )
+
+    @bot.tree.command(name="think", description="Toggle Thinking Mode (Chain of Thought)")
+    @app_commands.describe(enabled="Enable or disable Thinking Mode")
+    async def think(interaction: discord.Interaction, enabled: bool):
+        """Toggle Thinking Mode for deeper reasoning."""
+        mode = "thinking" if enabled else "short"
+        success = gemini_client.set_prompt_mode(mode)
+        
+        if success:
+            status = "✅ Enabled" if enabled else "❌ Disabled"
+            description = "Bot will now show its thought process before answering." if enabled else "Bot will respond directly without showing thoughts."
+            
+            embed = discord.Embed(
+                title=f"🧠 Thinking Mode {status}",
+                description=description,
+                color=discord.Color.purple() if enabled else discord.Color.light_grey()
+            )
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message("Failed to set thinking mode.", ephemeral=True)
+
+    @bot.tree.command(name="deepsearch", description="Toggle DeepSearch (Force Google Search)")
+    @app_commands.describe(enabled="Enable or disable DeepSearch")
+    async def deepsearch(interaction: discord.Interaction, enabled: bool):
+        """Toggle DeepSearch to force Google Search on all queries."""
+        gemini_client.set_force_search(enabled)
+        
+        status = "✅ Enabled" if enabled else "❌ Disabled"
+        description = "Bot will now search the web for EVERY query." if enabled else "Bot will only search when explicitly asked."
+        
+        embed = discord.Embed(
+            title=f"🌐 DeepSearch {status}",
+            description=description,
+            color=discord.Color.blue() if enabled else discord.Color.light_grey()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="debug", description="Toggle Debug Logging")
+    @app_commands.describe(enabled="Enable or disable verbose debug logging")
+    async def debug(interaction: discord.Interaction, enabled: bool):
+        """Toggle debug logging level."""
+        root_logger = logging.getLogger()
+        
+        if enabled:
+            root_logger.setLevel(logging.DEBUG)
+            status = "✅ Enabled"
+            color = discord.Color.orange()
+        else:
+            root_logger.setLevel(logging.INFO)
+            status = "❌ Disabled"
+            color = discord.Color.light_grey()
+            
+        embed = discord.Embed(
+            title=f"🐞 Debug Mode {status}",
+            description=f"Logging level set to {'DEBUG' if enabled else 'INFO'}.",
+            color=color
+        )
+        await interaction.response.send_message(embed=embed)
     
     
     @bot.tree.command(name="prompt-mode", description="Switch between thinking (detailed) and short (concise) response modes")

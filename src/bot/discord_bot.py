@@ -179,6 +179,21 @@ class DiscordBot(discord.Client):
         
         logger.info("✅ Bot is ready and listening for mentions!")
     
+    async def on_error(self, event, *args, **kwargs):
+        """
+        Global error handler for Discord events.
+        
+        Captures unhandled exceptions from event listeners and logs them
+        with full context.
+        """
+        logger.error(f"❌ Unhandled exception in event '{event}'", exc_info=True)
+        
+        # If we have args, log them for context (be careful with sensitive data)
+        if args:
+            logger.error(f"Event args: {args}")
+        if kwargs:
+            logger.error(f"Event kwargs: {kwargs}")
+
     async def get_service_health_status(self) -> Dict[str, str]:
         """
         Get current health status of all services.
@@ -1037,8 +1052,52 @@ class DiscordBot(discord.Client):
                     # Use dynamic timeout based on model complexity
                     api_timeout = self.gemini_client.get_timeout_for_current_model() + 10  # Add buffer
                     
+                    # Setup streaming callback for thinking mode
+                    accumulated_text = ""
+                    last_edit_time = 0
+                    
+                    async def on_chunk(chunk_text):
+                        nonlocal accumulated_text, last_edit_time, status_message
+                        accumulated_text += chunk_text
+                        
+                        # Debug logging for streaming
+                        # logger.debug(f"Stream chunk received: {len(chunk_text)} chars")
+                        
+                        if not status_message:
+                            return
+                            
+                        start_tag = "<thinking>"
+                        end_tag = "</thinking>"
+                        
+                        if start_tag in accumulated_text:
+                            start_idx = accumulated_text.find(start_tag) + len(start_tag)
+                            end_idx = accumulated_text.find(end_tag)
+                            
+                            if end_idx != -1:
+                                content = accumulated_text[start_idx:end_idx].strip()
+                            else:
+                                content = accumulated_text[start_idx:].strip()
+                                
+                            import time
+                            current_time = time.time()
+                            if current_time - last_edit_time > 1.5 and content:
+                                try:
+                                    # Show last 1500 chars to keep it dynamic
+                                    display_content = content
+                                    if len(display_content) > 1500:
+                                        display_content = "..." + display_content[-1500:]
+                                    
+                                    await status_message.edit(content=f"🧠 **Thinking Process:**\n{display_content}")
+                                    last_edit_time = current_time
+                                except Exception:
+                                    pass
+                        else:
+                            # If we are in thinking mode but no tag yet, maybe show the raw text if it looks like thinking?
+                            # But safer to wait for tag.
+                            pass
+
                     api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None),
+                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None, on_chunk=on_chunk),
                         timeout=api_timeout
                     )
                     

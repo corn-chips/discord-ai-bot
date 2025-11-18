@@ -79,34 +79,34 @@ class EnhancedCommandHandler:
 User message: "{message_content}"
 Has image attachments: {"yes" if has_images else "no"}
 
-Respond with EXACTLY two lines:
+Respond with a JSON object containing two keys: "intent" and "complexity".
 
-Line 1 - Intent (choose ONE):
+"intent" must be ONE of:
 - "image_generate" if user wants to CREATE/GENERATE a new image
 - "image_edit" if user wants to EDIT/MODIFY an existing image (only if has_images=yes)
 - "text" for any other request (questions, conversations, help requests, etc.)
 
-Line 2 - Complexity level:
+"complexity" must be ONE of:
 - "low" for simple questions, basic info, quick facts, straightforward requests
 - "medium" for moderate complexity needing reasoning, analysis, or detailed explanations
 - "high" for complex tasks needing deep analysis, creative writing, coding, or advanced reasoning
 
 Examples:
-"Create an image of a sunset" (no images) -> image_generate, low
-"Remove the background" (has images) -> image_edit, low
-"What's 2+2?" (no images) -> text, low
-"Explain quantum mechanics" (no images) -> text, medium
-"Write a complex sorting algorithm" (no images) -> text, high
-"Help me understand this bot" (no images) -> text, low
-
-Your response (two lines only):"""
+"Create an image of a sunset" (no images) -> {{"intent": "image_generate", "complexity": "low"}}
+"Remove the background" (has images) -> {{"intent": "image_edit", "complexity": "low"}}
+"What's 2+2?" (no images) -> {{"intent": "text", "complexity": "low"}}
+"Explain quantum mechanics" (no images) -> {{"intent": "text", "complexity": "medium"}}
+"Write a complex sorting algorithm" (no images) -> {{"intent": "text", "complexity": "high"}}
+"Help me understand this bot" (no images) -> {{"intent": "text", "complexity": "low"}}
+"""
 
             # Create router model instance for classification
             model = genai.GenerativeModel(
                 model_name="gemini-2.0-flash-lite",
                 generation_config={
                     "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_output_tokens": 30,  # Enough for two lines
+                    "max_output_tokens": 100,
+                    "response_mime_type": "application/json"
                 }
             )
             
@@ -117,30 +117,32 @@ Your response (two lines only):"""
             )
             
             # Extract and normalize the response
-            result = response.text.strip().lower()
-            lines = [line.strip() for line in result.split('\n') if line.strip()]
+            import json
+            try:
+                result = json.loads(response.text)
+                intent_str = result.get("intent", "text").lower()
+                complexity_level = result.get("complexity", "medium").lower()
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse router JSON response: {response.text}")
+                intent_str = "text"
+                complexity_level = "medium"
             
             # Parse the response
             intent = CommandIntent.UNKNOWN
-            complexity_level = "medium"  # Default to medium
             
-            if len(lines) >= 1:
-                intent_str = lines[0]
-                if intent_str == "image_generate":
-                    intent = CommandIntent.IMAGE_GENERATE
-                elif intent_str == "image_edit":
-                    intent = CommandIntent.IMAGE_EDIT
-                else:  # "text" or anything else
-                    intent = CommandIntent.UNKNOWN
+            if intent_str == "image_generate":
+                intent = CommandIntent.IMAGE_GENERATE
+            elif intent_str == "image_edit":
+                intent = CommandIntent.IMAGE_EDIT
+            else:  # "text" or anything else
+                intent = CommandIntent.UNKNOWN
             
-            if len(lines) >= 2:
-                # Validate complexity level
-                if lines[1] in ["low", "medium", "high"]:
-                    complexity_level = lines[1]
-                else:
-                    logger.warning(f"Invalid complexity level '{lines[1]}', defaulting to 'medium'")
+            # Validate complexity level
+            if complexity_level not in ["low", "medium", "high"]:
+                logger.warning(f"Invalid complexity level '{complexity_level}', defaulting to 'medium'")
+                complexity_level = "medium"
             
-            logger.info(f"🔍 Router decision: '{message_content[:50]}...' -> intent={intent.value}, complexity={complexity_level} (raw: '{result}')")
+            logger.info(f"🔍 Router decision: '{message_content[:50]}...' -> intent={intent.value}, complexity={complexity_level}")
             return intent, complexity_level
             
         except Exception as e:

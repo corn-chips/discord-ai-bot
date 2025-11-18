@@ -9,91 +9,94 @@ This script performs comprehensive health checks including:
 - Log file accessibility
 """
 
+from __future__ import annotations
+
 import sys
-import os
-import logging
 import asyncio
 from pathlib import Path
 
-# Add the src directory to the Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+# Load environment variables if a .env file exists (falls back to system env otherwise)
+dotenv_path = ROOT_DIR / ".env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+else:
+    load_dotenv()
 
 try:
-    from config import BotConfig
-    from services.nano_banana_client import NanoBananaClient, ServiceStatus
+    from src.config import BotConfig
+    from src.services.nano_banana_client import NanoBananaClient, ServiceStatus
     import google.generativeai as genai
 except ImportError as e:
     print(f"Health check failed: Missing dependencies - {e}")
     sys.exit(1)
 
 
+def _load_config() -> tuple[bool, BotConfig | None, str]:
+    """Load bot configuration from environment variables."""
+    try:
+        config = BotConfig.from_environment()
+        return True, config, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, None, f"Failed to load configuration: {exc}"
+
+
 async def check_configuration():
     """Check if bot configuration is valid."""
-    try:
-        config = BotConfig()
-        
-        # Check required configuration
-        if not config.discord_bot_token:
-            return False, "Discord bot token not configured"
-        
-        if not config.gemini_api_key:
-            return False, "Gemini API key not configured"
-        
-        # Check optional image generation configuration
-        # nano_banana_api_key defaults to gemini_api_key, so just check if it exists
-        if hasattr(config, 'nano_banana_api_key') and config.nano_banana_api_key:
-            # Image generation uses Gemini SDK directly, no base_url needed
-            pass
-        
-        return True, "Configuration valid"
-        
-    except Exception as e:
-        return False, f"Configuration error: {e}"
+    success, config, error = _load_config()
+    if not success or not config:
+        return False, error
+
+    validation_errors = config.validate()
+    if validation_errors:
+        return False, "; ".join(validation_errors)
+
+    return True, "Configuration valid"
 
 
 async def check_gemini_service():
     """Check Gemini API connectivity."""
+    success, config, error = _load_config()
+    if not success or not config:
+        return False, error
+
+    if not config.gemini_api_key:
+        return False, "GEMINI_API_KEY not configured"
+
     try:
-        config = BotConfig()
         genai.configure(api_key=config.gemini_api_key)
-        
-        # Try to list models to verify API key
-        models = genai.list_models()
-        model_list = list(models)
-        
+        model_list = list(genai.list_models())
         if model_list:
             return True, f"Gemini API accessible ({len(model_list)} models available)"
-        else:
-            return False, "Gemini API accessible but no models found"
-            
-    except Exception as e:
+        return False, "Gemini API accessible but no models found"
+    except Exception as e:  # noqa: BLE001
         return False, f"Gemini API error: {e}"
 
 
 async def check_nano_banana_service():
     """Check Gemini image generation service if configured."""
+    success, config, error = _load_config()
+    if not success or not config:
+        return False, error
+
+    api_key = getattr(config, "nano_banana_api_key", None)
+    if not api_key:
+        return True, "Image generation not configured (optional)"
+
     try:
-        config = BotConfig()
-        
-        if not hasattr(config, 'nano_banana_api_key') or not config.nano_banana_api_key:
-            return True, "Image generation not configured (optional)"
-        
-        # Initialize client (uses Gemini SDK directly)
-        client = NanoBananaClient(
-            api_key=config.nano_banana_api_key,
-            timeout=10
-        )
-        
+        client = NanoBananaClient(api_key=api_key, timeout=10)
         status = await client.check_service_status()
-        
         if status == ServiceStatus.HEALTHY:
             return True, "Gemini image generation service healthy"
-        elif status == ServiceStatus.DEGRADED:
+        if status == ServiceStatus.DEGRADED:
             return True, "Gemini image generation service degraded but functional"
-        else:
-            return False, f"Gemini image generation service unavailable: {status.value}"
-            
-    except Exception as e:
+        return False, f"Gemini image generation service unavailable: {status.value}"
+    except Exception as e:  # noqa: BLE001
         return False, f"Gemini image generation service error: {e}"
 
 
@@ -101,7 +104,7 @@ def check_file_system():
     """Check file system access and permissions."""
     try:
         # Check logs directory
-        logs_dir = Path("logs")
+        logs_dir = ROOT_DIR / "logs"
         if not logs_dir.exists():
             logs_dir.mkdir(parents=True, exist_ok=True)
         
@@ -109,7 +112,7 @@ def check_file_system():
             return False, "Logs directory is not accessible"
         
         # Check temp directory
-        temp_dir = Path("temp")
+        temp_dir = ROOT_DIR / "temp"
         if not temp_dir.exists():
             temp_dir.mkdir(parents=True, exist_ok=True)
         

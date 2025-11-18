@@ -10,17 +10,8 @@ import logging
 import random
 from typing import List, Optional
 
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-# Import the new genai SDK for Google Search grounding support
-try:
-    from google import genai as genai_new
-    from google.genai import types as genai_types
-    NEW_SDK_AVAILABLE = True
-except ImportError:
-    NEW_SDK_AVAILABLE = False
-    genai_new = None
-    genai_types = None
+from google import genai
+from google.genai import types
 
 from ..config import BotConfig
 from ..models.data_models import APIResponse, MessageContext, TokenUsage
@@ -49,10 +40,8 @@ class GeminiClient:
         self.config = config
         self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("gemini_client")
-        self._model = None
-        self._model_with_search = None
-        self._new_client = None  # New SDK client for search grounding
-        self._current_model_name = "gemini-flash-latest"
+        self.client = None
+        self._current_model_name = "gemini-2.5-flash"
         self._prompt_mode = "short"  # Default to short mode, can be "short" or "thinking"
         self._thinking_single_use = True  # Thinking mode auto-reverts to short after one use
         self._configure_api()
@@ -61,12 +50,12 @@ class GeminiClient:
         """Configure the Gemini API with authentication and settings."""
         try:
             logger.info("=" * 80)
-            logger.info("CONFIGURING GEMINI API")
+            logger.info("CONFIGURING GEMINI API (New SDK)")
             
             # Validate API key exists and is not empty
             if not self.config.gemini_api_key or not self.config.gemini_api_key.strip():
                 logger.error("Gemini API key is missing or empty")
-                self._model = None
+                self.client = None
                 logger.info("=" * 80)
                 return
             
@@ -74,7 +63,7 @@ class GeminiClient:
             if len(self.config.gemini_api_key) < 20:
                 logger.error("Gemini API key appears to be invalid (too short)")
                 logger.error(f"API key length: {len(self.config.gemini_api_key)}")
-                self._model = None
+                self.client = None
                 logger.info("=" * 80)
                 return
             
@@ -82,67 +71,18 @@ class GeminiClient:
             logger.info(f"API Key (first 8 chars): {self.config.gemini_api_key[:8]}...")
             logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
             
-            genai.configure(api_key=self.config.gemini_api_key)
-            
-            # Configure the model with appropriate settings
-            generation_config = {
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 65536,  # Maximum token limit for longest possible responses
-            }
-            
-            # Configure safety settings - all filters disabled
-            safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
-            
-            # Configure model using the legacy SDK (for backwards compatibility)
-            self._model = genai.GenerativeModel(
-                model_name=self._current_model_name,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
-            
-            # Configure the new SDK client for Google Search grounding support
-            if NEW_SDK_AVAILABLE and genai_new is not None:
-                try:
-                    self._new_client = genai_new.Client(api_key=self.config.gemini_api_key)
-                    logger.info("✅ New Gemini SDK initialized - Google Search grounding ENABLED")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize new SDK client: {e}")
-                    logger.warning("Google Search grounding will be unavailable")
-                    self._new_client = None
-            else:
-                logger.warning("New Gemini SDK (google-genai) not available")
-                logger.warning("Please install: pip install google-genai")
-                logger.warning("Google Search grounding will be unavailable")
-                self._new_client = None
-            
-            # Set model_with_search to same model for fallback
-            self._model_with_search = self._model
+            # Initialize the new SDK client
+            self.client = genai.Client(api_key=self.config.gemini_api_key)
             
             logger.info(f"Model name: {self._current_model_name}")
-            logger.info(f"Generation config: temperature={generation_config['temperature']}, "
-                       f"top_p={generation_config['top_p']}, top_k={generation_config['top_k']}, "
-                       f"max_output_tokens={generation_config['max_output_tokens']}")
-            logger.info(f"Safety settings: All filters set to BLOCK_NONE")
             logger.info(f"Gemini API configured successfully")
             logger.info("=" * 80)
             
-        except ValueError as e:
-            logger.error(f"Invalid Gemini API key format: {e}")
-            logger.error(f"ValueError details: {repr(e)}", exc_info=True)
-            self._model = None
-            logger.info("=" * 80)
         except Exception as e:
             logger.error(f"Failed to configure Gemini API: {e}", exc_info=True)
             logger.error(f"Exception type: {type(e).__name__}")
             logger.error(f"Exception details: {repr(e)}")
-            self._model = None
+            self.client = None
             logger.info("=" * 80)
     
     def get_current_model(self) -> str:
@@ -185,7 +125,7 @@ class GeminiClient:
         try:
             usage_info = {
                 "model_name": self._current_model_name,
-                "api_configured": self._model is not None,
+                "api_configured": self.client is not None,
                 "rate_limits": {
                     "free_tier": {
                         "requests_per_minute": 15,
@@ -258,34 +198,6 @@ class GeminiClient:
             logger.info(f"Old model: {old_model}")
             logger.info(f"New model: {model_name}")
             self._current_model_name = model_name
-            
-            # Reconfigure with new model
-            generation_config = {
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 65536,  # Increased to allow longer responses (will be split if needed)
-            }
-            
-            safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
-            
-            # Configure model using legacy SDK
-            self._model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
-            
-            # Set model_with_search to same model for fallback
-            self._model_with_search = self._model
-            
-            # Note: New SDK client doesn't need model-specific configuration
-            # as it's specified per-request
             
             logger.info(f"Model switched successfully from {old_model} to {model_name}")
             logger.info("=" * 80)
@@ -392,7 +304,7 @@ class GeminiClient:
     
     def _extract_grounding_sources(self, response, use_search: bool) -> list:
         """
-        Extract grounding sources from API response (works with both old and new SDK).
+        Extract grounding sources from API response.
         
         Args:
             response: The API response object
@@ -407,7 +319,6 @@ class GeminiClient:
             return grounding_sources
         
         try:
-            # Try new SDK format first
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
                 
@@ -430,13 +341,9 @@ class GeminiClient:
                                 })
                         
                         if grounding_sources:
-                            logger.info(f"✅ Extracted {len(grounding_sources)} grounding sources from new SDK:")
+                            logger.info(f"✅ Extracted {len(grounding_sources)} grounding sources:")
                             for i, source in enumerate(grounding_sources):
                                 logger.info(f"  [{i+1}] {source['title']} - {source['uri']}")
-                    
-                    # Also check search_entry_point for additional info
-                    if hasattr(grounding_metadata, 'search_entry_point'):
-                        logger.info("📊 Search entry point data available (for UI rendering)")
         
         except Exception as e:
             logger.error(f"Error extracting grounding sources: {e}")
@@ -537,8 +444,8 @@ class GeminiClient:
         Returns:
             APIResponse containing the generated response or error information
         """
-        if not self._model:
-            logger.error("Attempted to generate response but Gemini model is not configured")
+        if not self.client:
+            logger.error("Attempted to generate response but Gemini client is not configured")
             return APIResponse(
                 success=False,
                 error_type="configuration_error",
@@ -875,93 +782,85 @@ class GeminiClient:
         Returns:
             Generated response from Gemini API
         """
-        # Use the new SDK if search is enabled and available
-        if use_search and self._new_client is not None and NEW_SDK_AVAILABLE:
-            logger.info(f"🔍 Using NEW SDK with Google Search grounding enabled")
-            logger.info(f"Model: {self._current_model_name}")
-            
-            try:
-                # Configure Google Search tool
-                grounding_tool = genai_types.Tool(
-                    google_search=genai_types.GoogleSearch()
-                )
-                
-                config = genai_types.GenerateContentConfig(
-                    tools=[grounding_tool],
-                    temperature=0.7,
-                    top_p=0.8,
-                    top_k=40,
-                    max_output_tokens=65536,
-                )
-                
-                # Convert content to string if it's a list (multimodal not supported with search yet)
-                if isinstance(content, list):
-                    content_str = content[0] if content else ""
-                    logger.warning("⚠️ Multimodal input detected with search - using text only")
-                else:
-                    content_str = content
-                
-                # Map model name aliases to actual model names for new SDK
-                model_name = self._current_model_name
-                if model_name == "gemini-flash-latest":
-                    model_name = "gemini-2.5-flash"
-                elif model_name == "gemini-flash-lite-latest":
-                    model_name = "gemini-2.5-flash-lite"
-                
-                logger.info(f"Using model name: {model_name}")
-                
-                # Run the new SDK call in a thread pool (it's synchronous)
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self._new_client.models.generate_content(
-                        model=model_name,
-                        contents=content_str,
-                        config=config,
-                    )
-                )
-                
-                logger.info("✅ Successfully received response with Google Search grounding")
-                return response
-                
-            except Exception as e:
-                logger.error(f"❌ Error using new SDK with search: {e}")
-                logger.warning("⚠️ Falling back to legacy SDK without search")
-                # Fall through to use legacy SDK
-        
-        # Use legacy SDK (without search grounding)
-        model = self._model_with_search if use_search else self._model
-        
-        if use_search and self._new_client is None:
-            logger.warning("⚠️ Google Search requested but new SDK not available - using legacy SDK")
-        
-        logger.info(f"Making API call to model: {model._model_name if hasattr(model, '_model_name') else 'unknown'}")
+        logger.info(f"Making API call to model: {self._current_model_name}")
         logger.info(f"Using search-enabled model: {use_search}")
         
-        # Run the synchronous API call in a thread pool
+        # Configure tools
+        tools = []
+        if use_search:
+            tools.append(types.Tool(google_search=types.GoogleSearch()))
+        
+        # Configure generation config
+        config = types.GenerateContentConfig(
+            tools=tools,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=40,
+            max_output_tokens=65536,
+            safety_settings=[
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+            ]
+        )
+        
+        # Convert content to string if it's a list (multimodal not supported with search yet)
+        # Note: The new SDK supports multimodal content differently, but for now we'll stick to text if search is on
+        if use_search and isinstance(content, list):
+            content_str = content[0] if content else ""
+            logger.warning("⚠️ Multimodal input detected with search - using text only")
+        else:
+            content_str = content
+        
+        # Map model name aliases to actual model names for new SDK
+        model_name = self._current_model_name
+        if model_name == "gemini-flash-latest":
+            model_name = "gemini-2.5-flash"
+        elif model_name == "gemini-flash-lite-latest":
+            model_name = "gemini-2.5-flash-lite"
+        
+        logger.info(f"Using model name: {model_name}")
+        
+        # Run the new SDK call in a thread pool (it's synchronous)
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, 
-            model.generate_content, 
-            content
+            None,
+            lambda: self.client.models.generate_content(
+                model=model_name,
+                contents=content_str,
+                config=config,
+            )
         )
     
     def _get_response_text(self, response) -> Optional[str]:
         """
-        Safely extract text from response (works with both old and new SDK).
+        Safely extract text from response.
         
         Args:
-            response: Response object from either SDK
+            response: Response object from SDK
             
         Returns:
             Text content or None if not available
         """
         try:
-            # Try direct .text attribute (works for both SDKs)
+            # Try direct .text attribute
             if hasattr(response, 'text') and response.text:
                 return response.text
             
-            # Try candidates[0].content.parts[0].text (new SDK structure)
+            # Try candidates[0].content.parts[0].text
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
                 if hasattr(candidate, 'content') and candidate.content:
@@ -976,10 +875,10 @@ class GeminiClient:
     
     def _normalize_finish_reason(self, finish_reason):
         """
-        Normalize finish reason from both old SDK (int) and new SDK (enum) formats.
+        Normalize finish reason from SDK enum format.
         
         Args:
-            finish_reason: Finish reason from either SDK (int or enum)
+            finish_reason: Finish reason from SDK (enum)
             
         Returns:
             Integer representation: 1=STOP, 2=MAX_TOKENS, 3=SAFETY, etc.
@@ -988,7 +887,7 @@ class GeminiClient:
         if isinstance(finish_reason, int):
             return finish_reason
         
-        # Handle new SDK enum format
+        # Handle SDK enum format
         if hasattr(finish_reason, 'name'):
             reason_name = finish_reason.name.upper()
             reason_map = {

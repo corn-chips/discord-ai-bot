@@ -7,12 +7,15 @@ services:
     restart: unless-stopped
     # Load environment variables from .env file
     # Required: DISCORD_BOT_TOKEN, GEMINI_API_KEY
+    # GEMINI_API_KEY enables: chat, image generation, and Google Search grounding
     # Optional: NANO_BANANA_API_KEY (defaults to GEMINI_API_KEY for image generation)
     env_file:
       - .env
     volumes:
       # Mount logs directory for persistent logging
       - ./logs:/app/logs
+      # Persist token usage database
+      - ./data:/app/data
       # Mount source code for live editing (development)
       - ./src:/app/src
       # Temporary files (image processing, file uploads)
@@ -22,6 +25,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_FILE=/app/logs/bot.log
+      - TOKEN_DB_PATH=/app/data/token_usage.db
     healthcheck:
       test: ["CMD", "python", "scripts/health_check.py"]
       interval: 30s
@@ -37,3 +41,4 @@ services:
 volumes:
   bot-temp:
   bot-cache:
+  # Host bind mount handles /app/data

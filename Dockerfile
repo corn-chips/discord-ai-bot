@@ -32,6 +32,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies with optimizations
+# Note: Includes both google-generativeai (legacy) and google-genai (new SDK)
+# The new google-genai SDK is required for Google Search grounding functionality
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -46,8 +48,8 @@ RUN useradd --create-home --shell /bin/bash botuser && \
     chown -R botuser:botuser /app
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/logs /app/temp /app/cache && \
-    chown -R botuser:botuser /app/logs /app/temp /app/cache
+RUN mkdir -p /app/logs /app/temp /app/cache /app/data && \
+    chown -R botuser:botuser /app/logs /app/temp /app/cache /app/data
 
 USER botuser
 
@@ -61,7 +63,10 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PIP_NO_CACHE_DIR=1
 
-# Note: GEMINI_API_KEY enables both chat and image generation/editing
+# Note: GEMINI_API_KEY enables:
+#   - Chat/text generation
+#   - Image generation/editing
+#   - Google Search grounding (real-time web search integration)
 # Set NANO_BANANA_API_KEY separately only if you want different quotas
 # See .env.example for configuration options
 

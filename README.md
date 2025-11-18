@@ -37,6 +37,7 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 - **Error Handling**: Graceful handling of API errors with user-friendly messages
 - **Configurable**: Customizable message limits, timeouts, and other settings
 - **Detailed Logging**: Track file processing, AI requests, and responses for troubleshooting
+- **Per-User Token Tracking**: Precisely logs Gemini input/output tokens per request, stores them in SQLite, and powers an in-server `/token-leaderboard`
 
 ## Setup
 
@@ -86,7 +87,12 @@ cp .env.example .env
 # Edit .env with your actual tokens and configuration
 ```
 
-3. Quick start with Docker:
+3. Ensure local persistence folders exist (Docker bind mounts create them if missing, but creating ahead of time avoids permission issues):
+```bash
+mkdir -p data logs
+```
+
+4. Quick start with Docker:
 ```bash
 # Linux/Mac
 ./scripts/docker-build.sh
@@ -98,6 +104,11 @@ scripts\docker-build.bat
 Or manually:
 ```bash
 docker-compose up --build -d
+```
+
+After the initial build completes successfully, subsequent restarts only require:
+```bash
+docker compose up -d
 ```
 
 **Essential Docker Commands:**
@@ -210,6 +221,7 @@ The bot uses environment variables for configuration. Copy `.env.example` to `.e
 - `LOG_FILE`: Optional log file path (default: logs to console and bot.log)
 - `ENABLE_PERFORMANCE_LOGGING`: Enable performance metrics logging (default: true)
 - `NANO_BANANA_API_KEY`: API key for image generation/editing (uses Gemini 2.5 Flash Image model, defaults to GEMINI_API_KEY)
+- `TOKEN_DB_PATH`: Filesystem path for storing the SQLite token usage database (default: `data/token_usage.db`)
 
 ## Usage
 
@@ -224,6 +236,7 @@ The bot includes powerful slash commands for configuration and monitoring:
 - `/ping` - Check bot status and latency
 - `/model` - Switch between Gemini Flash models (2.5, 2.5-Lite, 2.0, 2.0-Lite)
 - `/stats` - View usage statistics and token consumption
+- `/token-leaderboard` - Display the top 10 token users in the current guild using real usage data
 - `/config` - View current configuration
 - `/help` - Show help information
 - `/dev` - Toggle developer mode for detailed error output (Admin only)

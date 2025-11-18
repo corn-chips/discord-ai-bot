@@ -334,12 +334,17 @@ class ImageProcessingService:
                 await self._update_progress(job_id, 0.9, "Finalizing...")
                 
                 # Create result
+                metadata = dict(edit_response.metadata or {})
+                if edit_response.token_usage:
+                    metadata['token_usage'] = edit_response.token_usage
+
                 job.result = ImageEditResult(
                     success=edit_response.success,
                     edited_image=edit_response.image_data,
                     processing_time=edit_response.processing_time,
                     error_message=edit_response.error_message,
-                    metadata=edit_response.metadata
+                    metadata=metadata or None,
+                    token_usage=edit_response.token_usage,
                 )
                 
                 # Update job status
@@ -371,7 +376,9 @@ class ImageProcessingService:
                 job.result = ImageEditResult(
                     success=False,
                     error_message=str(e),
-                    processing_time=(job.completed_at - job.started_at).total_seconds() if job.started_at else 0.0
+                    processing_time=(job.completed_at - job.started_at).total_seconds() if job.started_at else 0.0,
+                    metadata=None,
+                    token_usage=None,
                 )
                 
                 self._stats['failed_requests'] += 1

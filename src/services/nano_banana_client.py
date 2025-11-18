@@ -25,7 +25,7 @@ except ImportError:
     types = None
     logging.warning("Google GenAI SDK not available. Install: pip install google-generativeai")
 
-from ..models.data_models import EditType, ImageEditResult
+from ..models.data_models import EditType, TokenUsage
 from ..utils.image_utils import validate_image
 
 logger = logging.getLogger(__name__)
@@ -57,12 +57,14 @@ class EditResponse:
     
     def __init__(self, success: bool, image_data: Optional[bytes] = None,
                  error_message: Optional[str] = None, processing_time: float = 0.0,
-                 metadata: Optional[Dict[str, Any]] = None):
+                 metadata: Optional[Dict[str, Any]] = None,
+                 token_usage: Optional[TokenUsage] = None):
         self.success = success
         self.image_data = image_data
         self.error_message = error_message
         self.processing_time = processing_time
         self.metadata = metadata or {}
+        self.token_usage = token_usage
 
 
 class NanoBananaClientError(Exception):
@@ -207,21 +209,28 @@ class NanoBananaClient:
                 logger.info(f"Image generation mode - prompt: {prompt}")
             
             # Make request with retry logic using Gemini SDK
-            result_image_data = await self._make_gemini_request(prompt, image_data)
+            result_image_data, token_usage = await self._make_gemini_request(prompt, image_data)
             
+            response_metadata = {'edit_type': edit_type.value, 'model': self.model_name}
+            if token_usage:
+                response_metadata['token_usage'] = token_usage
+
             if result_image_data:
                 processing_time = (datetime.now() - start_time).total_seconds()
                 return EditResponse(
                     success=True,
                     image_data=result_image_data,
                     processing_time=processing_time,
-                    metadata={'edit_type': edit_type.value, 'model': self.model_name}
+                    metadata=response_metadata,
+                    token_usage=token_usage,
                 )
             else:
                 return EditResponse(
                     success=False,
                     error_message="Failed to generate/edit image - no image data returned",
-                    processing_time=(datetime.now() - start_time).total_seconds()
+                    processing_time=(datetime.now() - start_time).total_seconds(),
+                    metadata=response_metadata,
+                    token_usage=token_usage,
                 )
                 
         except Exception as e:
@@ -233,7 +242,7 @@ class NanoBananaClient:
                 processing_time=(datetime.now() - start_time).total_seconds()
             )
     
-    async def _make_gemini_request(self, prompt: str, image_data: Optional[bytes] = None) -> Optional[bytes]:
+    async def _make_gemini_request(self, prompt: str, image_data: Optional[bytes] = None) -> tuple[Optional[bytes], Optional[TokenUsage]]:
         """
         Make a request to Gemini 2.5 Flash Image model.
         
@@ -242,12 +251,14 @@ class NanoBananaClient:
             image_data: Optional image bytes for editing operations
             
         Returns:
-            Generated/edited image as bytes, or None on failure
+            Tuple of (image bytes, token usage metadata)
         """
         last_exception = None
+        token_usage: Optional[TokenUsage] = None
         
         for attempt in range(self.max_retries + 1):
             try:
+                token_usage = None
                 # Build content list
                 contents = []
                 
@@ -276,6 +287,7 @@ class NanoBananaClient:
                         response_modalities=['Image']  # Request only image output
                     )
                 )
+                token_usage = self._extract_token_usage(response)
                 
                 # Extract image from response
                 if response:
@@ -300,7 +312,7 @@ class NanoBananaClient:
                                         if hasattr(part, 'inline_data') and part.inline_data is not None:
                                             logger.info("Found inline_data in part")
                                             self._consecutive_failures = 0
-                                            return part.inline_data.data
+                                            return part.inline_data.data, token_usage
                                         
                                         # Check for blob (new SDK format)
                                         if hasattr(part, 'blob') and part.blob is not None:
@@ -308,9 +320,9 @@ class NanoBananaClient:
                                             self._consecutive_failures = 0
                                             # blob might have 'data' or be the data itself
                                             if hasattr(part.blob, 'data'):
-                                                return part.blob.data
+                                                return part.blob.data, token_usage
                                             else:
-                                                return part.blob
+                                                return part.blob, token_usage
                                         
                                         # Check for image_url or other image formats
                                         if hasattr(part, 'image_url'):
@@ -327,7 +339,7 @@ class NanoBananaClient:
                 # No image in response
                 logger.warning("No image data found in response")
                 logger.warning(f"Response structure: {type(response)}, attributes: {dir(response) if response else 'None'}")
-                return None
+                return None, token_usage
                 
             except Exception as e:
                 last_exception = e
@@ -344,6 +356,61 @@ class NanoBananaClient:
         # All retries failed
         self._consecutive_failures += 1
         raise NanoBananaClientError(f"Gemini request failed after {self.max_retries + 1} attempts: {last_exception}")
+
+    def _extract_token_usage(self, response) -> Optional[TokenUsage]:
+        """Extract token usage metadata from Gemini API responses."""
+
+        usage = getattr(response, 'usage_metadata', None)
+        if not usage:
+            return None
+
+        def _read_field(obj, names):
+            for name in names:
+                value = None
+                if isinstance(obj, dict):
+                    value = obj.get(name)
+                else:
+                    value = getattr(obj, name, None)
+                if value is not None:
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        continue
+            return None
+
+        prompt_tokens = _read_field(usage, [
+            'prompt_token_count', 'prompt_tokens', 'input_tokens', 'promptTokenCount'
+        ])
+        candidate_tokens = _read_field(usage, [
+            'candidates_token_count', 'output_tokens', 'candidatesTokenCount'
+        ])
+        total_tokens = _read_field(usage, [
+            'total_token_count', 'total_tokens', 'totalTokenCount'
+        ])
+
+        if prompt_tokens is None and candidate_tokens is None and total_tokens is None:
+            return None
+
+        prompt_tokens = prompt_tokens or 0
+        candidate_tokens = candidate_tokens or 0
+        total_tokens = total_tokens or (prompt_tokens + candidate_tokens)
+
+        try:
+            token_usage = TokenUsage(
+                input_tokens=prompt_tokens,
+                output_tokens=candidate_tokens,
+                total_tokens=total_tokens
+            )
+            logger.info(
+                "Image token usage extracted: input=%s output=%s total=%s",
+                token_usage.input_tokens,
+                token_usage.output_tokens,
+                token_usage.total_tokens
+            )
+            return token_usage
+        except Exception as exc:
+            logger.warning(f"Failed to parse image token usage metadata: {exc}")
+            return None
     
     async def check_service_status(self) -> ServiceStatus:
         """

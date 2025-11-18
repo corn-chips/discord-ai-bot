@@ -378,7 +378,7 @@ class DiscordBot(discord.Client):
                 
                 # Get standard channel context
                 try:
-                    standard_context = await self.context_collector.get_channel_context(message.channel)
+                    standard_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     standard_context = []
@@ -394,7 +394,7 @@ class DiscordBot(discord.Client):
                 logger.debug("Message is not a reply, collecting standard context")
                 # Get standard channel context only
                 try:
-                    combined_context = await self.context_collector.get_channel_context(message.channel)
+                    combined_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     combined_context = []

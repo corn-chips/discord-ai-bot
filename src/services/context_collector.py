@@ -34,7 +34,7 @@ class ContextCollector:
         self.reply_context_range = reply_context_range
         self.logger = logging.getLogger(__name__)
     
-    async def get_channel_context(self, channel: discord.TextChannel, limit: int = None) -> List[MessageContext]:
+    async def get_channel_context(self, channel: discord.TextChannel, limit: int = None, bot_user: discord.User = None) -> List[MessageContext]:
         """
         Retrieve recent message history from a Discord channel.
         
@@ -47,6 +47,7 @@ class ContextCollector:
         Args:
             channel: Discord channel to retrieve messages from
             limit: Maximum number of messages to retrieve (defaults to max_context_messages)
+            bot_user: The bot user object (to include bot's own messages)
             
         Returns:
             List of MessageContext objects representing recent messages
@@ -69,13 +70,14 @@ class ContextCollector:
                     if message.created_at < cutoff_time:
                         continue
                         
-                    # Skip bot messages to avoid self-referential context
+                    # Skip bot messages unless it's us
                     if message.author.bot:
-                        continue
+                        if not bot_user or message.author.id != bot_user.id:
+                            continue
                     
-                    # Skip messages with no text content (images, embeds, stickers only)
-                    if not message.content or not message.content.strip():
-                        self.logger.debug(f"Skipping message {message.id} with no text content")
+                    # Skip messages with no text content AND no attachments
+                    if (not message.content or not message.content.strip()) and not message.attachments:
+                        self.logger.debug(f"Skipping message {message.id} with no text content or attachments")
                         continue
                     
                     # Convert Discord message to MessageContext

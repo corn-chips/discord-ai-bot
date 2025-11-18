@@ -255,7 +255,14 @@ class UserExperienceService:
                 async def remove_reaction_after_delay():
                     try:
                         await asyncio.sleep(remove_after)
-                        await message.remove_reaction(reaction_type.value, message.guild.me)
+                        bot_member = None
+                        if message.guild and message.guild.me:
+                            bot_member = message.guild.me
+                        else:
+                            bot_member = getattr(getattr(message, "_state", None), "user", None)
+
+                        if bot_member is not None:
+                            await message.remove_reaction(reaction_type.value, bot_member)
                     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                         # Reaction might already be removed or no permission
                         pass

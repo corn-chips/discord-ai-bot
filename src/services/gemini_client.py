@@ -454,7 +454,7 @@ class GeminiClient:
         
         return any(keyword in prompt_lower for keyword in search_keywords)
     
-    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, on_chunk: Optional[callable] = None) -> APIResponse:
+    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, on_chunk: Optional[callable] = None, model_override: Optional[str] = None, search_override: Optional[bool] = None) -> APIResponse:
         """
         Generate a response using the Gemini API with retry logic.
         
@@ -463,6 +463,8 @@ class GeminiClient:
             context: Optional conversation context for better responses
             images: Optional list of PIL Image objects to include in the request
             on_chunk: Optional async callback for streaming response chunks
+            model_override: Optional model name to use for this specific request
+            search_override: Optional boolean to force enable/disable search for this request
             
         Returns:
             APIResponse containing the generated response or error information
@@ -475,14 +477,21 @@ class GeminiClient:
                 content="Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable."
             )
         
+        # Use override model or current model
+        target_model = model_override if model_override else self._current_model_name
+        
         # Log API call initiation
         logger.info("=" * 80)
         logger.info("API CALL INITIATED")
-        logger.info(f"Model: {self._current_model_name}")
+        logger.info(f"Model: {target_model}")
         logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
         
         # Determine if Google Search should be used
-        use_search = self._should_use_search(prompt)
+        if search_override is not None:
+            use_search = search_override
+        else:
+            use_search = self._should_use_search(prompt)
+            
         if use_search:
             logger.info("Google Search enabled for this request")
         
@@ -511,7 +520,11 @@ class GeminiClient:
         
         # Get dynamic timeout based on current model
         timeout_duration = self.get_timeout_for_current_model()
-        logger.info(f"Using timeout: {timeout_duration}s for model {self._current_model_name} (mode: {self._prompt_mode})")
+        # Adjust timeout if using Pro model via override
+        if target_model == "gemini-2.5-pro":
+            timeout_duration = max(timeout_duration, 120)
+            
+        logger.info(f"Using timeout: {timeout_duration}s for model {target_model} (mode: {self._prompt_mode})")
         
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -522,7 +535,7 @@ class GeminiClient:
                 start_time = time.time()
                 
                 response = await asyncio.wait_for(
-                    self._generate_response_async(content, use_search, on_chunk),
+                    self._generate_response_async(content, use_search, on_chunk, model_override=target_model),
                     timeout=timeout_duration
                 )
                 
@@ -794,7 +807,7 @@ class GeminiClient:
             content="An unexpected error occurred"
         )
     
-    async def _generate_response_async(self, content, use_search: bool = False, on_chunk: Optional[callable] = None):
+    async def _generate_response_async(self, content, use_search: bool = False, on_chunk: Optional[callable] = None, model_override: Optional[str] = None):
         """
         Async wrapper for Gemini API call.
         
@@ -802,11 +815,13 @@ class GeminiClient:
             content: Content to send to the API (string for text-only, list for multimodal)
             use_search: Whether to use the model with Google Search enabled
             on_chunk: Optional async callback for streaming chunks
+            model_override: Optional model name to use
             
         Returns:
             Generated response from Gemini API
         """
-        logger.info(f"Making API call to model: {self._current_model_name}")
+        target_model = model_override if model_override else self._current_model_name
+        logger.info(f"Making API call to model: {target_model}")
         logger.info(f"Using search-enabled model: {use_search}")
         
         # Configure tools
@@ -850,7 +865,7 @@ class GeminiClient:
             content_str = content
         
         # Map model name aliases to actual model names for new SDK
-        model_name = self._current_model_name
+        model_name = target_model
         if model_name == "gemini-flash-latest":
             model_name = "gemini-2.5-flash"
         elif model_name == "gemini-flash-lite-latest":

@@ -7,10 +7,13 @@ statistics, and utility functions.
 
 import asyncio
 import logging
+import os
+from io import BytesIO
 from datetime import datetime, timedelta
 from typing import Optional
 
 import discord
+import jinja2
 from discord import app_commands
 
 from ..config import BotConfig
@@ -1160,6 +1163,87 @@ async def setup_commands(
             )
 
 
+    @bot.tree.command(name="deepresearch", description="Perform a deep research task and generate a report")
+    @app_commands.describe(topic="The topic to research")
+    async def deepresearch(interaction: discord.Interaction, topic: str):
+        """Perform deep research on a topic and generate a comprehensive report."""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            # Step 1: Research Phase (Flash + Search)
+            await interaction.followup.send(f"🔍 **Starting Deep Research on:** *{topic}*\nStep 1/2: Gathering information...")
+            
+            research_prompt = f"Research the following topic in depth: {topic}. Provide comprehensive details, facts, statistics, and different perspectives. Focus on gathering raw information."
+            
+            research_response = await gemini_client.generate_response(
+                prompt=research_prompt,
+                model_override="gemini-2.5-flash",
+                search_override=True
+            )
+            
+            if not research_response.success:
+                await interaction.followup.send(f"❌ Research failed: {research_response.content}")
+                return
+
+            research_data = research_response.content
+            
+            # Step 2: Thinking Phase (Pro + Template)
+            await interaction.followup.send(f"🧠 Step 2/2: Analyzing and synthesizing report...")
+            
+            # Load template
+            template_path = os.path.join("grok-prompts", "default_deepsearch_final_summarizer_prompt.j2")
+            if not os.path.exists(template_path):
+                # Fallback if path is different or running from different cwd
+                template_path = os.path.join(os.getcwd(), "grok-prompts", "default_deepsearch_final_summarizer_prompt.j2")
+            
+            try:
+                with open(template_path, "r", encoding="utf-8") as f:
+                    template_content = f.read()
+                
+                template = jinja2.Template(template_content)
+                final_prompt = template.render(
+                    question=topic,
+                    answer=research_data,
+                    current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    language="English",
+                    prefill=False,
+                    is_grok_file_update_request=False,
+                    real_time_data_provider_called=False,
+                    contains_url=True,
+                    supported_inline_rich_content_tools=False
+                )
+            except Exception as e:
+                logger.error(f"Template error: {e}")
+                # Fallback prompt if template fails
+                final_prompt = f"User Query: {topic}\n\nResearch Data:\n{research_data}\n\nPlease write a comprehensive deep research report based on the above data."
+
+            # Generate final report using Pro model
+            report_response = await gemini_client.generate_response(
+                prompt=final_prompt,
+                model_override="gemini-2.5-pro",
+                search_override=False # We already searched
+            )
+            
+            if not report_response.success:
+                await interaction.followup.send(f"❌ Report generation failed: {report_response.content}")
+                return
+                
+            report_content = report_response.content
+            
+            # Step 3: Upload File
+            file_buffer = BytesIO(report_content.encode('utf-8'))
+            # Sanitize filename
+            safe_topic = "".join([c for c in topic if c.isalnum() or c in (' ', '-', '_')]).strip()
+            filename = f"DeepResearch_{safe_topic[:30].replace(' ', '_')}.md"
+            discord_file = discord.File(file_buffer, filename=filename)
+            
+            await interaction.followup.send(f"✅ **Deep Research Complete!**\nHere is your report on: *{topic}*", file=discord_file)
+            
+        except Exception as e:
+            logger.error(f"Deep research error: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ An error occurred during deep research: {str(e)}")
+    
+    
 def _get_model_description(model_name: str) -> str:
     """Get description for a specific model."""
     descriptions = {

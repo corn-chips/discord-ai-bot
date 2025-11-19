@@ -14,6 +14,7 @@ numpy>=1.24.0
 # Message formatting dependencies
 markdown>=3.5.0
 beautifulsoup4>=4.12.0
+jinja2>=3.1.0
 
 # Enhanced error handling and logging
 colorlog>=6.7.0

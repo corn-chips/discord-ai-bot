@@ -59,7 +59,7 @@ class EnhancedCommandHandler:
     
     async def _check_intent_and_complexity(self, message_content: str, has_images: bool) -> Tuple[CommandIntent, str]:
         """
-        Use Gemini 2.0 Flash Lite router model to determine user intent and complexity.
+        Use Gemini router model to determine user intent and complexity.
         
         This is the ONLY decision-making function - no keyword matching is used.
         
@@ -73,36 +73,26 @@ class EnhancedCommandHandler:
             - complexity_level: "low", "medium", or "high" for model selection
         """
         try:
-            # Create a prompt for Gemini router to classify intent and complexity
-            classification_prompt = f"""Analyze this user message and determine the intent and complexity.
+            # Optimized prompt for Gemini router to classify intent and complexity
+            classification_prompt = f"""Classify intent and complexity.
+Msg: "{message_content}"
+Images: {"yes" if has_images else "no"}
 
-User message: "{message_content}"
-Has image attachments: {"yes" if has_images else "no"}
+JSON schema:
+{{
+"intent": "image_generate" | "image_edit" (only if Images=yes) | "text",
+"complexity": "low" | "medium" | "high"
+}}
 
-Respond with a JSON object containing two keys: "intent" and "complexity".
-
-"intent" must be ONE of:
-- "image_generate" if user wants to CREATE/GENERATE a new image
-- "image_edit" if user wants to EDIT/MODIFY an existing image (only if has_images=yes)
-- "text" for any other request (questions, conversations, help requests, etc.)
-
-"complexity" must be ONE of:
-- "low" for simple questions, basic info, quick facts, straightforward requests
-- "medium" for moderate complexity needing reasoning, analysis, or detailed explanations
-- "high" for complex tasks needing deep analysis, creative writing, coding, or advanced reasoning
-
-Examples:
-"Create an image of a sunset" (no images) -> {{"intent": "image_generate", "complexity": "low"}}
-"Remove the background" (has images) -> {{"intent": "image_edit", "complexity": "low"}}
-"What's 2+2?" (no images) -> {{"intent": "text", "complexity": "low"}}
-"Explain quantum mechanics" (no images) -> {{"intent": "text", "complexity": "medium"}}
-"Write a complex sorting algorithm" (no images) -> {{"intent": "text", "complexity": "high"}}
-"Help me understand this bot" (no images) -> {{"intent": "text", "complexity": "low"}}
+"low": simple, facts. "medium": reasoning. "high": complex, coding, creative.
 """
 
             # Create router model instance for classification
+            # Use configured router model or default to gemini-2.0-flash-lite
+            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
+            
             model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-lite",
+                model_name=router_model,
                 generation_config={
                     "temperature": 0.1,  # Low temperature for consistent classification
                     "max_output_tokens": 100,
@@ -121,11 +111,11 @@ Examples:
             try:
                 result = json.loads(response.text)
                 intent_str = result.get("intent", "text").lower()
-                complexity_level = result.get("complexity", "medium").lower()
+                complexity_level = result.get("complexity", "low").lower()
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse router JSON response: {response.text}")
                 intent_str = "text"
-                complexity_level = "medium"
+                complexity_level = "low"
             
             # Parse the response
             intent = CommandIntent.UNKNOWN
@@ -139,15 +129,16 @@ Examples:
             
             # Validate complexity level
             if complexity_level not in ["low", "medium", "high"]:
-                logger.warning(f"Invalid complexity level '{complexity_level}', defaulting to 'medium'")
-                complexity_level = "medium"
+                logger.warning(f"Invalid complexity level '{complexity_level}', defaulting to 'low'")
+                complexity_level = "low"
             
             logger.info(f"🔍 Router decision: '{message_content[:50]}...' -> intent={intent.value}, complexity={complexity_level}")
             return intent, complexity_level
             
         except Exception as e:
             logger.error(f"Error in router model: {e}", exc_info=True)
-            # On error, default to unknown intent and medium complexity
+            # On error, default to unknown intent and low complexity (safer/faster fallback)
+            return CommandIntent.UNKNOWN, "low"
             return CommandIntent.UNKNOWN, "medium"
     
     async def handle_message(self, message: discord.Message) -> Tuple[bool, str]:
@@ -211,7 +202,7 @@ Examples:
         """
         Use AI router model to detect the type of image edit requested.
         
-        NO keyword matching - relies entirely on Gemini 2.0 Flash Lite.
+        NO keyword matching - relies entirely on configured router model.
         
         Args:
             instruction: The natural language edit instruction
@@ -233,8 +224,11 @@ Categories:
 
 Respond with EXACTLY one word (the category name):"""
 
+            # Use configured router model or default to gemini-2.0-flash-lite
+            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
+
             model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-lite",
+                model_name=router_model,
                 generation_config={
                     "temperature": 0.1,
                     "max_output_tokens": 10,

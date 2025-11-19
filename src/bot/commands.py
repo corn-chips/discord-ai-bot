@@ -77,8 +77,10 @@ async def setup_commands(
         
         await interaction.response.send_message(embed=embed)
     
-    
-    @bot.tree.command(name="model", description="Switch between Gemini Flash AI models")
+    # Create config group
+    config_group = app_commands.Group(name="config", description="Configure bot settings")
+
+    @config_group.command(name="model", description="Switch between Gemini Flash AI models")
     @app_commands.describe(
         model_name="The Gemini Flash model to use"
     )
@@ -120,9 +122,9 @@ async def setup_commands(
                 f"❌ Error: {str(e)}"
             )
 
-    @bot.tree.command(name="think", description="Toggle Thinking Mode (Chain of Thought)")
+    @config_group.command(name="thinking", description="Toggle Thinking Mode (Chain of Thought)")
     @app_commands.describe(enabled="Enable or disable Thinking Mode")
-    async def think(interaction: discord.Interaction, enabled: bool):
+    async def thinking(interaction: discord.Interaction, enabled: bool):
         """Toggle Thinking Mode for deeper reasoning."""
         mode = "thinking" if enabled else "short"
         success = gemini_client.set_prompt_mode(mode)
@@ -140,7 +142,7 @@ async def setup_commands(
         else:
             await interaction.response.send_message("Failed to set thinking mode.", ephemeral=True)
 
-    @bot.tree.command(name="deepsearch", description="Toggle DeepSearch (Force Google Search)")
+    @config_group.command(name="deepsearch", description="Toggle DeepSearch (Force Google Search)")
     @app_commands.describe(enabled="Enable or disable DeepSearch")
     async def deepsearch(interaction: discord.Interaction, enabled: bool):
         """Toggle DeepSearch to force Google Search on all queries."""
@@ -156,7 +158,7 @@ async def setup_commands(
         )
         await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="debug", description="Toggle Debug Logging")
+    @config_group.command(name="debug", description="Toggle Debug Logging")
     @app_commands.describe(enabled="Enable or disable verbose debug logging")
     async def debug(interaction: discord.Interaction, enabled: bool):
         """Toggle debug logging level."""
@@ -177,54 +179,6 @@ async def setup_commands(
             color=color
         )
         await interaction.response.send_message(embed=embed)
-    
-    
-    @bot.tree.command(name="prompt-mode", description="Switch between thinking (detailed) and short (concise) response modes")
-    @app_commands.describe(
-        mode="The response mode to use"
-    )
-    @app_commands.choices(mode=[
-        app_commands.Choice(name="Short - Concise & Direct Responses", value="short"),
-        app_commands.Choice(name="Thinking - Detailed Analysis (Single-Use)", value="thinking"),
-    ])
-    async def prompt_mode(interaction: discord.Interaction, mode: app_commands.Choice[str]):
-        """Switch between prompt modes for different response styles."""
-        try:
-            old_mode = gemini_client.get_prompt_mode()
-            success = gemini_client.set_prompt_mode(mode.value)
-            
-            if success:
-                embed = discord.Embed(
-                    title="💭 Prompt Mode Changed",
-                    description=f"Successfully switched response mode!",
-                    color=discord.Color.purple()
-                )
-                embed.add_field(name="Previous Mode", value=old_mode.capitalize(), inline=True)
-                embed.add_field(name="New Mode", value=mode.value.capitalize(), inline=True)
-                
-                mode_descriptions = {
-                    "short": "✨ **Short Mode:** Quick, concise responses focused on directly answering your question without unnecessary details.",
-                    "thinking": "🧠 **Thinking Mode:** Comprehensive, in-depth analysis with detailed explanations, context, and thorough reasoning.\n\n⚡ *Note: Thinking mode automatically reverts to Short mode after one use.*"
-                }
-                
-                embed.add_field(
-                    name="Mode Description", 
-                    value=mode_descriptions.get(mode.value, "Standard response mode"), 
-                    inline=False
-                )
-                
-                logger.info(f"User {interaction.user} changed prompt mode from {old_mode} to {mode.value}")
-                await interaction.response.send_message(embed=embed)
-            else:
-                await interaction.response.send_message(
-                    "❌ Failed to change prompt mode. Please try again later."
-                )
-        except Exception as e:
-            logger.error(f"Error changing prompt mode: {e}")
-            await interaction.response.send_message(
-                f"❌ Error: {str(e)}"
-            )
-    
     
     @bot.tree.command(name="stats", description="View bot statistics and usage data")
     async def stats(interaction: discord.Interaction):
@@ -381,8 +335,8 @@ async def setup_commands(
         await interaction.response.send_message(embed=embed)
 
 
-    @bot.tree.command(name="config", description="View current bot configuration and feature status")
-    async def config_command(interaction: discord.Interaction):
+    @config_group.command(name="info", description="View current bot configuration and feature status")
+    async def config_info(interaction: discord.Interaction):
         """Display current bot configuration and feature availability."""
         embed = discord.Embed(
             title="⚙️ Enhanced Bot Configuration",
@@ -1242,6 +1196,84 @@ async def setup_commands(
         except Exception as e:
             logger.error(f"Deep research error: {e}", exc_info=True)
             await interaction.followup.send(f"❌ An error occurred during deep research: {str(e)}")
+
+    bot.tree.add_command(config_group)
+    
+    
+    @bot.tree.command(name="summarize", description="Summarize the current conversation")
+    async def summarize(interaction: discord.Interaction):
+        """Summarize the conversation in the current channel."""
+        await interaction.response.defer(thinking=True)
+        
+        messages = []
+        last_msg_time = None
+        
+        try:
+            # Fetch messages backwards
+            # Limit to 500 to avoid excessive processing, but should cover most "current" conversations
+            async for message in interaction.channel.history(limit=500):
+                current_msg_time = message.created_at
+                
+                if last_msg_time:
+                    time_diff = last_msg_time - current_msg_time
+                    # If gap is greater than 24 hours, stop fetching
+                    if time_diff.total_seconds() > 86400:
+                        break
+                
+                messages.append(message)
+                last_msg_time = current_msg_time
+                
+            if not messages:
+                await interaction.followup.send("No recent conversation found to summarize.")
+                return
+                
+            # Reverse to chronological order (oldest to newest)
+            messages.reverse()
+            
+            # Format conversation
+            conversation_text = ""
+            for msg in messages:
+                author_name = msg.author.display_name
+                content = msg.content
+                
+                # Handle attachments
+                if msg.attachments:
+                    attachment_names = [att.filename for att in msg.attachments]
+                    if content:
+                        content += f" [Attachments: {', '.join(attachment_names)}]"
+                    else:
+                        content = f"[Attachments: {', '.join(attachment_names)}]"
+                
+                conversation_text += f"{author_name}: {content}\n"
+                
+            prompt = f"Please summarize the following conversation. Focus on the main topics discussed, key decisions made, and any action items:\n\n{conversation_text}"
+            
+            # Generate summary
+            response = await gemini_client.generate_response(prompt)
+            
+            if response.success:
+                summary = response.content
+                # Check length limits
+                if len(summary) > 1900:
+                    # Split into chunks of 1900 characters
+                    chunks = [summary[i:i+1900] for i in range(0, len(summary), 1900)]
+                    
+                    await interaction.followup.send(f"✅ **Conversation Summary** (Part 1/{len(chunks)})")
+                    
+                    # Send first chunk
+                    await interaction.followup.send(chunks[0])
+                    
+                    # Send remaining chunks
+                    for i, chunk in enumerate(chunks[1:], 1):
+                        await interaction.channel.send(f"**(Part {i+1}/{len(chunks)})**\n{chunk}")
+                else:
+                    await interaction.followup.send(f"✅ **Conversation Summary**\n\n{summary}")
+            else:
+                await interaction.followup.send(f"❌ Failed to generate summary: {response.content}")
+                
+        except Exception as e:
+            logger.error(f"Summarize error: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ An error occurred while summarizing: {str(e)}")
     
     
 def _get_model_description(model_name: str) -> str:

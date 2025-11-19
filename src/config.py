@@ -18,6 +18,9 @@ class BotConfig:
     discord_token: str
     gemini_api_key: str
     
+    # Router configuration
+    router_model_name: str = "gemini-2.0-flash-lite"
+    
     # Optional configuration with defaults
     max_context_messages: int = 100
     reply_context_range: int = 10

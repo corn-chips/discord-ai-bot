@@ -9,7 +9,7 @@ import asyncio
 import io
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 
 import discord
 from discord.ext import commands
@@ -636,6 +636,112 @@ class DiscordBot(discord.Client):
         
         return images
     
+    async def _extract_audio_from_message(self, message: discord.Message) -> List[Dict[str, Any]]:
+        """
+        Extract and download audio files from a Discord message.
+        
+        Args:
+            message: The Discord message to extract audio from
+            
+        Returns:
+            List of audio file dictionaries {'data': bytes, 'mime_type': str}
+        """
+        audio_files = []
+        
+        # Supported audio mime types
+        supported_audio_types = [
+            'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 
+            'audio/aac', 'audio/mp4', 'audio/x-m4a', 'audio/ogg'
+        ]
+        
+        # Check message attachments for audio
+        for attachment in message.attachments:
+            is_audio = False
+            mime_type = attachment.content_type
+            
+            # Check if it's a voice message
+            if hasattr(attachment, 'is_voice_message') and attachment.is_voice_message():
+                is_audio = True
+                mime_type = 'audio/ogg' # Voice messages are typically OGG
+                logger.info(f"🎤 Voice message detected: {attachment.filename}")
+            
+            # Check content type
+            elif mime_type and any(t in mime_type for t in ['audio/', 'video/mp4']):
+                is_audio = True
+            # Check filename extension if content type is generic
+            elif attachment.filename.lower().endswith(('.mp3', '.wav', '.aac', '.m4a', '.ogg', '.mpga')):
+                is_audio = True
+                # Guess mime type from extension
+                if attachment.filename.lower().endswith('.mp3'):
+                    mime_type = 'audio/mp3'
+                elif attachment.filename.lower().endswith('.wav'):
+                    mime_type = 'audio/wav'
+                elif attachment.filename.lower().endswith('.aac'):
+                    mime_type = 'audio/aac'
+                elif attachment.filename.lower().endswith('.m4a'):
+                    mime_type = 'audio/mp4'
+                elif attachment.filename.lower().endswith('.ogg'):
+                    mime_type = 'audio/ogg'
+            
+            if is_audio:
+                try:
+                    logger.info(f"🎵 Audio detected: {attachment.filename}")
+                    # Download the audio
+                    audio_bytes = await attachment.read()
+                    
+                    audio_files.append({
+                        'data': audio_bytes,
+                        'mime_type': mime_type or 'audio/mp3', # Default to mp3 if unknown
+                        'filename': attachment.filename
+                    })
+                    logger.info(f"✅ Loaded audio attachment: {attachment.filename} ({len(audio_bytes)} bytes)")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process audio {attachment.filename}: {e}", exc_info=True)
+        
+        # Also check replied message
+        if message.reference and message.reference.resolved:
+            replied_message = message.reference.resolved
+            if isinstance(replied_message, discord.Message):
+                for attachment in replied_message.attachments:
+                    is_audio = False
+                    mime_type = attachment.content_type
+                    
+                    # Check if it's a voice message
+                    if hasattr(attachment, 'is_voice_message') and attachment.is_voice_message():
+                        is_audio = True
+                        mime_type = 'audio/ogg'
+                        logger.info(f"🎤 Voice message detected in reply: {attachment.filename}")
+                    
+                    elif mime_type and any(t in mime_type for t in ['audio/', 'video/mp4']):
+                        is_audio = True
+                    elif attachment.filename.lower().endswith(('.mp3', '.wav', '.aac', '.m4a', '.ogg', '.mpga')):
+                        is_audio = True
+                        if attachment.filename.lower().endswith('.mp3'):
+                            mime_type = 'audio/mp3'
+                        elif attachment.filename.lower().endswith('.wav'):
+                            mime_type = 'audio/wav'
+                        elif attachment.filename.lower().endswith('.aac'):
+                            mime_type = 'audio/aac'
+                        elif attachment.filename.lower().endswith('.m4a'):
+                            mime_type = 'audio/mp4'
+                        elif attachment.filename.lower().endswith('.ogg'):
+                            mime_type = 'audio/ogg'
+                    
+                    if is_audio:
+                        try:
+                            audio_bytes = await attachment.read()
+                            audio_files.append({
+                                'data': audio_bytes,
+                                'mime_type': mime_type or 'audio/mp3',
+                                'filename': attachment.filename
+                            })
+                            logger.info(f"✅ Loaded audio from replied message: {attachment.filename}")
+                        except Exception as e:
+                            logger.error(f"Failed to load audio from replied message {attachment.filename}: {e}")
+                            
+        return audio_files
+    
     async def _extract_files_from_message(self, message: discord.Message) -> Tuple[List[Dict[str, str]], List[str]]:
         """
         Extract and read non-image files from a Discord message.
@@ -951,6 +1057,11 @@ class DiscordBot(discord.Client):
                     # Extract images from the message
                     images = await self._extract_images_from_message(message)
                     
+                    # Extract audio files from the message
+                    audio_files = await self._extract_audio_from_message(message)
+                    if audio_files:
+                        logger.info(f"✅ Extracted {len(audio_files)} audio file(s)")
+                    
                     # Extract files from the message
                     logger.info("=" * 80)
                     logger.info("FILE EXTRACTION STARTED")
@@ -985,10 +1096,10 @@ class DiscordBot(discord.Client):
                         except Exception as e:
                             logger.error(f"Failed to send unsupported files message: {e}")
                     
-                    # Validate prompt is not empty (or has images/files)
-                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0 and len(files) == 0:
-                        logger.warning("Empty user prompt and no images/files provided to response generation")
-                        await message.reply("Please provide a message, attach an image, or upload a file for me to respond to! 📝")
+                    # Validate prompt is not empty (or has images/files/audio)
+                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0 and len(files) == 0 and len(audio_files) == 0:
+                        logger.warning("Empty user prompt and no images/files/audio provided to response generation")
+                        await message.reply("Please provide a message, attach an image/audio, or upload a file for me to respond to! 📝")
                         return
                     
                     # Build enhanced prompt with file contents
@@ -1016,10 +1127,14 @@ class DiscordBot(discord.Client):
                         logger.info(f"Total prompt length: {len(enhanced_prompt)} characters")
                         logger.info("=" * 80)
                     
-                    # If only images, provide a default prompt
+                    # If only audio/images, provide a default prompt
                     elif not enhanced_prompt or not enhanced_prompt.strip():
-                        enhanced_prompt = "What's in this image? Please describe it in detail."
-                        logger.info("Using default prompt for image-only message")
+                        if audio_files:
+                            enhanced_prompt = "Please provide a verbatim transcription of this audio. Preserve all speech patterns including stutters, repetitions, and informal language (e.g., 'gonna', 'wanna'). Include non-verbal sounds and emotions in brackets, such as [laughter], [sigh], [unintelligible]. Do not summarize or clean up the text; transcribe exactly what is heard."
+                            logger.info("Using default prompt for audio-only message")
+                        elif images:
+                            enhanced_prompt = "What's in this image? Please describe it in detail."
+                            logger.info("Using default prompt for image-only message")
                     
                     # Generate AI response with timeout handling (including images and files if present)
                     logger.info("=" * 80)
@@ -1027,6 +1142,7 @@ class DiscordBot(discord.Client):
                     logger.info(f"  - Prompt length: {len(enhanced_prompt)} characters")
                     logger.info(f"  - Context messages: {len(context)}")
                     logger.info(f"  - Images included: {len(images) if images else 0}")
+                    logger.info(f"  - Audio files included: {len(audio_files) if audio_files else 0}")
                     logger.info(f"  - Files included in prompt: {len(files)}")
                     if files:
                         logger.info("  - Files sent to AI:")
@@ -1097,7 +1213,7 @@ class DiscordBot(discord.Client):
                             pass
 
                     api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None, on_chunk=on_chunk),
+                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None, audio_files=audio_files if audio_files else None, on_chunk=on_chunk),
                         timeout=api_timeout
                     )
                     

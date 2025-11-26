@@ -7,7 +7,6 @@ A Discord bot that provides AI-powered responses using Google's Gemini API.
 
 import asyncio
 import logging
-import signal
 import sys
 from dotenv import load_dotenv
 
@@ -17,44 +16,8 @@ from src.bot.discord_bot import DiscordBot
 # Load environment variables
 load_dotenv()
 
-# Global bot instance for signal handling
-bot_instance = None
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
-    logger = logging.getLogger(__name__)
-    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-    
-    if bot_instance:
-        # Create a new event loop for cleanup if needed
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Schedule the cleanup
-                asyncio.create_task(shutdown_bot())
-            else:
-                # Run cleanup in new loop
-                asyncio.run(shutdown_bot())
-        except Exception as e:
-            logger.error(f"Error during signal cleanup: {e}")
-    
-    sys.exit(0)
-
-async def shutdown_bot():
-    """Perform graceful bot shutdown."""
-    logger = logging.getLogger(__name__)
-    
-    if bot_instance:
-        try:
-            logger.info("Closing Discord connection...")
-            await bot_instance.close()
-            logger.info("✅ Bot shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during bot shutdown: {e}")
-
 async def main():
     """Main application entry point."""
-    global bot_instance
     
     # Load and validate configuration first
     config = load_and_validate_config()
@@ -65,6 +28,7 @@ async def main():
                 f"Reply context range: {config.reply_context_range}, "
                 f"Response timeout: {config.response_timeout}s")
     
+    bot_instance = None
     try:
         # Validate service connectivity
         connectivity_ok = await validate_startup_connectivity(config)
@@ -75,27 +39,20 @@ async def main():
         bot_instance = DiscordBot(config)
         logger.info("✅ Bot instance created successfully")
         
-        # Set up signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
         # Start the bot
         logger.info("🔌 Connecting to Discord...")
         await bot_instance.start(config.discord_token)
         
     except Exception as e:
         logger.error(f"❌ Failed to start bot: {e}")
-        if bot_instance:
-            try:
-                await bot_instance.close()
-            except Exception as cleanup_error:
-                logger.error(f"Error during cleanup: {cleanup_error}")
         raise
     finally:
         # Ensure cleanup happens
         if bot_instance:
             try:
-                await shutdown_bot()
+                logger.info("Closing Discord connection...")
+                await bot_instance.close()
+                logger.info("✅ Bot shutdown complete")
             except Exception as cleanup_error:
                 logger.error(f"Error during final cleanup: {cleanup_error}")
 

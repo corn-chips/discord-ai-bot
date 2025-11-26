@@ -15,6 +15,7 @@ from enum import Enum
 import uuid
 
 from ..config import BotConfig
+from ..constants import MAX_REQUESTS_PER_USER_PER_HOUR
 from ..models.data_models import ImageEditRequest, ImageEditResult, EditType, ValidationResult
 from ..utils.image_utils import validate_image, estimate_processing_time
 from .nano_banana_client import NanoBananaClient, ServiceStatus
@@ -80,7 +81,7 @@ class ImageProcessingService:
         self._max_concurrent_jobs = config.max_concurrent_image_edits
         self._processing_semaphore = asyncio.Semaphore(self._max_concurrent_jobs)
         self._user_rate_limits: Dict[str, List[datetime]] = {}
-        self._max_requests_per_user_per_hour = 10
+        self._max_requests_per_user_per_hour = MAX_REQUESTS_PER_USER_PER_HOUR
         
         # Service state
         self._is_running = False

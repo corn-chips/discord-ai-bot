@@ -7,7 +7,20 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from .constants import (
+    DISCORD_MESSAGE_LIMIT,
+    MIN_TOKEN_LENGTH_DISCORD,
+    MIN_TOKEN_LENGTH_GEMINI,
+)
 from .utils.logging_config import setup_logging
+
+# Available Gemini models for the /config model command
+AVAILABLE_MODELS = [
+    {"name": "Gemini 2.5 Flash (Latest, Recommended)", "value": "gemini-2.5-flash"},
+    {"name": "Gemini 2.5 Flash-Lite (Ultra Fast)", "value": "gemini-2.5-flash-lite"},
+    {"name": "Gemini 2.0 Flash (Stable)", "value": "gemini-2.0-flash-exp"},
+    {"name": "Gemini 2.0 Flash-Lite (Lightweight)", "value": "gemini-2.0-flash-lite"},
+]
 
 
 @dataclass
@@ -139,8 +152,8 @@ class BotConfig:
         if self.message_split_length <= 0:
             errors.append("MESSAGE_SPLIT_LENGTH must be positive")
         
-        if self.message_split_length > 2000:
-            errors.append("MESSAGE_SPLIT_LENGTH cannot exceed Discord's 2000 character limit")
+        if self.message_split_length > DISCORD_MESSAGE_LIMIT:
+            errors.append(f"MESSAGE_SPLIT_LENGTH cannot exceed Discord's {DISCORD_MESSAGE_LIMIT} character limit")
         
         if self.message_split_length < 100:
             errors.append("MESSAGE_SPLIT_LENGTH should be at least 100 characters for effective splitting")
@@ -160,11 +173,11 @@ class BotConfig:
         
         # Basic token format validation
         if self.discord_token:
-            if len(self.discord_token) < 50:  # Discord tokens are typically 59+ chars
+            if len(self.discord_token) < MIN_TOKEN_LENGTH_DISCORD:
                 errors.append("DISCORD_BOT_TOKEN appears to be invalid (too short)")
         
         if self.gemini_api_key:
-            if len(self.gemini_api_key) < 30:  # Gemini API keys are typically longer
+            if len(self.gemini_api_key) < MIN_TOKEN_LENGTH_GEMINI:
                 errors.append("GEMINI_API_KEY appears to be invalid (too short)")
         
         # Nano-banana API key validation

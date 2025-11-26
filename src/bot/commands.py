@@ -16,9 +16,10 @@ import discord
 import jinja2
 from discord import app_commands
 
-from ..config import BotConfig
+from ..config import BotConfig, AVAILABLE_MODELS
 from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
+from ..models.data_models import MessageContext
 
 
 logger = logging.getLogger(__name__)
@@ -85,10 +86,8 @@ async def setup_commands(
         model_name="The Gemini Flash model to use"
     )
     @app_commands.choices(model_name=[
-        app_commands.Choice(name="Gemini 2.5 Flash (Latest, Recommended)", value="gemini-2.5-flash"),
-        app_commands.Choice(name="Gemini 2.5 Flash-Lite (Ultra Fast)", value="gemini-2.5-flash-lite"),
-        app_commands.Choice(name="Gemini 2.0 Flash (Stable)", value="gemini-2.0-flash-exp"),
-        app_commands.Choice(name="Gemini 2.0 Flash-Lite (Lightweight)", value="gemini-2.0-flash-lite"),
+        app_commands.Choice(name=model["name"], value=model["value"])
+        for model in AVAILABLE_MODELS
     ])
     async def model(interaction: discord.Interaction, model_name: app_commands.Choice[str]):
         """Switch the Gemini AI model."""
@@ -670,7 +669,7 @@ async def setup_commands(
                 logger.error(f"Error in edit-image command: {e}", exc_info=True)
                 try:
                     await interaction.followup.send(f"❌ An error occurred: {str(e)}")
-                except:
+                except discord.HTTPException:
                     await interaction.response.send_message(f"❌ An error occurred: {str(e)}")
         
         
@@ -1230,10 +1229,9 @@ async def setup_commands(
             # Reverse to chronological order (oldest to newest)
             messages.reverse()
             
-            # Format conversation
-            conversation_text = ""
+            # Build context list
+            context_list = []
             for msg in messages:
-                author_name = msg.author.display_name
                 content = msg.content
                 
                 # Handle attachments
@@ -1244,12 +1242,21 @@ async def setup_commands(
                     else:
                         content = f"[Attachments: {', '.join(attachment_names)}]"
                 
-                conversation_text += f"{author_name}: {content}\n"
+                # Create MessageContext
+                msg_context = MessageContext(
+                    content=content,
+                    author=msg.author.display_name,
+                    timestamp=msg.created_at,
+                    message_id=msg.id,
+                    is_reply=(msg.reference is not None),
+                    replied_to_id=msg.reference.message_id if msg.reference else None
+                )
+                context_list.append(msg_context)
                 
-            prompt = f"Please summarize the following conversation. Focus on the main topics discussed, key decisions made, and any action items:\n\n{conversation_text}"
+            prompt = "Please summarize the conversation. Focus on the main topics discussed, key decisions made, and any action items."
             
-            # Generate summary
-            response = await gemini_client.generate_response(prompt)
+            # Generate summary using context
+            response = await gemini_client.generate_response(prompt, context=context_list)
             
             if response.success:
                 summary = response.content

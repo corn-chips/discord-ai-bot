@@ -55,8 +55,10 @@ class ContextCollector:
         if limit is None:
             limit = self.max_context_messages
             
-        # Calculate 24-hour cutoff time
-        cutoff_time = datetime.now(datetime.now().astimezone().tzinfo) - timedelta(hours=24)
+        # Calculate 24-hour cutoff time using timezone-aware datetime
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        cutoff_time = now - timedelta(hours=24)
         
         messages = []
         message_count = 0

@@ -1,5 +1,5 @@
 discord.py>=2.3.0
-google-generativeai>=0.8.0
+# google-generativeai>=0.8.0  <-- Removed as we are using google-genai
 google-genai>=1.0.0
 python-dotenv>=1.0.0
 aiohttp>=3.8.0

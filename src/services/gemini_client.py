@@ -60,14 +60,6 @@ class GeminiClient:
                 logger.info("=" * 80)
                 return
             
-            # Check if API key looks valid (basic format check)
-            if len(self.config.gemini_api_key) < 20:
-                logger.error("Gemini API key appears to be invalid (too short)")
-                logger.error(f"API key length: {len(self.config.gemini_api_key)}")
-                self.client = None
-                logger.info("=" * 80)
-                return
-            
             logger.info(f"API Key length: {len(self.config.gemini_api_key)} characters")
             logger.info(f"API Key (first 8 chars): {self.config.gemini_api_key[:8]}...")
             logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
@@ -208,8 +200,8 @@ class GeminiClient:
             logger.info("=" * 80)
             return False
         
+        old_model = self._current_model_name
         try:
-            old_model = self._current_model_name
             logger.info(f"Old model: {old_model}")
             logger.info(f"New model: {model_name}")
             self._current_model_name = model_name

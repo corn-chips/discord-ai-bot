@@ -9,7 +9,7 @@ import asyncio
 import io
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Any
 
 import discord
 from discord.ext import commands
@@ -17,12 +17,17 @@ from PIL import Image
 import fitz  # PyMuPDF
 
 from ..config import BotConfig
-from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage
+from ..constants import (
+    SUPPORTED_TEXT_EXTENSIONS,
+    MAX_TEXT_FILE_SIZE_BYTES,
+    PDF_RENDER_SCALE,
+    RGB_WHITE_BACKGROUND,
+)
+from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage, MessageContext
 from ..services.context_collector import ContextCollector
 from ..services.gemini_client import GeminiClient
 from ..services.message_splitter import MessageSplitter
 from ..services.image_processing_service import ImageProcessingService
-from ..services.nano_banana_client import NanoBananaClient
 from ..services.user_experience_service import UserExperienceService
 from ..services.token_tracker import TokenTracker
 from ..utils.error_manager import ErrorManager
@@ -112,6 +117,26 @@ class DiscordBot(discord.Client):
         self.tree = discord.app_commands.CommandTree(self)
         
         logger.info("DiscordBot initialized with configuration")
+    
+    def _convert_image_to_rgb(self, image: Image.Image) -> Image.Image:
+        """
+        Convert a PIL Image to RGB mode, handling RGBA transparency.
+        
+        Args:
+            image: PIL Image object to convert
+            
+        Returns:
+            RGB-mode PIL Image
+        """
+        if image.mode == 'RGBA':
+            # Create white background and paste image with alpha mask
+            background = Image.new('RGB', image.size, RGB_WHITE_BACKGROUND)
+            background.paste(image, mask=image.split()[3])
+            return background
+        elif image.mode not in ['RGB', 'L']:
+            # Convert other modes to RGB
+            return image.convert('RGB')
+        return image
     
     async def on_ready(self):
         """
@@ -228,17 +253,6 @@ class DiscordBot(discord.Client):
         
         return status
     
-    async def on_error(self, event: str, *args, **kwargs):
-        """
-        Global error handler for Discord events.
-        
-        Args:
-            event: Name of the event that caused the error
-            *args: Event arguments
-            **kwargs: Event keyword arguments
-        """
-        logger.error(f"Discord event error in {event}", exc_info=True)
-    
     async def on_disconnect(self):
         """Event handler called when the bot disconnects from Discord."""
         logger.warning("🔌 Bot disconnected from Discord")
@@ -298,7 +312,7 @@ class DiscordBot(discord.Client):
             message_id=message.id
         )
         
-        context_logger.info(f"Bot mentioned by {message.author} in #{message.channel.name}")
+        context_logger.info(f"Bot mentioned by {message.author} in #{getattr(message.channel, 'name', 'DM')}")
         logger.debug(f"Message content: {message.content}")
         
         try:
@@ -418,8 +432,49 @@ class DiscordBot(discord.Client):
                     combined_context = []
             
             logger.info(f"Collected {len(combined_context)} messages for context")
-            
-            # Generate AI response using Gemini API with collected context
+
+            # If router thinks this is an image generation request, we must avoid passing the full conversation context
+            # to the text model (previously a text model might say "I cannot generate images" and pollute history).
+            try:
+                if self.enhanced_command_handler:
+                    has_images = any(
+                        attachment.content_type and attachment.content_type.startswith('image/')
+                        for attachment in message.attachments
+                    )
+                    intent, _complexity = await self.enhanced_command_handler._check_intent_and_complexity(message.content, has_images)
+                    from .enhanced_command_handler import CommandIntent
+                    if intent == CommandIntent.IMAGE_GENERATE:
+                        logger.info("Routing detected IMAGE_GENERATE while processing context; clearing context except reply/current message")
+                        # Keep only the replied-to message context and the current message as per user's request
+                        filtered_context: list[MessageContext] = []
+                        if message.reference:
+                            reply_context = await self.context_collector.get_reply_context(message)
+                            # reply_context contains several messages around the replied-to message; keep only those
+                            filtered_context.extend(reply_context)
+
+                        # Also add a context entry for the current message (so the model knows the prompt in context)
+                        filtered_context.append(MessageContext(
+                            content=message.content,
+                            author=message.author.display_name,
+                            timestamp=message.created_at,
+                            message_id=message.id,
+                            is_reply=message.reference is not None,
+                            replied_to_id=message.reference.message_id if message.reference else None
+                        ))
+
+                        # Either directly invoke image generation handler (preferred) or proceed with a filtered context
+                        try:
+                            await self.enhanced_command_handler.handle_image_generation_command(message)
+                            return
+                        except Exception as exc:
+                            logger.error(f"Failed to handle image generation via enhanced handler: {exc}", exc_info=True)
+                            # Fallback: continue with filtered context and let the text model handle it (safer than full context)
+                            combined_context = filtered_context
+
+            except Exception as e:
+                logger.error(f"Failed to re-check router intent in _process_message_with_context: {e}", exc_info=True)
+
+            # Generate AI response using Gemini API with collected or filtered context
             await self._generate_and_send_response(message, user_prompt, combined_context)
             
         except discord.Forbidden as e:
@@ -504,20 +559,13 @@ class DiscordBot(discord.Client):
                     page = pdf_document[page_num]
                     
                     # Render page to pixmap (image) at 2x resolution for better quality
-                    mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better quality
+                    mat = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Convert pixmap to PIL Image
+                    # Convert pixmap to PIL Image and ensure RGB mode
                     img_data = pix.tobytes("png")
                     image = Image.open(io.BytesIO(img_data))
-                    
-                    # Convert to RGB if necessary
-                    if image.mode == 'RGBA':
-                        background = Image.new('RGB', image.size, (255, 255, 255))
-                        background.paste(image, mask=image.split()[3])
-                        image = background
-                    elif image.mode not in ['RGB', 'L']:
-                        image = image.convert('RGB')
+                    image = self._convert_image_to_rgb(image)
                     
                     images.append(image)
                     logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
@@ -577,18 +625,9 @@ class DiscordBot(discord.Client):
                     # Download the image
                     image_bytes = await attachment.read()
                     
-                    # Convert to PIL Image
+                    # Convert to PIL Image and ensure RGB mode
                     image = Image.open(io.BytesIO(image_bytes))
-                    
-                    # Convert RGBA to RGB if necessary (Gemini prefers RGB)
-                    if image.mode == 'RGBA':
-                        # Create white background
-                        background = Image.new('RGB', image.size, (255, 255, 255))
-                        background.paste(image, mask=image.split()[3])  # Use alpha channel as mask
-                        image = background
-                    elif image.mode not in ['RGB', 'L']:
-                        # Convert other modes to RGB
-                        image = image.convert('RGB')
+                    image = self._convert_image_to_rgb(image)
                     
                     images.append(image)
                     logger.info(f"Loaded image from attachment: {attachment.filename} ({image.size[0]}x{image.size[1]})")
@@ -620,13 +659,7 @@ class DiscordBot(discord.Client):
                         try:
                             image_bytes = await attachment.read()
                             image = Image.open(io.BytesIO(image_bytes))
-                            
-                            if image.mode == 'RGBA':
-                                background = Image.new('RGB', image.size, (255, 255, 255))
-                                background.paste(image, mask=image.split()[3])
-                                image = background
-                            elif image.mode not in ['RGB', 'L']:
-                                image = image.convert('RGB')
+                            image = self._convert_image_to_rgb(image)
                             
                             images.append(image)
                             logger.info(f"Loaded image from replied message: {attachment.filename} ({image.size[0]}x{image.size[1]})")
@@ -648,22 +681,16 @@ class DiscordBot(discord.Client):
         """
         audio_files = []
         
-        # Supported audio mime types
-        supported_audio_types = [
-            'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 
-            'audio/aac', 'audio/mp4', 'audio/x-m4a', 'audio/ogg'
-        ]
-        
-        # Check message attachments for audio
-        for attachment in message.attachments:
+        async def process_audio_attachment(attachment, source: str = "message") -> None:
+            """Process a single audio attachment."""
             is_audio = False
             mime_type = attachment.content_type
             
             # Check if it's a voice message
             if hasattr(attachment, 'is_voice_message') and attachment.is_voice_message():
                 is_audio = True
-                mime_type = 'audio/ogg' # Voice messages are typically OGG
-                logger.info(f"🎤 Voice message detected: {attachment.filename}")
+                mime_type = 'audio/ogg'  # Voice messages are typically OGG
+                logger.info(f"🎤 Voice message detected in {source}: {attachment.filename}")
             
             # Check content type
             elif mime_type and any(t in mime_type for t in ['audio/', 'video/mp4']):
@@ -671,78 +698,49 @@ class DiscordBot(discord.Client):
             # Check filename extension if content type is generic
             elif attachment.filename.lower().endswith(('.mp3', '.wav', '.aac', '.m4a', '.ogg', '.mpga')):
                 is_audio = True
-                # Guess mime type from extension
-                if attachment.filename.lower().endswith('.mp3'):
-                    mime_type = 'audio/mp3'
-                elif attachment.filename.lower().endswith('.wav'):
-                    mime_type = 'audio/wav'
-                elif attachment.filename.lower().endswith('.aac'):
-                    mime_type = 'audio/aac'
-                elif attachment.filename.lower().endswith('.m4a'):
-                    mime_type = 'audio/mp4'
-                elif attachment.filename.lower().endswith('.ogg'):
-                    mime_type = 'audio/ogg'
+                # Map extension to mime type
+                ext_mime_map = {
+                    '.mp3': 'audio/mp3',
+                    '.wav': 'audio/wav',
+                    '.aac': 'audio/aac',
+                    '.m4a': 'audio/mp4',
+                    '.ogg': 'audio/ogg',
+                    '.mpga': 'audio/mpeg'
+                }
+                for ext, mime in ext_mime_map.items():
+                    if attachment.filename.lower().endswith(ext):
+                        mime_type = mime
+                        break
             
             if is_audio:
                 try:
-                    logger.info(f"🎵 Audio detected: {attachment.filename}")
-                    # Download the audio
+                    logger.info(f"🎵 Audio detected in {source}: {attachment.filename}")
                     audio_bytes = await attachment.read()
                     
                     audio_files.append({
                         'data': audio_bytes,
-                        'mime_type': mime_type or 'audio/mp3', # Default to mp3 if unknown
+                        'mime_type': mime_type or 'audio/mp3',
                         'filename': attachment.filename
                     })
-                    logger.info(f"✅ Loaded audio attachment: {attachment.filename} ({len(audio_bytes)} bytes)")
+                    logger.info(f"✅ Loaded audio from {source}: {attachment.filename} ({len(audio_bytes)} bytes)")
                     
                 except Exception as e:
                     logger.error(f"Failed to process audio {attachment.filename}: {e}", exc_info=True)
+        
+        # Process attachments from the main message
+        for attachment in message.attachments:
+            await process_audio_attachment(attachment, "message")
         
         # Also check replied message
         if message.reference and message.reference.resolved:
             replied_message = message.reference.resolved
             if isinstance(replied_message, discord.Message):
                 for attachment in replied_message.attachments:
-                    is_audio = False
-                    mime_type = attachment.content_type
-                    
-                    # Check if it's a voice message
-                    if hasattr(attachment, 'is_voice_message') and attachment.is_voice_message():
-                        is_audio = True
-                        mime_type = 'audio/ogg'
-                        logger.info(f"🎤 Voice message detected in reply: {attachment.filename}")
-                    
-                    elif mime_type and any(t in mime_type for t in ['audio/', 'video/mp4']):
-                        is_audio = True
-                    elif attachment.filename.lower().endswith(('.mp3', '.wav', '.aac', '.m4a', '.ogg', '.mpga')):
-                        is_audio = True
-                        if attachment.filename.lower().endswith('.mp3'):
-                            mime_type = 'audio/mp3'
-                        elif attachment.filename.lower().endswith('.wav'):
-                            mime_type = 'audio/wav'
-                        elif attachment.filename.lower().endswith('.aac'):
-                            mime_type = 'audio/aac'
-                        elif attachment.filename.lower().endswith('.m4a'):
-                            mime_type = 'audio/mp4'
-                        elif attachment.filename.lower().endswith('.ogg'):
-                            mime_type = 'audio/ogg'
-                    
-                    if is_audio:
-                        try:
-                            audio_bytes = await attachment.read()
-                            audio_files.append({
-                                'data': audio_bytes,
-                                'mime_type': mime_type or 'audio/mp3',
-                                'filename': attachment.filename
-                            })
-                            logger.info(f"✅ Loaded audio from replied message: {attachment.filename}")
-                        except Exception as e:
-                            logger.error(f"Failed to load audio from replied message {attachment.filename}: {e}")
+                    await process_audio_attachment(attachment, "reply")
                             
         return audio_files
     
-    async def _extract_files_from_message(self, message: discord.Message) -> Tuple[List[Dict[str, str]], List[str]]:
+    async def _extract_files_from_message(self, message: discord.Message) -> tuple[List[Dict[str, str]], List[str]]:
         """
         Extract and read non-image files from a Discord message.
         
@@ -758,18 +756,11 @@ class DiscordBot(discord.Client):
         logger.info(f"Extracting files from message {message.id}")
         logger.info(f"Total attachments in message: {len(message.attachments)}")
         
-        # Supported text-based file extensions
-        text_extensions = {
-            '.txt', '.md', '.json', '.yaml', '.yml', '.xml', '.csv', 
-            '.log', '.ini', '.cfg', '.conf', '.py', '.js', '.ts', 
-            '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs',
-            '.html', '.css', '.jsx', '.tsx', '.vue', '.php', '.rb',
-            '.sh', '.bash', '.ps1', '.sql', '.r', '.m', '.swift',
-            '.kt', '.scala', '.pl', '.lua', '.dart'
-        }
+        # Supported text-based file extensions (imported from constants)
+        text_extensions = SUPPORTED_TEXT_EXTENSIONS
         
-        # Maximum file size to read (5MB)
-        max_file_size = 5 * 1024 * 1024
+        # Maximum file size to read
+        max_file_size = MAX_TEXT_FILE_SIZE_BYTES
         
         async def process_attachment(attachment: discord.Attachment) -> None:
             """Process a single attachment."""
@@ -1061,6 +1052,18 @@ class DiscordBot(discord.Client):
                     audio_files = await self._extract_audio_from_message(message)
                     if audio_files:
                         logger.info(f"✅ Extracted {len(audio_files)} audio file(s)")
+                        
+                        # Filter context for audio transcription to only include the replied-to message
+                        if message.reference and message.reference.message_id:
+                            replied_id = message.reference.message_id
+                            # Keep only the immediate parent message in context
+                            original_context_len = len(context)
+                            context = [msg for msg in context if msg.message_id == replied_id]
+                            logger.info(f"Audio transcription: Context restricted to replied message (kept {len(context)}/{original_context_len} messages)")
+                        else:
+                            # No reply, clear context completely
+                            context = []
+                            logger.info("Audio transcription: Context cleared (no reply)")
                     
                     # Extract files from the message
                     logger.info("=" * 80)

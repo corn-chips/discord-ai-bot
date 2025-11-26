@@ -8,12 +8,12 @@ command recognition, image editing capabilities, and improved user experience.
 import asyncio
 import logging
 import re
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Tuple
 from enum import Enum
 
 import discord
-from discord.ext import commands
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from ..models.data_models import ImageEditRequest, EditType, ImageEditResult, TokenUsage
 from ..services.image_processing_service import ImageProcessingService, ProcessingStatus
@@ -74,44 +74,64 @@ class EnhancedCommandHandler:
         """
         try:
             # Optimized prompt for Gemini router to classify intent and complexity
-            classification_prompt = f"""Classify intent and complexity.
-Msg: "{message_content}"
-Images: {"yes" if has_images else "no"}
+            classification_prompt = f"""Classify the user's intent and task complexity.
 
-JSON schema:
+User message: "{message_content}"
+Has image attachments: {"yes" if has_images else "no"}
+
+Return JSON with this schema:
 {{
-"intent": "image_generate" | "image_edit" (only if Images=yes) | "text",
-"complexity": "low" | "medium" | "high"
+  "intent": "image_generate" | "image_edit" | "text",
+  "complexity": "low" | "medium" | "high"
 }}
 
-"low": simple, facts. "medium": reasoning. "high": complex, coding, creative.
+Intent rules:
+- "image_generate": User wants to CREATE/GENERATE a NEW image from text description (e.g., "generate a picture of...", "create an image of...", "draw me...", "make a picture of...")
+- "image_edit": User wants to MODIFY an EXISTING attached image (only valid if Has image attachments=yes)
+- "text": Any other request (questions, conversations, coding, analysis, etc.)
+
+Complexity rules:
+- "low": Simple facts, greetings, short answers
+- "medium": Reasoning, explanations, moderate tasks
+- "high": Complex analysis, coding, creative writing
 """
 
             # Create router model instance for classification
             # Use configured router model or default to gemini-2.0-flash-lite
             router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
             
-            model = genai.GenerativeModel(
-                model_name=router_model,
-                generation_config={
-                    "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_output_tokens": 100,
-                    "response_mime_type": "application/json"
-                }
-            )
-            
-            # Generate response
+            if not self.gemini_client.client:
+                logger.warning("Gemini client not initialized, skipping router")
+                return CommandIntent.UNKNOWN, "low"
+
+            # Generate response using the new SDK
             response = await asyncio.to_thread(
-                model.generate_content,
-                classification_prompt
+                self.gemini_client.client.models.generate_content,
+                model=router_model,
+                contents=classification_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=100,
+                    response_mime_type="application/json"
+                )
             )
             
             # Extract and normalize the response
             import json
             try:
                 result = json.loads(response.text)
-                intent_str = result.get("intent", "text").lower()
-                complexity_level = result.get("complexity", "low").lower()
+                # Handle case where model returns a list instead of a dict
+                if isinstance(result, list) and len(result) > 0:
+                    logger.debug(f"Router returned list, extracting first element: {result}")
+                    result = result[0]  # Take the first element
+                if isinstance(result, dict):
+                    intent_str = result.get("intent", "text").lower()
+                    complexity_level = result.get("complexity", "low").lower()
+                    logger.debug(f"Router raw response: intent={intent_str}, complexity={complexity_level}")
+                else:
+                    logger.warning(f"Unexpected router response type: {type(result)}, value: {result}")
+                    intent_str = "text"
+                    complexity_level = "low"
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse router JSON response: {response.text}")
                 intent_str = "text"
@@ -139,7 +159,6 @@ JSON schema:
             logger.error(f"Error in router model: {e}", exc_info=True)
             # On error, default to unknown intent and low complexity (safer/faster fallback)
             return CommandIntent.UNKNOWN, "low"
-            return CommandIntent.UNKNOWN, "medium"
     
     async def handle_message(self, message: discord.Message) -> Tuple[bool, str]:
         """
@@ -227,17 +246,18 @@ Respond with EXACTLY one word (the category name):"""
             # Use configured router model or default to gemini-2.0-flash-lite
             router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
 
-            model = genai.GenerativeModel(
-                model_name=router_model,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 10,
-                }
-            )
-            
+            if not self.gemini_client.client:
+                logger.warning("Gemini client not initialized, defaulting to GENERAL_EDIT")
+                return EditType.GENERAL_EDIT
+
             response = await asyncio.to_thread(
-                model.generate_content,
-                classification_prompt
+                self.gemini_client.client.models.generate_content,
+                model=router_model,
+                contents=classification_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=10
+                )
             )
             
             result = response.text.strip().lower()
@@ -395,8 +415,6 @@ Respond with EXACTLY one word (the category name):"""
                 )
                 
                 # Generate the image (pass None for image_data to trigger generation mode)
-                from ..services.nano_banana_client import NanoBananaClient
-                
                 # Use the nano banana client directly for generation
                 result = await self.image_processing_service.client.edit_image(
                     image_data=None,  # None triggers generation mode
@@ -409,7 +427,7 @@ Respond with EXACTLY one word (the category name):"""
                 # Delete processing message
                 try:
                     await processing_msg.delete()
-                except:
+                except discord.HTTPException:
                     pass
                 
                 # Create file from generated image data
@@ -445,7 +463,7 @@ Respond with EXACTLY one word (the category name):"""
                         f"❌ I couldn't generate your image: {error_msg}\n\n"
                         f"Please try a different prompt or try again later!"
                     )
-                except:
+                except discord.HTTPException:
                     await message.reply(
                         f"❌ I couldn't generate your image: {error_msg}\n\n"
                         f"Please try a different prompt or try again later!"
@@ -563,7 +581,7 @@ Respond with EXACTLY one word (the category name):"""
                         content=f"🎨 Processing your image edit... {int(job.progress * 100)}%"
                     )
                     last_progress = job.progress
-                except:
+                except discord.HTTPException:
                     pass  # Ignore edit failures
             
             # Check if job completed
@@ -571,7 +589,7 @@ Respond with EXACTLY one word (the category name):"""
                 # Delete processing message
                 try:
                     await processing_msg.delete()
-                except:
+                except discord.HTTPException:
                     pass
                 
                 return job.result
@@ -580,7 +598,7 @@ Respond with EXACTLY one word (the category name):"""
                 # Delete processing message
                 try:
                     await processing_msg.delete()
-                except:
+                except discord.HTTPException:
                     pass
                 
                 # Return failed result

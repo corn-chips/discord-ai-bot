@@ -50,7 +50,7 @@ class TokenUsage:
         if self.input_tokens < 0 or self.output_tokens < 0 or self.total_tokens < 0:
             raise ValueError("Token counts must be non-negative")
         # Guard against obviously incorrect totals
-        if self.total_tokens < max(self.input_tokens, 0) + max(self.output_tokens, 0):
+        if self.total_tokens < self.input_tokens + self.output_tokens:
             raise ValueError("total_tokens must be at least the sum of input and output tokens")
 
 

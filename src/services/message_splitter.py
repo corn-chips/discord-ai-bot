@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 import logging
 
+from ..constants import DISCORD_MESSAGE_LIMIT, CONTINUATION_INDICATOR_OVERHEAD
 from ..utils.markdown_utils import MarkdownParser, BlockType, MarkdownBlock
 
 
@@ -36,7 +37,7 @@ class MessageSplitter:
     and continuation indicators for message relationship tracking.
     """
     
-    def __init__(self, max_length: int = 2000, preserve_formatting: bool = True):
+    def __init__(self, max_length: int = DISCORD_MESSAGE_LIMIT, preserve_formatting: bool = True):
         """
         Initialize the message splitter.
         
@@ -49,7 +50,7 @@ class MessageSplitter:
         self.markdown_parser = MarkdownParser()
         
         # Reserve space for continuation indicators
-        self.continuation_overhead = 50  # Space for "*(continued...)* " and "*(continues...)*"
+        self.continuation_overhead = CONTINUATION_INDICATOR_OVERHEAD
         self.effective_max_length = max_length - self.continuation_overhead
         
         logger.info(f"MessageSplitter initialized with max_length={max_length}, preserve_formatting={preserve_formatting}")

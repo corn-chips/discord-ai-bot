@@ -65,31 +65,54 @@ class MessageSplitter:
         Returns:
             List of MessagePart objects representing the split message
         """
-        if not content or len(content) <= self.max_length:
-            # No splitting needed
-            blocks = self.markdown_parser.parse_markdown(content) if self.preserve_formatting else []
+        # Handle empty or whitespace-only content
+        if not content or not content.strip():
             return [MessagePart(
-                content=content,
+                content=content or "",
+                part_number=1,
+                total_parts=1,
+                has_continuation=False,
+                markdown_blocks=[]
+            )]
+        
+        # Strip the content for length check but preserve for processing
+        stripped_content = content.strip()
+        
+        if len(stripped_content) <= self.max_length:
+            # No splitting needed
+            blocks = self.markdown_parser.parse_markdown(stripped_content) if self.preserve_formatting else []
+            return [MessagePart(
+                content=stripped_content,
                 part_number=1,
                 total_parts=1,
                 has_continuation=False,
                 markdown_blocks=blocks
             )]
         
-        logger.info(f"Splitting message of {len(content)} characters")
+        logger.info(f"Splitting message of {len(stripped_content)} characters")
         
         # Find optimal split points
-        split_points = self._find_optimal_split_points(content)
+        split_points = self._find_optimal_split_points(stripped_content)
         
-        # Create message parts
-        parts = self._create_message_parts(content, split_points)
+        # Create message parts (filters out empty parts)
+        parts = self._create_message_parts(stripped_content, split_points)
+        
+        # If all parts were empty, return a single empty part
+        if not parts:
+            return [MessagePart(
+                content="",
+                part_number=1,
+                total_parts=1,
+                has_continuation=False,
+                markdown_blocks=[]
+            )]
         
         # Add continuation indicators
         parts = self._add_continuation_indicators(parts)
         
         # Handle code block preservation
         if self.preserve_formatting:
-            parts = self._preserve_code_blocks(parts, content)
+            parts = self._preserve_code_blocks(parts, stripped_content)
         
         logger.info(f"Message split into {len(parts)} parts")
         return parts
@@ -145,22 +168,32 @@ class MessageSplitter:
         if max_end >= len(content):
             return len(content)
         
+        # Minimum content threshold - don't split if it would create a part smaller than this
+        min_part_length = 100  # Ensure at least 100 chars of actual content per part
+        
         # Look for natural break points in order of preference
         search_text = content[start_pos:max_end]
+        
+        # Helper function to check if a split point creates a part with enough content
+        def has_enough_content(split_pos: int) -> bool:
+            """Check if the split would create a part with enough non-whitespace content."""
+            part_content = content[start_pos:split_pos].strip()
+            return len(part_content) >= min_part_length
         
         # 1. Paragraph breaks (double newlines) - highest priority
         paragraph_breaks = list(re.finditer(r'\n\n+', search_text))
         if paragraph_breaks:
-            best_break = paragraph_breaks[-1]  # Take the last one within range
-            split_pos = start_pos + best_break.end()
-            if self.markdown_parser.is_safe_split_point(content, split_pos):
-                return split_pos
+            # Try breaks from last to first, preferring those that create substantial parts
+            for match in reversed(paragraph_breaks):
+                split_pos = start_pos + match.end()
+                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                    return split_pos
         
         # 2. End of code blocks
         code_boundaries = self.markdown_parser.find_code_block_boundaries(content)
         for start, end, _ in code_boundaries:
             if start_pos < end <= max_end:
-                if self.markdown_parser.is_safe_split_point(content, end):
+                if has_enough_content(end) and self.markdown_parser.is_safe_split_point(content, end):
                     return end
         
         # 3. Single line breaks
@@ -169,16 +202,16 @@ class MessageSplitter:
             # Prefer line breaks that are not inside code blocks
             for match in reversed(line_breaks):
                 split_pos = start_pos + match.end()
-                if self.markdown_parser.is_safe_split_point(content, split_pos):
+                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
                     return split_pos
         
         # 4. Sentence endings
         sentence_endings = list(re.finditer(r'[.!?]\s+', search_text))
         if sentence_endings:
-            best_sentence = sentence_endings[-1]
-            split_pos = start_pos + best_sentence.end()
-            if self.markdown_parser.is_safe_split_point(content, split_pos):
-                return split_pos
+            for match in reversed(sentence_endings):
+                split_pos = start_pos + match.end()
+                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                    return split_pos
         
         # 5. Word boundaries
         word_boundaries = list(re.finditer(r'\s+', search_text))
@@ -186,7 +219,7 @@ class MessageSplitter:
             # Take the last word boundary that's safe and makes progress
             for match in reversed(word_boundaries):
                 split_pos = start_pos + match.start()
-                if split_pos > start_pos and self.markdown_parser.is_safe_split_point(content, split_pos):
+                if split_pos > start_pos and has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
                     return split_pos
         
         # 6. Fallback: force split at character boundary (avoid breaking UTF-8)
@@ -203,26 +236,44 @@ class MessageSplitter:
         Returns:
             List of MessagePart objects
         """
-        parts = []
-        total_parts = len(split_points) - 1
-        
+        # First pass: collect non-empty parts
+        raw_parts = []
         for i in range(len(split_points) - 1):
             start = split_points[i]
             end = split_points[i + 1]
             part_content = content[start:end].strip()
             
+            # Skip empty parts
+            if not part_content:
+                continue
+            
+            raw_parts.append({
+                'content': part_content,
+                'original_start': start,
+                'original_end': end
+            })
+        
+        # If no valid parts, return empty list
+        if not raw_parts:
+            return []
+        
+        # Second pass: create MessagePart objects with correct numbering
+        parts = []
+        total_parts = len(raw_parts)
+        
+        for i, raw_part in enumerate(raw_parts):
             # Parse markdown blocks for this part
             blocks = []
-            if self.preserve_formatting and part_content:
-                blocks = self.markdown_parser.parse_markdown(part_content)
+            if self.preserve_formatting:
+                blocks = self.markdown_parser.parse_markdown(raw_part['content'])
             
             part = MessagePart(
-                content=part_content,
+                content=raw_part['content'],
                 part_number=i + 1,
                 total_parts=total_parts,
                 has_continuation=i < total_parts - 1,  # All parts except the last have continuation
                 markdown_blocks=blocks,
-                metadata={'original_start': start, 'original_end': end}
+                metadata={'original_start': raw_part['original_start'], 'original_end': raw_part['original_end']}
             )
             
             parts.append(part)

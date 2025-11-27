@@ -43,11 +43,12 @@ class ContextCollector:
         - Excludes messages older than 24 hours
         - Limits to specified number of messages
         - Handles channels with fewer messages than the limit
+        - Excludes all bot messages (including our own)
         
         Args:
             channel: Discord channel to retrieve messages from
             limit: Maximum number of messages to retrieve (defaults to max_context_messages)
-            bot_user: The bot user object (to include bot's own messages)
+            bot_user: The bot user object (unused, kept for backwards compatibility)
             
         Returns:
             List of MessageContext objects representing recent messages
@@ -72,10 +73,9 @@ class ContextCollector:
                     if message.created_at < cutoff_time:
                         continue
                         
-                    # Skip bot messages unless it's us
+                    # Skip ALL bot messages (including our own) to avoid context pollution
                     if message.author.bot:
-                        if not bot_user or message.author.id != bot_user.id:
-                            continue
+                        continue
                     
                     # Skip messages with no text content AND no attachments
                     if (not message.content or not message.content.strip()) and not message.attachments:

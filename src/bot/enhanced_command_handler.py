@@ -90,10 +90,13 @@ Intent rules:
 - "image_edit": User wants to MODIFY an EXISTING attached image (only valid if Has image attachments=yes)
 - "text": Any other request (questions, conversations, coding, analysis, etc.)
 
-Complexity rules:
-- "low": Simple facts, greetings, short answers
-- "medium": Reasoning, explanations, moderate tasks
-- "high": Complex analysis, coding, creative writing
+Complexity rules (BE CONSERVATIVE - favor lower complexity):
+- "low": DEFAULT for most questions. Simple facts, greetings, short answers, casual conversation, basic questions, quick lookups, simple explanations, memes, jokes
+- "medium": Only for tasks needing moderate reasoning: multi-step explanations, code debugging, summarizing documents, comparative analysis
+- "high": ONLY for genuinely complex tasks requiring deep expertise: advanced mathematics/proofs, complex system architecture, novel research questions, multi-file code refactoring, PhD-level analysis
+
+IMPORTANT: When in doubt, choose "low" or "medium". Reserve "high" for truly exceptional complexity.
+Most everyday questions should be "low". Most work-related tasks should be "medium".
 """
 
             # Create router model instance for classification

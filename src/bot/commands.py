@@ -25,26 +25,6 @@ from ..models.data_models import MessageContext
 logger = logging.getLogger(__name__)
 
 
-class BotCommands(app_commands.CommandTree):
-    """Command tree for Discord bot slash commands."""
-    
-    def __init__(self, client, config: BotConfig, gemini_client: GeminiClient, performance_logger):
-        """
-        Initialize bot commands.
-        
-        Args:
-            client: Discord client instance
-            config: Bot configuration
-            gemini_client: Gemini API client
-            performance_logger: Performance logging instance
-        """
-        super().__init__(client)
-        self.config = config
-        self.gemini_client = gemini_client
-        self.performance_logger = performance_logger
-        self.client = client
-        
-
 async def setup_commands(
     bot,
     config: BotConfig,

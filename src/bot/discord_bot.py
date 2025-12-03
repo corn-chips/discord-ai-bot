@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 import discord
-from discord.ext import commands
 from PIL import Image
 import fitz  # PyMuPDF
 
@@ -80,7 +79,8 @@ class DiscordBot(discord.Client):
         self.gemini_client = GeminiClient(config)
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
-            preserve_formatting=config.preserve_code_blocks
+            preserve_formatting=config.preserve_code_blocks,
+            add_continuation_indicators=config.add_continuation_indicators
         )
         
         # Initialize UX enhancement services
@@ -881,15 +881,19 @@ class DiscordBot(discord.Client):
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
-        Check if the bot is mentioned in a Discord message or if the message is a reply to the bot.
+        Check if the bot is directly mentioned in a Discord message or if the message is a reply to the bot.
         
         Implements requirements 1.1, 1.2: Identify bot mentions in messages.
+        
+        Note: Does NOT respond to @everyone or @here to avoid spam in busy servers.
+        Only responds to direct @bot mentions, replies to bot messages, or role mentions
+        where the bot has that role.
         
         Args:
             message: The Discord message to check
             
         Returns:
-            True if the bot is mentioned or message is a reply to bot, False otherwise
+            True if the bot is directly mentioned or message is a reply to bot, False otherwise
         """
         # Check if this is a reply to a bot message
         if message.reference and message.reference.resolved:
@@ -899,19 +903,21 @@ class DiscordBot(discord.Client):
                 if replied_message.author == self.user:
                     return True
         
-        # Check if the bot user is in the message mentions
+        # Check if the bot user is directly mentioned
         if self.user in message.mentions:
             return True
         
-        # Check for @everyone or @here mentions if the bot has appropriate permissions
-        if message.mention_everyone:
-            return True
+        # Note: We intentionally do NOT respond to @everyone or @here
+        # to avoid spam in busy servers
         
-        # Check for role mentions that the bot has
+        # Check for role mentions that the bot has (but not @everyone role)
         if message.guild and hasattr(message.guild, 'me'):
             bot_member = message.guild.me
             if bot_member:
                 for role in message.role_mentions:
+                    # Skip the @everyone role
+                    if role.is_default():
+                        continue
                     if role in bot_member.roles:
                         return True
         

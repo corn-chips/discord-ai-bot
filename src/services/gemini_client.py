@@ -6,6 +6,7 @@ to generate AI-powered responses based on user prompts and conversation context.
 """
 
 import asyncio
+import io
 import logging
 import random
 from typing import List, Optional
@@ -16,7 +17,8 @@ from google.genai import types
 from ..config import BotConfig
 from ..models.data_models import APIResponse, MessageContext, TokenUsage
 from ..utils.error_manager import ErrorManager
-from ..utils.logging_config import PerformanceLogger, TimingContext
+from ..utils.logging_config import PerformanceLogger
+from ..utils.token_extraction import extract_token_usage
 
 
 logger = logging.getLogger(__name__)
@@ -362,59 +364,8 @@ class GeminiClient:
         return grounding_sources
 
     def _extract_token_usage(self, response) -> Optional[TokenUsage]:
-        """Best-effort extraction of token usage metadata from API responses."""
-
-        usage = getattr(response, 'usage_metadata', None)
-        if not usage:
-            return None
-
-        def _read_field(obj, names):
-            for name in names:
-                value = None
-                if isinstance(obj, dict):
-                    value = obj.get(name)
-                else:
-                    value = getattr(obj, name, None)
-                if value is not None:
-                    try:
-                        return int(value)
-                    except (TypeError, ValueError):
-                        continue
-            return None
-
-        prompt_tokens = _read_field(usage, [
-            'prompt_token_count', 'prompt_tokens', 'input_tokens', 'promptTokenCount'
-        ])
-        candidate_tokens = _read_field(usage, [
-            'candidates_token_count', 'output_tokens', 'candidatesTokenCount'
-        ])
-        total_tokens = _read_field(usage, [
-            'total_token_count', 'total_tokens', 'totalTokenCount'
-        ])
-
-        if prompt_tokens is None and candidate_tokens is None and total_tokens is None:
-            return None
-
-        prompt_tokens = prompt_tokens or 0
-        candidate_tokens = candidate_tokens or 0
-        total_tokens = total_tokens or (prompt_tokens + candidate_tokens)
-
-        try:
-            token_usage = TokenUsage(
-                input_tokens=prompt_tokens,
-                output_tokens=candidate_tokens,
-                total_tokens=total_tokens
-            )
-            logger.info(
-                "Token usage extracted: input=%s output=%s total=%s",
-                token_usage.input_tokens,
-                token_usage.output_tokens,
-                token_usage.total_tokens
-            )
-            return token_usage
-        except Exception as exc:
-            logger.warning(f"Failed to parse token usage metadata: {exc}")
-            return None
+        """Extract token usage metadata from API responses using shared utility."""
+        return extract_token_usage(response)
     
     def _should_use_search(self, prompt: str) -> bool:
         """
@@ -495,9 +446,14 @@ class GeminiClient:
         formatted_prompt = self.format_prompt(prompt, context)
         content_parts.append(formatted_prompt)
         
-        # Add images
+        # Add images - convert PIL Images to bytes for the Gemini SDK
         if images and len(images) > 0:
-            content_parts.extend(images)
+            for img in images:
+                # Convert PIL Image to bytes for the SDK
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                content_parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/png'))
             logger.info(f"Added {len(images)} image(s) to request")
             
         # Add audio files

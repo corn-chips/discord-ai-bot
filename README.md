@@ -1,6 +1,19 @@
 # Discord Grok Bot
 
-A Discord bot that provides AI-powered conversational responses using Google's Gemini API. The bot mimics Grok's functionality from Twitter, offering contextual responses when mentioned in Discord channels.
+A Discord bot that provides AI-powered conversational responses using Google's Gemini API. The bot offers contextual responses when mentioned in Discord channels, with advanced features like image generation, PDF processing, and intelligent message handling.
+
+## Recent Updates (v2.0)
+
+- ✅ **Code Cleanup & Optimization**: Refactored codebase for better maintainability
+  - Eliminated duplicate code (token extraction now centralized)
+  - Removed unused code and imports
+  - Improved module organization with proper exports
+  - Better separation of concerns
+- ✅ **Bug Fixes**: 
+  - Fixed image handling for Gemini API (PIL images now properly converted)
+  - Fixed @everyone/@here spam (bot no longer responds to broadcast mentions)
+  - Fixed continuation indicators config (now properly honors user settings)
+- ✅ **Enhanced Stability**: All syntax checks pass, no diagnostic errors
 
 ## Todo List
  - [ ] (CANCELED, UNSAFE) Make model interpret user message to do actual actions in discord server (mute all, ban all, kick all, etc)
@@ -14,10 +27,16 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 
 ## Features
 
+### Core Capabilities
 - **Context-Aware Responses**: Analyzes recent message history for relevant context
 - **Enhanced Reply Context**: Provides additional context when replying to specific messages
+- **Smart Mention Detection**: Only responds to direct @mentions and replies (ignores @everyone/@here to prevent spam)
+- **Intelligent Message Splitting**: Preserves markdown formatting and code blocks across long messages
+- **Configurable Continuation Indicators**: Optional message part indicators (can be disabled)
+
+### AI & Media Processing
 - **Image Analysis**: Supports image attachments for visual understanding
-- **Image Generation & Editing**: 🎨 **NEW!** Create and edit images using Gemini 2.5 Flash Image (see [IMAGE_GENERATION.md](IMAGE_GENERATION.md))
+- **Image Generation & Editing**: 🎨 Create and edit images using Gemini 2.5 Flash Image (see [IMAGE_GENERATION.md](IMAGE_GENERATION.md))
   - Generate images from text descriptions
   - Edit existing images with natural language prompts
   - Object removal, background changes, style transfer, and more
@@ -29,15 +48,22 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 - **File Upload Support**: Reads and processes uploaded text files, code, configurations, logs, and more (see [FILE_UPLOAD_FEATURE.md](FILE_UPLOAD_FEATURE.md))
   - Supports 40+ file types including all major programming languages
   - Comprehensive logging for debugging (see [FILE_UPLOAD_DEBUGGING.md](FILE_UPLOAD_DEBUGGING.md))
-- **Developer Mode**: 🔧 **NEW!** Toggle detailed error output with `/dev` command (see [DEV_MODE.md](DEV_MODE.md))
+
+### Developer Tools
+- **Developer Mode**: 🔧 Toggle detailed error output with `/dev` command (see [DEV_MODE.md](DEV_MODE.md))
   - Full stack traces when enabled
   - User-friendly messages when disabled
   - Perfect for debugging and troubleshooting
   - Admin-only control
 - **Error Handling**: Graceful handling of API errors with user-friendly messages
-- **Configurable**: Customizable message limits, timeouts, and other settings
 - **Detailed Logging**: Track file processing, AI requests, and responses for troubleshooting
 - **Per-User Token Tracking**: Precisely logs Gemini input/output tokens per request, stores them in SQLite, and powers an in-server `/token-leaderboard`
+
+### Configuration & Monitoring
+- **Highly Configurable**: Customizable message limits, timeouts, model selection, and more
+- **Multiple AI Models**: Switch between Gemini 2.5 Flash, Flash-Lite, Pro, and 2.0 variants
+- **Real-time Monitoring**: Built-in health checks and performance metrics
+- **Clean Codebase**: Modular architecture with centralized utilities and proper error handling
 
 ## Setup
 
@@ -213,14 +239,36 @@ The bot uses environment variables for configuration. Copy `.env.example` to `.e
 - `GEMINI_API_KEY`: Your Google Gemini API key
 
 ### Optional Variables
+
+**Context & Response Settings:**
 - `MAX_CONTEXT_MESSAGES`: Maximum messages to include in context (default: 100)
 - `REPLY_CONTEXT_RANGE`: Messages before/after replied message (default: 10)
 - `RESPONSE_TIMEOUT`: API response timeout in seconds (default: 30)
 - `MAX_RETRIES`: Maximum retry attempts for API calls (default: 3)
+
+**Message Formatting:**
+- `MESSAGE_SPLIT_LENGTH`: Maximum length for each message part (default: 2000)
+- `PRESERVE_CODE_BLOCKS`: Preserve code block formatting across splits (default: true)
+- `ADD_CONTINUATION_INDICATORS`: Add "continued" text between message parts (default: true)
+
+**User Experience:**
+- `SHOW_TYPING_INDICATORS`: Show typing indicator while processing (default: true)
+- `USE_RICH_EMBEDS`: Use rich Discord embeds for responses (default: true)
+- `ENABLE_REACTION_FEEDBACK`: Add reaction emojis for feedback (default: true)
+
+**Logging & Monitoring:**
 - `LOG_LEVEL`: Logging level - DEBUG, INFO, WARNING, ERROR (default: INFO)
 - `LOG_FILE`: Optional log file path (default: logs to console and bot.log)
 - `ENABLE_PERFORMANCE_LOGGING`: Enable performance metrics logging (default: true)
+- `DEV_MODE_ENABLED`: Enable detailed error output (default: false)
+
+**Image Processing:**
 - `NANO_BANANA_API_KEY`: API key for image generation/editing (uses Gemini 2.5 Flash Image model, defaults to GEMINI_API_KEY)
+- `MAX_IMAGE_SIZE_MB`: Maximum image size in MB (default: 10)
+- `IMAGE_PROCESSING_TIMEOUT`: Image processing timeout in seconds (default: 60)
+- `MAX_CONCURRENT_IMAGE_EDITS`: Maximum concurrent image operations (default: 3)
+
+**Data Storage:**
 - `TOKEN_DB_PATH`: Filesystem path for storing the SQLite token usage database (default: `data/token_usage.db`)
 
 ## Usage
@@ -473,20 +521,102 @@ docker-compose logs -f  # View real-time logs
 ```
 discord-grok-bot/
 ├── src/
-│   ├── bot/          # Discord bot implementation
-│   ├── models/       # Data models and structures
-│   ├── services/     # External service integrations
-│   ├── utils/        # Utility functions
-│   └── config.py     # Configuration management
-├── main.py           # Application entry point
-├── requirements.txt  # Python dependencies
-├── .env.example      # Environment configuration template
-└── README.md         # This file
+│   ├── bot/                    # Discord bot implementation
+│   │   ├── discord_bot.py      # Main bot class and event handlers
+│   │   ├── commands.py         # Slash command definitions
+│   │   └── enhanced_command_handler.py  # Image editing command handler
+│   ├── models/                 # Data models and structures
+│   │   └── data_models.py      # Core data models (MessageContext, APIResponse, etc.)
+│   ├── services/               # External service integrations
+│   │   ├── gemini_client.py    # Gemini API client for text generation
+│   │   ├── nano_banana_client.py  # Gemini image generation client
+│   │   ├── context_collector.py   # Message context collection
+│   │   ├── message_splitter.py    # Intelligent message splitting
+│   │   ├── image_processing_service.py  # Image processing queue
+│   │   ├── user_experience_service.py   # UX enhancements
+│   │   ├── token_tracker.py    # Token usage tracking
+│   │   └── help_system.py      # Help and command suggestions
+│   ├── utils/                  # Utility functions
+│   │   ├── error_manager.py    # Centralized error handling
+│   │   ├── logging_config.py   # Logging configuration
+│   │   ├── markdown_utils.py   # Markdown parsing
+│   │   ├── image_utils.py      # Image validation
+│   │   └── token_extraction.py # Shared token usage extraction
+│   ├── config.py               # Configuration management
+│   └── constants.py            # Application constants
+├── data/                       # Data storage
+│   └── token_usage.db          # SQLite database for token tracking
+├── logs/                       # Log files
+│   └── bot.log                 # Application logs
+├── scripts/                    # Utility scripts
+│   ├── health_check.py         # Health check script
+│   ├── docker-build.sh         # Docker build script (Linux/Mac)
+│   └── docker-build.bat        # Docker build script (Windows)
+├── grok-prompts/               # AI prompt templates
+├── main.py                     # Application entry point
+├── requirements.txt            # Python dependencies
+├── docker-compose.yml          # Docker configuration
+├── Dockerfile                  # Docker image definition
+├── .env.example                # Environment configuration template
+└── README.md                   # This file
 ```
+
+### Code Organization
+
+The codebase follows a modular architecture:
+
+- **Bot Layer** (`src/bot/`): Discord integration and command handling
+- **Service Layer** (`src/services/`): Business logic and external API integrations
+- **Model Layer** (`src/models/`): Data structures and validation
+- **Utility Layer** (`src/utils/`): Shared utilities and helpers
+- **Configuration** (`src/config.py`): Centralized configuration management
+
+Key improvements in v2.0:
+- Centralized token extraction utility (eliminates duplication)
+- Proper module exports for cleaner imports
+- Separated concerns (e.g., image processing has its own service)
+- Shared error handling and logging utilities
 
 ## Development
 
-This project is currently under development. See the implementation tasks in `.kiro/specs/discord-grok-bot/tasks.md` for the development roadmap.
+### Code Quality
+
+The codebase maintains high quality standards:
+- ✅ All syntax checks pass
+- ✅ No diagnostic errors
+- ✅ Modular architecture with clear separation of concerns
+- ✅ Comprehensive error handling
+- ✅ Detailed logging for debugging
+- ✅ Type hints for better IDE support
+
+### Recent Improvements (v2.0)
+
+**Code Cleanup:**
+- Removed duplicate token extraction code (~80 lines eliminated)
+- Removed unused classes and imports
+- Centralized shared utilities
+- Improved module organization
+
+**Bug Fixes:**
+- Fixed PIL Image handling for Gemini API (images now properly converted to bytes)
+- Fixed @everyone/@here spam (bot now only responds to direct mentions)
+- Fixed continuation indicators config (now properly honors user settings)
+
+**Architecture:**
+- Better separation of concerns
+- Proper module exports
+- Centralized error handling
+- Shared utility functions
+
+### Contributing
+
+When contributing to this project:
+1. Follow the existing code structure
+2. Add type hints to function signatures
+3. Include docstrings for classes and methods
+4. Test changes with both Docker and local installations
+5. Update documentation for new features
+6. Run syntax checks: `python -m py_compile <file>`
 
 ## Quick Reference
 
@@ -563,6 +693,65 @@ docker-compose down && docker-compose build --no-cache && docker-compose up -d
 - [PDF_SUPPORT.md](PDF_SUPPORT.md) - PDF processing guide
 - [FILE_UPLOAD_FEATURE.md](FILE_UPLOAD_FEATURE.md) - File upload guide
 - [DOCKER.md](DOCKER.md) - Detailed Docker setup
+
+## Technical Details
+
+### Architecture Highlights
+
+**Modular Design:**
+- Clean separation between Discord integration, AI services, and utilities
+- Each service has a single, well-defined responsibility
+- Shared utilities eliminate code duplication
+
+**Error Handling:**
+- Centralized error manager with user-friendly messages
+- Automatic retry logic with exponential backoff
+- Graceful degradation when services are unavailable
+
+**Performance:**
+- Intelligent message splitting preserves formatting
+- Async/await throughout for non-blocking operations
+- Connection pooling and rate limiting
+- Token usage tracking for cost monitoring
+
+**Image Processing:**
+- Queue-based processing with configurable concurrency
+- Proper PIL Image to bytes conversion for Gemini API
+- Support for both generation and editing operations
+- Rate limiting per user to prevent abuse
+
+**Message Handling:**
+- Smart mention detection (ignores broadcast mentions)
+- Context-aware responses with conversation history
+- Markdown preservation across message splits
+- Configurable continuation indicators
+
+### API Integration
+
+**Gemini Text API:**
+- Supports multiple models (Flash, Flash-Lite, Pro)
+- Automatic model selection based on complexity
+- Search grounding for up-to-date information
+- Token usage tracking and reporting
+
+**Gemini Image API:**
+- Uses Gemini 2.5 Flash Image model
+- Proper image format conversion (PIL → bytes → types.Part)
+- Support for both generation and editing
+- Natural language instruction parsing
+
+### Data Storage
+
+**SQLite Database:**
+- Tracks per-user token usage
+- Stores input/output/total tokens per request
+- Powers the `/token-leaderboard` command
+- Automatic schema initialization
+
+**File System:**
+- Logs stored in `logs/` directory
+- Token database in `data/` directory
+- Configurable paths via environment variables
 
 ## License
 

@@ -37,23 +37,26 @@ class MessageSplitter:
     and continuation indicators for message relationship tracking.
     """
     
-    def __init__(self, max_length: int = DISCORD_MESSAGE_LIMIT, preserve_formatting: bool = True):
+    def __init__(self, max_length: int = DISCORD_MESSAGE_LIMIT, preserve_formatting: bool = True,
+                 add_continuation_indicators: bool = True):
         """
         Initialize the message splitter.
         
         Args:
             max_length: Maximum length for each message part (Discord limit is 2000)
             preserve_formatting: Whether to preserve markdown formatting across splits
+            add_continuation_indicators: Whether to add continuation text between parts
         """
         self.max_length = max_length
         self.preserve_formatting = preserve_formatting
+        self.add_continuation_indicators = add_continuation_indicators
         self.markdown_parser = MarkdownParser()
         
-        # Reserve space for continuation indicators
-        self.continuation_overhead = CONTINUATION_INDICATOR_OVERHEAD
+        # Reserve space for continuation indicators only if enabled
+        self.continuation_overhead = CONTINUATION_INDICATOR_OVERHEAD if add_continuation_indicators else 0
         self.effective_max_length = max_length - self.continuation_overhead
         
-        logger.info(f"MessageSplitter initialized with max_length={max_length}, preserve_formatting={preserve_formatting}")
+        logger.info(f"MessageSplitter initialized with max_length={max_length}, preserve_formatting={preserve_formatting}, add_continuation_indicators={add_continuation_indicators}")
     
     def split_message(self, content: str) -> List[MessagePart]:
         """
@@ -107,8 +110,9 @@ class MessageSplitter:
                 markdown_blocks=[]
             )]
         
-        # Add continuation indicators
-        parts = self._add_continuation_indicators(parts)
+        # Add continuation indicators if enabled
+        if self.add_continuation_indicators:
+            parts = self._add_continuation_indicators(parts)
         
         # Handle code block preservation
         if self.preserve_formatting:

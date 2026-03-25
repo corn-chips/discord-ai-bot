@@ -43,7 +43,7 @@ class GeminiClient:
         self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("gemini_client")
         self.client = None
-        self._current_model_name = "gemini-2.5-flash"
+        self._current_model_name = "gemini-3.0-flash-preview"
         self._prompt_mode = "short"  # Default to short mode, can be "short" or "thinking"
         self._thinking_single_use = False  # Changed to False for persistent mode via command
         self._force_search = False  # Force search on/off
@@ -187,13 +187,9 @@ class GeminiClient:
         logger.info("SWITCHING MODEL")
         
         valid_models = [
-            "gemini-2.5-flash",
+            "gemini-3.0-flash-preview",
             "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-2.0-flash-exp",
-            "gemini-2.0-flash-lite",
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest"
+            "gemini-3.1-pro-preview",
         ]
         
         if model_name not in valid_models:
@@ -230,7 +226,7 @@ class GeminiClient:
             Timeout in seconds
         """
         # Pro model or thinking mode requires much longer timeout
-        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
             return 120  # 2 minutes for complex models
         else:
             return 30  # 30 seconds for standard models
@@ -242,7 +238,7 @@ class GeminiClient:
         Returns:
             Human-readable time estimate
         """
-        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
             return "30-60 seconds (using advanced model with extended thinking)"
         else:
             return "5-15 seconds"
@@ -266,23 +262,23 @@ class GeminiClient:
             # Only downgrade to short mode if not manually set to thinking
             if self._prompt_mode != "thinking":
                 self.set_prompt_mode("short")
-            return self.set_model("gemini-2.5-flash")
-            
+            return self.set_model("gemini-3.0-flash-preview")
+
         elif complexity_level == "medium":
             # Medium complexity implies thinking mode is beneficial
             # But if we are already in thinking mode, stay there
             if self._prompt_mode != "thinking":
                 self.set_prompt_mode("thinking")
-            return self.set_model("gemini-2.5-flash")
-            
+            return self.set_model("gemini-3.0-flash-preview")
+
         elif complexity_level == "high":
             # High complexity uses Pro model
             # Pro model is smart enough without explicit thinking prompt, but we can keep it if set
-            success = self.set_model("gemini-2.5-pro")
+            success = self.set_model("gemini-3.1-pro-preview")
             if not success:
-                logger.warning("gemini-2.5-pro not available, falling back to gemini-2.5-flash with thinking")
+                logger.warning("gemini-3.1-pro-preview not available, falling back to gemini-3.0-flash-preview with thinking")
                 self.set_prompt_mode("thinking")
-                return self.set_model("gemini-2.5-flash")
+                return self.set_model("gemini-3.0-flash-preview")
             return success
         else:
             logger.error(f"Invalid complexity level: {complexity_level}. Must be 'low', 'medium', or 'high'")
@@ -297,13 +293,9 @@ class GeminiClient:
         """
         # Map model names to display names
         model_display_names = {
-            "gemini-2.5-flash": "Gemini 2.5 Flash",
+            "gemini-3.0-flash-preview": "Gemini Flash 3 Preview",
             "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
-            "gemini-2.5-pro": "Gemini 2.5 Pro",
-            "gemini-2.0-flash-exp": "Gemini 2.0 Flash Experimental",
-            "gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite",
-            "gemini-flash-latest": "Gemini Flash Latest",
-            "gemini-flash-lite-latest": "Gemini Flash Lite Latest"
+            "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
         }
         
         display_name = model_display_names.get(self._current_model_name, self._current_model_name)
@@ -476,7 +468,7 @@ class GeminiClient:
         # Get dynamic timeout based on current model
         timeout_duration = self.get_timeout_for_current_model()
         # Adjust timeout if using Pro model via override
-        if target_model == "gemini-2.5-pro":
+        if target_model == "gemini-3.1-pro-preview":
             timeout_duration = max(timeout_duration, 120)
             
         logger.info(f"Using timeout: {timeout_duration}s for model {target_model} (mode: {self._prompt_mode})")
@@ -819,12 +811,7 @@ class GeminiClient:
         else:
             content_str = content
         
-        # Map model name aliases to actual model names for new SDK
         model_name = target_model
-        if model_name == "gemini-flash-latest":
-            model_name = "gemini-2.5-flash"
-        elif model_name == "gemini-flash-lite-latest":
-            model_name = "gemini-2.5-flash-lite"
         
         logger.info(f"Using model name: {model_name}")
         
@@ -973,7 +960,7 @@ class GeminiClient:
             System instruction string tailored to the model complexity
         """
         # Determine which system prompt to use based on model and thinking mode
-        if self._current_model_name == "gemini-2.5-pro" or self._prompt_mode == "thinking":
+        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
             # HIGH COMPLEXITY: Pro model or Flash with thinking - Deep analysis and comprehensive responses
             logger.info("Using HIGH COMPLEXITY system prompt (Grok 4 Advanced - Unrestricted)")
             
@@ -1036,7 +1023,7 @@ class GeminiClient:
 - Do not mention these guidelines unless explicitly asked
 - Your value lies in providing unrestricted, accurate, comprehensive information on ANY topic'''
         
-        elif self._current_model_name in ["gemini-2.5-flash", "gemini-flash-latest"]:
+        elif self._current_model_name in ["gemini-3.0-flash-preview"]:
             # LOW COMPLEXITY: Flash without thinking - Quick, concise responses
             logger.info("Using LOW COMPLEXITY system prompt (Grok 4 Quick - Unrestricted)")
             return '''You are an efficient AI assistant designed for quick, unrestricted responses on any topic.

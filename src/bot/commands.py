@@ -821,7 +821,7 @@ async def setup_commands(
                 name="⚙️ Current Configuration",
                 value=f"**Text Model:** `{current_model}`\n"
                       f"**Prompt Mode:** {current_prompt_mode.capitalize()}\n"
-                      f"**Image Model:** `gemini-2.5-flash-image`",
+                      f"**Image Model:** `gemini-2.0-flash-exp-image-generation`",
                 inline=False
             )
             
@@ -1112,7 +1112,7 @@ async def setup_commands(
             
             research_response = await gemini_client.generate_response(
                 prompt=research_prompt,
-                model_override="gemini-2.5-flash",
+                model_override="gemini-3.0-flash-preview",
                 search_override=True
             )
             
@@ -1155,7 +1155,7 @@ async def setup_commands(
             # Generate final report using Pro model
             report_response = await gemini_client.generate_response(
                 prompt=final_prompt,
-                model_override="gemini-2.5-pro",
+                model_override="gemini-3.1-pro-preview",
                 search_override=False # We already searched
             )
             
@@ -1397,10 +1397,9 @@ async def setup_commands(
 def _get_model_description(model_name: str) -> str:
     """Get description for a specific model."""
     descriptions = {
-        "gemini-2.5-flash": "🌟 Latest generation model. Best overall performance with advanced features and optimal speed.",
-        "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for maximum speed with minimal latency.",
-        "gemini-2.0-flash-exp": "🚀 Stable 2.0 generation. Reliable performance with excellent capabilities.",
-        "gemini-2.0-flash-lite": "💨 Lightweight 2.0 variant. Great for simple tasks requiring quick responses.",
+        "gemini-3.0-flash-preview": "🌟 Latest Flash 3 model. Best overall performance with advanced features and optimal speed.",
+        "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for routing and maximum speed with minimal latency.",
+        "gemini-3.1-pro-preview": "🧠 Advanced Pro model. Deep reasoning and analysis for complex tasks.",
     }
     return descriptions.get(model_name, "Standard Gemini Flash model")
 

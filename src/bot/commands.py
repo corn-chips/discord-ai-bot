@@ -19,6 +19,8 @@ from discord import app_commands
 from ..config import BotConfig, AVAILABLE_MODELS
 from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
+from ..services.channel_settings_service import ChannelSettingsService, VALID_PERSONALITIES
+from ..services.user_preferences_service import UserPreferencesService
 from ..models.data_models import MessageContext
 
 
@@ -1261,8 +1263,137 @@ async def setup_commands(
         except Exception as e:
             logger.error(f"Summarize error: {e}", exc_info=True)
             await interaction.followup.send(f"❌ An error occurred while summarizing: {str(e)}")
-    
-    
+
+    # ── Personality / Tone Command ────────────────────────────────────
+
+    channel_settings_service = ChannelSettingsService(
+        db_path=config.token_db_path if hasattr(config, 'token_db_path') else "data/token_usage.db"
+    )
+    # Store on bot so discord_bot.py can access it
+    bot._channel_settings_service = channel_settings_service
+
+    personality_choices = [
+        app_commands.Choice(name=name.capitalize(), value=name)
+        for name in VALID_PERSONALITIES.keys()
+    ]
+
+    @bot.tree.command(name="personality", description="Set the bot's personality/tone for this channel")
+    @app_commands.describe(style="The personality style to use")
+    @app_commands.choices(style=personality_choices)
+    async def personality(interaction: discord.Interaction, style: app_commands.Choice[str]):
+        """Set the bot's personality for the current channel."""
+        success = channel_settings_service.set_personality(interaction.channel_id, style.value)
+        if success:
+            desc = VALID_PERSONALITIES[style.value]
+            embed = discord.Embed(
+                title=f"Personality set to **{style.name}**",
+                description=desc,
+                color=discord.Color.purple()
+            )
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(
+                f"Failed to set personality. Valid options: {', '.join(VALID_PERSONALITIES.keys())}",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name="personality-info", description="Show the current personality setting for this channel")
+    async def personality_info(interaction: discord.Interaction):
+        """Show the current personality for this channel."""
+        current = channel_settings_service.get_personality(interaction.channel_id)
+        desc = VALID_PERSONALITIES.get(current, "Unknown")
+        embed = discord.Embed(
+            title=f"Current Personality: **{current.capitalize()}**",
+            description=desc,
+            color=discord.Color.purple()
+        )
+        all_styles = "\n".join(f"- **{name}**: {d[:80]}..." if len(d) > 80 else f"- **{name}**: {d}"
+                               for name, d in VALID_PERSONALITIES.items())
+        embed.add_field(name="Available Styles", value=all_styles, inline=False)
+        await interaction.response.send_message(embed=embed)
+
+    # ── User Preferences Commands ─────────────────────────────────────
+
+    user_prefs_service = UserPreferencesService(
+        db_path=config.token_db_path if hasattr(config, 'token_db_path') else "data/token_usage.db"
+    )
+    # Store on bot so discord_bot.py can access it
+    bot._user_prefs_service = user_prefs_service
+
+    prefs_group = app_commands.Group(name="preferences", description="Manage your personal bot preferences")
+
+    model_choices = [
+        app_commands.Choice(name=model_name, value=model_name)
+        for model_name in UserPreferencesService.VALID_MODELS
+    ]
+
+    @prefs_group.command(name="model", description="Set your preferred AI model")
+    @app_commands.describe(model="The model to use for your requests")
+    @app_commands.choices(model=model_choices)
+    async def prefs_model(interaction: discord.Interaction, model: app_commands.Choice[str]):
+        success = user_prefs_service.set_model(interaction.user.id, model.value)
+        if success:
+            await interaction.response.send_message(
+                f"Your preferred model is now **{model.name}**. It will be used for all your future requests.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("Failed to set model preference.", ephemeral=True)
+
+    lang_choices = [
+        app_commands.Choice(name=lang.capitalize(), value=lang)
+        for lang in UserPreferencesService.VALID_LANGUAGES[:25]  # Discord max 25 choices
+    ]
+
+    @prefs_group.command(name="language", description="Set your preferred response language")
+    @app_commands.describe(language="The language for bot responses")
+    @app_commands.choices(language=lang_choices)
+    async def prefs_language(interaction: discord.Interaction, language: app_commands.Choice[str]):
+        success = user_prefs_service.set_language(interaction.user.id, language.value)
+        if success:
+            if language.value == "auto":
+                await interaction.response.send_message(
+                    "Language preference set to **Auto** (bot will respond in the same language you use).",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"Your preferred language is now **{language.name}**.",
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message("Failed to set language preference.", ephemeral=True)
+
+    @prefs_group.command(name="show", description="Show your current preferences")
+    async def prefs_show(interaction: discord.Interaction):
+        prefs = user_prefs_service.get_preferences(interaction.user.id)
+        embed = discord.Embed(
+            title="Your Preferences",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="Preferred Model",
+            value=prefs.preferred_model or "Not set (uses channel/server default)",
+            inline=False
+        )
+        embed.add_field(
+            name="Preferred Language",
+            value=(prefs.preferred_language or "auto").capitalize(),
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @prefs_group.command(name="clear", description="Reset all your preferences to defaults")
+    async def prefs_clear(interaction: discord.Interaction):
+        user_prefs_service.clear_preferences(interaction.user.id)
+        await interaction.response.send_message(
+            "All your preferences have been reset to defaults.",
+            ephemeral=True
+        )
+
+    bot.tree.add_command(prefs_group)
+
+
 def _get_model_description(model_name: str) -> str:
     """Get description for a specific model."""
     descriptions = {

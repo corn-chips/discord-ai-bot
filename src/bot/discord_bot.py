@@ -18,8 +18,6 @@ import fitz  # PyMuPDF
 from ..config import BotConfig
 from ..constants import (
     SUPPORTED_TEXT_EXTENSIONS,
-    MAX_TEXT_FILE_SIZE_BYTES,
-    PDF_RENDER_SCALE,
     RGB_WHITE_BACKGROUND,
 )
 from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage, MessageContext
@@ -75,13 +73,15 @@ class DiscordBot(discord.Client):
         # Initialize core services
         self.context_collector = ContextCollector(
             max_context_messages=config.max_context_messages,
-            reply_context_range=config.reply_context_range
+            reply_context_range=config.reply_context_range,
+            cutoff_hours=config.context_cutoff_hours
         )
         self.gemini_client = GeminiClient(config)
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
             preserve_formatting=config.preserve_code_blocks,
-            add_continuation_indicators=config.add_continuation_indicators
+            add_continuation_indicators=config.add_continuation_indicators,
+            continuation_overhead=config.continuation_overhead,
         )
         
         # Initialize content renderer for LaTeX and table formatting
@@ -563,7 +563,7 @@ class DiscordBot(discord.Client):
                     page = pdf_document[page_num]
                     
                     # Render page to pixmap (image) at 2x resolution for better quality
-                    mat = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
+                    mat = fitz.Matrix(self.config.pdf_render_scale, self.config.pdf_render_scale)
                     pix = page.get_pixmap(matrix=mat)
                     
                     # Convert pixmap to PIL Image and ensure RGB mode
@@ -764,7 +764,7 @@ class DiscordBot(discord.Client):
         text_extensions = SUPPORTED_TEXT_EXTENSIONS
         
         # Maximum file size to read
-        max_file_size = MAX_TEXT_FILE_SIZE_BYTES
+        max_file_size = self.config.max_text_file_size_bytes
         
         async def process_attachment(attachment: discord.Attachment) -> None:
             """Process a single attachment."""
@@ -1529,8 +1529,8 @@ class DiscordBot(discord.Client):
         Returns:
             The first sent message (for reply threading)
         """
-        # Discord limit is 2000 chars, we'll use 1900 to be safe and leave room for continuation indicators
-        max_length = 1900
+        # Use safe split length from config
+        max_length = self.config.safe_split_length
         
         # Split by paragraphs first to avoid breaking mid-sentence
         parts = []

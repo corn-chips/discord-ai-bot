@@ -16,10 +16,10 @@ import discord
 import jinja2
 from discord import app_commands
 
-from ..config import BotConfig, AVAILABLE_MODELS
+from ..config import BotConfig
 from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
-from ..services.channel_settings_service import ChannelSettingsService, VALID_PERSONALITIES
+from ..services.channel_settings_service import ChannelSettingsService
 from ..services.user_preferences_service import UserPreferencesService
 from ..models.data_models import MessageContext
 
@@ -69,7 +69,7 @@ async def setup_commands(
     )
     @app_commands.choices(model_name=[
         app_commands.Choice(name=model["name"], value=model["value"])
-        for model in AVAILABLE_MODELS
+        for model in config.available_models
     ])
     async def model(interaction: discord.Interaction, model_name: app_commands.Choice[str]):
         """Switch the Gemini AI model."""
@@ -282,7 +282,7 @@ async def setup_commands(
             return
 
         try:
-            entries = await token_tracker.get_top_users(interaction.guild.id, limit=10)
+            entries = await token_tracker.get_top_users(interaction.guild.id, limit=config.leaderboard_limit)
         except Exception as exc:
             logger.error("Failed to load token leaderboard: %s", exc, exc_info=True)
             await interaction.response.send_message(
@@ -1192,7 +1192,7 @@ async def setup_commands(
         try:
             # Fetch messages backwards
             # Limit to 500 to avoid excessive processing, but should cover most "current" conversations
-            async for message in interaction.channel.history(limit=500):
+            async for message in interaction.channel.history(limit=config.channel_history_limit):
                 current_msg_time = message.created_at
                 
                 if last_msg_time:
@@ -1243,9 +1243,10 @@ async def setup_commands(
             if response.success:
                 summary = response.content
                 # Check length limits
-                if len(summary) > 1900:
-                    # Split into chunks of 1900 characters
-                    chunks = [summary[i:i+1900] for i in range(0, len(summary), 1900)]
+                safe_len = config.safe_split_length
+                if len(summary) > safe_len:
+                    # Split into chunks
+                    chunks = [summary[i:i+safe_len] for i in range(0, len(summary), safe_len)]
                     
                     await interaction.followup.send(f"✅ **Conversation Summary** (Part 1/{len(chunks)})")
                     
@@ -1267,14 +1268,15 @@ async def setup_commands(
     # ── Personality / Tone Command ────────────────────────────────────
 
     channel_settings_service = ChannelSettingsService(
-        db_path=config.token_db_path if hasattr(config, 'token_db_path') else "data/token_usage.db"
+        db_path=config.token_db_path,
+        personalities=config.personalities,
     )
     # Store on bot so discord_bot.py can access it
     bot._channel_settings_service = channel_settings_service
 
     personality_choices = [
         app_commands.Choice(name=name.capitalize(), value=name)
-        for name in VALID_PERSONALITIES.keys()
+        for name in config.personalities.keys()
     ]
 
     @bot.tree.command(name="personality", description="Set the bot's personality/tone for this channel")
@@ -1284,7 +1286,7 @@ async def setup_commands(
         """Set the bot's personality for the current channel."""
         success = channel_settings_service.set_personality(interaction.channel_id, style.value)
         if success:
-            desc = VALID_PERSONALITIES[style.value]
+            desc = config.personalities[style.value]
             embed = discord.Embed(
                 title=f"Personality set to **{style.name}**",
                 description=desc,
@@ -1293,7 +1295,7 @@ async def setup_commands(
             await interaction.response.send_message(embed=embed)
         else:
             await interaction.response.send_message(
-                f"Failed to set personality. Valid options: {', '.join(VALID_PERSONALITIES.keys())}",
+                f"Failed to set personality. Valid options: {', '.join(config.personalities.keys())}",
                 ephemeral=True
             )
 
@@ -1301,21 +1303,23 @@ async def setup_commands(
     async def personality_info(interaction: discord.Interaction):
         """Show the current personality for this channel."""
         current = channel_settings_service.get_personality(interaction.channel_id)
-        desc = VALID_PERSONALITIES.get(current, "Unknown")
+        desc = config.personalities.get(current, "Unknown")
         embed = discord.Embed(
             title=f"Current Personality: **{current.capitalize()}**",
             description=desc,
             color=discord.Color.purple()
         )
         all_styles = "\n".join(f"- **{name}**: {d[:80]}..." if len(d) > 80 else f"- **{name}**: {d}"
-                               for name, d in VALID_PERSONALITIES.items())
+                               for name, d in config.personalities.items())
         embed.add_field(name="Available Styles", value=all_styles, inline=False)
         await interaction.response.send_message(embed=embed)
 
     # ── User Preferences Commands ─────────────────────────────────────
 
     user_prefs_service = UserPreferencesService(
-        db_path=config.token_db_path if hasattr(config, 'token_db_path') else "data/token_usage.db"
+        db_path=config.token_db_path,
+        valid_models=config.valid_models,
+        valid_languages=config.valid_languages,
     )
     # Store on bot so discord_bot.py can access it
     bot._user_prefs_service = user_prefs_service
@@ -1324,7 +1328,7 @@ async def setup_commands(
 
     model_choices = [
         app_commands.Choice(name=model_name, value=model_name)
-        for model_name in UserPreferencesService.VALID_MODELS
+        for model_name in config.valid_models
     ]
 
     @prefs_group.command(name="model", description="Set your preferred AI model")
@@ -1342,7 +1346,7 @@ async def setup_commands(
 
     lang_choices = [
         app_commands.Choice(name=lang.capitalize(), value=lang)
-        for lang in UserPreferencesService.VALID_LANGUAGES[:25]  # Discord max 25 choices
+        for lang in config.valid_languages[:25]  # Discord max 25 choices
     ]
 
     @prefs_group.command(name="language", description="Set your preferred response language")

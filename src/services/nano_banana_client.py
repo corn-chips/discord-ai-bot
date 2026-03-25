@@ -82,7 +82,8 @@ class NanoBananaClient:
     """
     
     def __init__(self, api_key: str, base_url: str = None, timeout: int = 60,
-                 max_retries: int = 3, retry_delay: float = 1.0):
+                 max_retries: int = 3, retry_delay: float = 1.0,
+                 max_requests_per_minute: int = 30):
         """
         Initialize the Gemini 2.5 Flash Image client.
         
@@ -123,7 +124,7 @@ class NanoBananaClient:
         
         # Rate limiting
         self._request_times = []
-        self._max_requests_per_minute = 30
+        self._max_requests_per_minute = max_requests_per_minute
         
         # Edit type patterns for instruction parsing
         self._edit_patterns = {

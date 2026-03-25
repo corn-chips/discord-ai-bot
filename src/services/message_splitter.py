@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 import logging
 
-from ..constants import DISCORD_MESSAGE_LIMIT, CONTINUATION_INDICATOR_OVERHEAD
+from ..constants import DISCORD_MESSAGE_LIMIT
 from ..utils.markdown_utils import MarkdownParser, BlockType, MarkdownBlock
 
 
@@ -38,22 +38,23 @@ class MessageSplitter:
     """
     
     def __init__(self, max_length: int = DISCORD_MESSAGE_LIMIT, preserve_formatting: bool = True,
-                 add_continuation_indicators: bool = True):
+                 add_continuation_indicators: bool = True, continuation_overhead: int = 50):
         """
         Initialize the message splitter.
-        
+
         Args:
             max_length: Maximum length for each message part (Discord limit is 2000)
             preserve_formatting: Whether to preserve markdown formatting across splits
             add_continuation_indicators: Whether to add continuation text between parts
+            continuation_overhead: Characters reserved for continuation indicators
         """
         self.max_length = max_length
         self.preserve_formatting = preserve_formatting
         self.add_continuation_indicators = add_continuation_indicators
         self.markdown_parser = MarkdownParser()
-        
+
         # Reserve space for continuation indicators only if enabled
-        self.continuation_overhead = CONTINUATION_INDICATOR_OVERHEAD if add_continuation_indicators else 0
+        self.continuation_overhead = continuation_overhead if add_continuation_indicators else 0
         self.effective_max_length = max_length - self.continuation_overhead
         
         logger.info(f"MessageSplitter initialized with max_length={max_length}, preserve_formatting={preserve_formatting}, add_continuation_indicators={add_continuation_indicators}")

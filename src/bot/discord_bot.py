@@ -29,6 +29,7 @@ from ..services.message_splitter import MessageSplitter
 from ..services.image_processing_service import ImageProcessingService
 from ..services.user_experience_service import UserExperienceService
 from ..services.token_tracker import TokenTracker
+from ..services.content_renderer import ContentRenderer
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
@@ -83,6 +84,9 @@ class DiscordBot(discord.Client):
             add_continuation_indicators=config.add_continuation_indicators
         )
         
+        # Initialize content renderer for LaTeX and table formatting
+        self.content_renderer = ContentRenderer()
+
         # Initialize UX enhancement services
         self.user_experience_service = UserExperienceService(config)
         
@@ -895,6 +899,10 @@ class DiscordBot(discord.Client):
         Returns:
             True if the bot is directly mentioned or message is a reply to bot, False otherwise
         """
+        # Always respond in private DMs (1-on-1 with bot) — no @mention needed
+        if isinstance(message.channel, discord.DMChannel):
+            return True
+
         # Check if this is a reply to a bot message
         if message.reference and message.reference.resolved:
             replied_message = message.reference.resolved
@@ -1059,17 +1067,20 @@ class DiscordBot(discord.Client):
                     if audio_files:
                         logger.info(f"✅ Extracted {len(audio_files)} audio file(s)")
                         
-                        # Filter context for audio transcription to only include the replied-to message
+                        # Keep limited context for audio transcription (for tone/speaker identification)
                         if message.reference and message.reference.message_id:
                             replied_id = message.reference.message_id
-                            # Keep only the immediate parent message in context
+                            # Keep the replied-to message + last 5 recent messages
                             original_context_len = len(context)
-                            context = [msg for msg in context if msg.message_id == replied_id]
-                            logger.info(f"Audio transcription: Context restricted to replied message (kept {len(context)}/{original_context_len} messages)")
+                            replied = [msg for msg in context if msg.message_id == replied_id]
+                            recent = context[-5:] if len(context) > 5 else context
+                            context = self.context_collector._remove_duplicate_messages(recent, replied)
+                            logger.info(f"Audio transcription: Context restricted to replied message + recent (kept {len(context)}/{original_context_len} messages)")
                         else:
-                            # No reply, clear context completely
-                            context = []
-                            logger.info("Audio transcription: Context cleared (no reply)")
+                            # No reply, keep last 5 messages for minimal context
+                            original_context_len = len(context)
+                            context = context[-5:] if len(context) > 5 else context
+                            logger.info(f"Audio transcription: Context trimmed to recent messages (kept {len(context)}/{original_context_len} messages)")
                     
                     # Extract files from the message
                     logger.info("=" * 80)
@@ -1159,6 +1170,17 @@ class DiscordBot(discord.Client):
                             logger.info(f"    • {f['name']}")
                     logger.info("=" * 80)
                     
+                    # Load channel personality and user preferences
+                    personality_prompt = None
+                    user_language = None
+                    if hasattr(self, '_channel_settings_service') and self._channel_settings_service:
+                        personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
+                    if hasattr(self, '_user_prefs_service') and self._user_prefs_service:
+                        prefs = self._user_prefs_service.get_preferences(message.author.id)
+                        if prefs.preferred_model:
+                            self.gemini_client.set_model(prefs.preferred_model)
+                        user_language = prefs.preferred_language
+
                     # Get estimated response time and show it to user
                     estimated_time = self.gemini_client.get_estimated_response_time()
                     model_name = self.gemini_client.get_current_model()
@@ -1222,7 +1244,14 @@ class DiscordBot(discord.Client):
                             pass
 
                     api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None, audio_files=audio_files if audio_files else None, on_chunk=on_chunk),
+                        self.gemini_client.generate_response(
+                            enhanced_prompt, context,
+                            images=images if images else None,
+                            audio_files=audio_files if audio_files else None,
+                            on_chunk=on_chunk,
+                            personality_prompt=personality_prompt,
+                            language=user_language,
+                        ),
                         timeout=api_timeout
                     )
                     
@@ -1325,8 +1354,6 @@ class DiscordBot(discord.Client):
             return
         if not self.token_tracker:
             return
-        if not message.guild:
-            return
 
         username = (
             message.author.display_name
@@ -1336,12 +1363,15 @@ class DiscordBot(discord.Client):
         )
         username = username[:80]  # Avoid storing excessively long names
 
+        guild_id = message.guild.id if message.guild else 0
+        guild_name = message.guild.name if message.guild else "Direct Messages"
+
         try:
             await self.token_tracker.record_usage(
                 user_id=message.author.id,
                 username=username,
-                guild_id=message.guild.id,
-                guild_name=message.guild.name,
+                guild_id=guild_id,
+                guild_name=guild_name,
                 input_tokens=token_usage.input_tokens,
                 output_tokens=token_usage.output_tokens,
                 total_tokens=token_usage.total_tokens,
@@ -1366,24 +1396,26 @@ class DiscordBot(discord.Client):
                 logger.warning("Empty response content generated")
                 await message.reply("I generated a response, but it appears to be empty. Could you try asking differently? 🤔")
                 return
-            
+
+            # Render LaTeX and format tables for Discord
+            rendered = self.content_renderer.process_response(response_content)
+            response_content = rendered.text
+            attachments = rendered.attachments
+            if attachments:
+                logger.info(f"Content renderer produced {len(attachments)} image attachment(s) (LaTeX)")
+
             # Check if response is too long for Discord (2000 character limit)
             if len(response_content) > 2000:
                 logger.info(f"Response too long ({len(response_content)} chars), splitting into multiple messages")
-                sent_message = await self._send_split_response(message, response_content)
+                sent_message = await self._send_split_response(message, response_content, attachments=attachments)
             else:
-                # Send the response as a reply
-                sent_message = await message.reply(response_content)
-                logger.info(f"Successfully sent response to {message.author} in #{message.channel.name}")
+                # Send the response as a reply (with any LaTeX image attachments)
+                sent_message = await message.reply(response_content, files=attachments if attachments else None)
+                logger.info(f"Successfully sent response to {message.author} in #{getattr(message.channel, 'name', 'DM')}")
             
             # Send grounding sources as a separate message if available
             if grounding_sources and len(grounding_sources) > 0:
                 await self._send_grounding_sources(sent_message, grounding_sources)
-            
-            # Check if the response indicates the bot will provide more information
-            if self._should_generate_followup(response_content):
-                logger.info("Response indicates follow-up needed, generating continuation...")
-                await self._generate_and_send_followup(message, sent_message)
             
             return sent_message
             
@@ -1441,47 +1473,46 @@ class DiscordBot(discord.Client):
                 fallback_reaction="⚠️"
             )
     
-    async def _send_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
+    async def _send_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
         """
         Split a long response into multiple messages and send them using intelligent splitting.
-        
+
         Args:
             message: The original Discord message to reply to
             response_content: The long response content to split
-            
+            attachments: Optional list of discord.File attachments (sent with first message)
+
         Returns:
             The first sent message (for reply threading)
         """
         try:
             # Use the intelligent message splitter
             message_parts = self.message_splitter.split_message(response_content)
-            
+
             # Log split statistics
             stats = self.message_splitter.get_split_statistics(message_parts)
             logger.info(f"Message split statistics: {stats}")
-            
+
             # Validate split integrity
             if not self.message_splitter.validate_split_integrity(response_content, message_parts):
                 logger.warning("Split integrity validation failed, falling back to simple split")
                 return await self._send_simple_split_response(message, response_content)
-            
-            # Send the parts
+
+            # Send the parts — first part replies to original, rest are regular messages
             first_message = None
-            last_message = message
-            
+
             for part in message_parts:
-                # Reply to the last message to create a thread
-                sent = await last_message.reply(part.content)
-                
                 if part.part_number == 1:
+                    sent = await message.reply(part.content, files=attachments if attachments else None)
                     first_message = sent
-                last_message = sent
-                
+                else:
+                    sent = await message.channel.send(part.content)
+
                 logger.info(f"Sent message part {part.part_number}/{part.total_parts} ({len(part.content)} chars)")
-            
+
             logger.info(f"Successfully sent response in {len(message_parts)} parts with intelligent splitting")
             return first_message
-            
+
         except Exception as e:
             logger.error(f"Error in intelligent message splitting: {e}", exc_info=True)
             logger.info("Falling back to simple message splitting")
@@ -1534,26 +1565,24 @@ class DiscordBot(discord.Client):
         if current_part.strip():
             parts.append(current_part.strip())
         
-        # Send the parts
+        # Send the parts — first part replies to original, rest are regular messages
         first_message = None
-        last_message = message
-        
+
         for idx, part in enumerate(parts):
             # Add continuation indicator
             if idx > 0:
                 part = f"*(continued...)*\n\n{part}"
             if idx < len(parts) - 1:
                 part = f"{part}\n\n*(continues...)*"
-            
-            # Reply to the last message to create a thread
-            sent = await last_message.reply(part)
-            
+
             if idx == 0:
+                sent = await message.reply(part)
                 first_message = sent
-            last_message = sent
-            
+            else:
+                sent = await message.channel.send(part)
+
             logger.info(f"Sent message part {idx + 1}/{len(parts)}")
-        
+
         logger.info(f"Successfully sent response in {len(parts)} parts using simple splitting")
         return first_message
     
@@ -1598,91 +1627,3 @@ class DiscordBot(discord.Client):
         except Exception as e:
             logger.error(f"Unexpected error sending grounding sources: {e}", exc_info=True)
     
-    def _should_generate_followup(self, response: str) -> bool:
-        """
-        Simple heuristic to detect if bot promised a follow-up.
-        
-        Note: This is a lightweight UX enhancement, NOT a core routing decision.
-        Core routing decisions are made by the AI router model.
-        
-        Args:
-            response: The bot's initial response content
-            
-        Returns:
-            True if a follow-up should be generated
-        """
-        response_lower = response.lower()
-        
-        # Simple keyword check for common "I'll get back to you" phrases
-        # This is just a UX enhancement and doesn't affect routing
-        followup_indicators = [
-            "give me a sec",
-            "let me check",
-            "let me search",
-            "let me look",
-            "one moment",
-            "just a moment",
-            "hold on",
-            "searching for",
-            "looking up",
-            "checking on",
-            "dig up",
-            "find out",
-            "i'll search",
-            "i'll check",
-            "i'll look",
-            "i will search",
-            "i will check",
-            "i will look"
-        ]
-        
-        return any(indicator in response_lower for indicator in followup_indicators)
-    
-    async def _generate_and_send_followup(self, original_message: discord.Message, initial_response: discord.Message):
-        """
-        Generate and send a follow-up response when the initial response indicated more info would come.
-        
-        Args:
-            original_message: The user's original message
-            initial_response: The bot's initial response message
-        """
-        try:
-            # Wait a moment to simulate "working on it"
-            await asyncio.sleep(2)
-            
-            # Show typing indicator
-            async with original_message.channel.typing():
-                # Extract the original user prompt
-                user_prompt = self._extract_user_prompt(original_message)
-                
-                # Create a modified prompt that asks for the actual information
-                followup_prompt = f"Now provide the actual detailed information for: {user_prompt}"
-                
-                # Collect fresh context including the initial response
-                try:
-                    context = await self.context_collector.get_channel_context(original_message.channel)
-                except Exception as e:
-                    logger.error(f"Failed to collect context for follow-up: {e}")
-                    context = []
-                
-                # Generate the follow-up response
-                api_response = await asyncio.wait_for(
-                    self.gemini_client.generate_response(followup_prompt, context),
-                    timeout=self.config.response_timeout + 5
-                )
-                
-                if api_response.success and api_response.content:
-                    # Send as a reply to the initial response
-                    if len(api_response.content) > 2000:
-                        api_response.content = api_response.content[:1997] + "..."
-                    
-                    await initial_response.reply(api_response.content)
-                    logger.info("Successfully sent follow-up response")
-                else:
-                    logger.error(f"Failed to generate follow-up: {api_response.error_type}")
-                    # Don't send an error for follow-up failures, just log them
-                    
-        except asyncio.TimeoutError:
-            logger.error("Follow-up response generation timed out")
-        except Exception as e:
-            logger.error(f"Error generating follow-up response: {e}", exc_info=True)

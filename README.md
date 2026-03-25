@@ -1,18 +1,24 @@
 # Discord Grok Bot
 
-A Discord bot that provides AI-powered conversational responses using Google's Gemini API. The bot offers contextual responses when mentioned in Discord channels, with advanced features like image generation, PDF processing, and intelligent message handling.
+A Discord bot that provides AI-powered conversational responses using Google's Gemini API — inspired by X's Grok. Responds when mentioned in guild channels and group DMs, and auto-responds in private DMs. Supports image generation, PDF processing, LaTeX rendering, and per-channel personality tuning.
 
-## Recent Updates (v2.0)
+## Recent Updates (v3.0)
+
+- ✅ **Private DM Support**: Bot now auto-responds to all messages in private DMs — no @mention required
+- ✅ **LaTeX & Table Rendering**: Block LaTeX (`$$...$$`) renders to PNG images; inline LaTeX (`$...$`) converts to Unicode; markdown tables display as formatted code blocks
+- ✅ **Personality/Tone System**: Per-channel personality settings via `/personality` — choose from default, professional, casual, sarcastic, academic, or friendly
+- ✅ **Per-User Preferences**: `/preferences` commands let users set their preferred AI model and response language, applied automatically on every request
+- ✅ **Bug Fixes**:
+  - Fixed bot crashing with AttributeError on `channel.name` in DMs
+  - Fixed token usage not being tracked for DM conversations
+  - Fixed audio transcription wiping all conversation context
+  - Fixed long responses creating deeply nested reply chains (now sends subsequent parts as flat messages)
+  - Removed faulty follow-up heuristic that triggered unwanted double-responses
+
+## Previous Updates (v2.0)
 
 - ✅ **Code Cleanup & Optimization**: Refactored codebase for better maintainability
-  - Eliminated duplicate code (token extraction now centralized)
-  - Removed unused code and imports
-  - Improved module organization with proper exports
-  - Better separation of concerns
-- ✅ **Bug Fixes**: 
-  - Fixed image handling for Gemini API (PIL images now properly converted)
-  - Fixed @everyone/@here spam (bot no longer responds to broadcast mentions)
-  - Fixed continuation indicators config (now properly honors user settings)
+- ✅ **Bug Fixes**: Fixed image handling for Gemini API, @everyone/@here spam, continuation indicators
 - ✅ **Enhanced Stability**: All syntax checks pass, no diagnostic errors
 
 ## Todo List
@@ -20,7 +26,10 @@ A Discord bot that provides AI-powered conversational responses using Google's G
  - [x] **NEW!** Add image generation and editing via Gemini 2.5 Flash Image (nano-banana)
  - [x] Add functionality to read files in the discord message
  - [x] Add PDF support - PDFs are now converted to images and processed!
- - [ ] Make it so that markdown is consistent through split messages
+ - [x] LaTeX and table rendering in responses
+ - [x] Private DM support (auto-respond without @mention)
+ - [x] Per-channel personality/tone settings
+ - [x] Per-user model and language preferences
  - [ ] Add feature to join vc and answer in real time
  - [ ] Add interactive image refinement (multiple edit iterations)
  - [ ] Add batch image processing
@@ -30,9 +39,11 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 ### Core Capabilities
 - **Context-Aware Responses**: Analyzes recent message history for relevant context
 - **Enhanced Reply Context**: Provides additional context when replying to specific messages
-- **Smart Mention Detection**: Only responds to direct @mentions and replies (ignores @everyone/@here to prevent spam)
-- **Intelligent Message Splitting**: Preserves markdown formatting and code blocks across long messages
+- **Smart Mention Detection**: Responds to direct @mentions and replies in guild/group channels; auto-responds in private DMs (no @mention needed)
+- **Intelligent Message Splitting**: Preserves markdown formatting and code blocks across long messages; subsequent parts sent as flat channel messages (no nested chains)
 - **Configurable Continuation Indicators**: Optional message part indicators (can be disabled)
+- **LaTeX Rendering**: Block LaTeX expressions (`$$...$$`) rendered to PNG images via matplotlib; inline expressions (`$...$`) converted to Unicode with image fallback
+- **Table Formatting**: Markdown tables automatically converted to fixed-width code blocks for proper Discord display
 
 ### AI & Media Processing
 - **Image Analysis**: Supports image attachments for visual understanding
@@ -48,6 +59,10 @@ A Discord bot that provides AI-powered conversational responses using Google's G
 - **File Upload Support**: Reads and processes uploaded text files, code, configurations, logs, and more (see [FILE_UPLOAD_FEATURE.md](FILE_UPLOAD_FEATURE.md))
   - Supports 40+ file types including all major programming languages
   - Comprehensive logging for debugging (see [FILE_UPLOAD_DEBUGGING.md](FILE_UPLOAD_DEBUGGING.md))
+
+### Personality & Preferences
+- **Channel Personalities**: Set a per-channel AI tone with `/personality` — options: default, professional, casual, sarcastic, academic, friendly
+- **User Preferences**: Each user can set their preferred Gemini model and response language via `/preferences`; settings persist across sessions and apply automatically
 
 ### Developer Tools
 - **Developer Mode**: 🔧 Toggle detailed error output with `/dev` command (see [DEV_MODE.md](DEV_MODE.md))
@@ -281,14 +296,25 @@ The bot uses environment variables for configuration. Copy `.env.example` to `.e
 ### Slash Commands
 The bot includes powerful slash commands for configuration and monitoring:
 
+**General:**
 - `/ping` - Check bot status and latency
 - `/model` - Switch between Gemini Flash models (2.5, 2.5-Lite, 2.0, 2.0-Lite)
 - `/stats` - View usage statistics and token consumption
-- `/token-leaderboard` - Display the top 10 token users in the current guild using real usage data
+- `/token-leaderboard` - Display the top 10 token users in the current guild
 - `/config` - View current configuration
 - `/help` - Show help information
 - `/dev` - Toggle developer mode for detailed error output (Admin only)
 - `/clear-cache` - Clear statistics cache (Admin only)
+
+**Personality & Tone:**
+- `/personality <style>` - Set the bot's tone for this channel (default, professional, casual, sarcastic, academic, friendly)
+- `/personality-info` - Show the current personality and all available styles
+
+**User Preferences:**
+- `/preferences model <model>` - Set your preferred Gemini model
+- `/preferences language <language>` - Set your preferred response language
+- `/preferences show` - View your current preferences
+- `/preferences clear` - Reset all preferences to defaults
 
 📖 See [SLASH_COMMANDS.md](SLASH_COMMANDS.md) for detailed command documentation.
 
@@ -535,6 +561,9 @@ discord-grok-bot/
 │   │   ├── image_processing_service.py  # Image processing queue
 │   │   ├── user_experience_service.py   # UX enhancements
 │   │   ├── token_tracker.py    # Token usage tracking
+│   │   ├── content_renderer.py # LaTeX-to-image and table formatting
+│   │   ├── channel_settings_service.py  # Per-channel personality settings
+│   │   ├── user_preferences_service.py  # Per-user model/language preferences
 │   │   └── help_system.py      # Help and command suggestions
 │   ├── utils/                  # Utility functions
 │   │   ├── error_manager.py    # Centralized error handling
@@ -721,10 +750,13 @@ docker-compose down && docker-compose build --no-cache && docker-compose up -d
 - Rate limiting per user to prevent abuse
 
 **Message Handling:**
-- Smart mention detection (ignores broadcast mentions)
+- Smart mention detection (ignores broadcast mentions; auto-responds in private DMs)
 - Context-aware responses with conversation history
-- Markdown preservation across message splits
-- Configurable continuation indicators
+- Markdown preservation across message splits; parts sent as flat messages, not nested chains
+- LaTeX rendering via matplotlib (block → PNG image attachments; inline → Unicode)
+- Markdown table conversion to fixed-width code blocks
+- Per-channel personality injected into system prompt
+- Per-user model/language preferences applied per request
 
 ### API Integration
 
@@ -742,11 +774,11 @@ docker-compose down && docker-compose build --no-cache && docker-compose up -d
 
 ### Data Storage
 
-**SQLite Database:**
-- Tracks per-user token usage
-- Stores input/output/total tokens per request
-- Powers the `/token-leaderboard` command
-- Automatic schema initialization
+**SQLite Database (`data/token_usage.db`):**
+- `token_usage` — per-user input/output/total tokens per request; powers `/token-leaderboard`
+- `channel_settings` — per-channel personality setting; populated by `/personality`
+- `user_preferences` — per-user preferred model and language; populated by `/preferences`
+- All tables auto-initialized on first run
 
 **File System:**
 - Logs stored in `logs/` directory

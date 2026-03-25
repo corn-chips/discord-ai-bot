@@ -100,9 +100,9 @@ Most everyday questions should be "low". Most work-related tasks should be "medi
 """
 
             # Create router model instance for classification
-            # Use configured router model or default to gemini-2.0-flash-lite
-            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
-            
+            # Use configured router model or default to gemini-2.5-flash-lite
+            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.5-flash-lite")
+
             if not self.gemini_client.client:
                 logger.warning("Gemini client not initialized, skipping router")
                 return CommandIntent.UNKNOWN, "low"
@@ -246,8 +246,8 @@ Categories:
 
 Respond with EXACTLY one word (the category name):"""
 
-            # Use configured router model or default to gemini-2.0-flash-lite
-            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.0-flash-lite")
+            # Use configured router model or default to gemini-2.5-flash-lite
+            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.5-flash-lite")
 
             if not self.gemini_client.client:
                 logger.warning("Gemini client not initialized, defaulting to GENERAL_EDIT")

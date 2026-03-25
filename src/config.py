@@ -16,10 +16,9 @@ from .utils.logging_config import setup_logging
 
 # Available Gemini models for the /config model command
 AVAILABLE_MODELS = [
-    {"name": "Gemini 2.5 Flash (Latest, Recommended)", "value": "gemini-2.5-flash"},
-    {"name": "Gemini 2.5 Flash-Lite (Ultra Fast)", "value": "gemini-2.5-flash-lite"},
-    {"name": "Gemini 2.0 Flash (Stable)", "value": "gemini-2.0-flash-exp"},
-    {"name": "Gemini 2.0 Flash-Lite (Lightweight)", "value": "gemini-2.0-flash-lite"},
+    {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
+    {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
+    {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
 ]
 
 
@@ -32,7 +31,7 @@ class BotConfig:
     gemini_api_key: str
     
     # Router configuration
-    router_model_name: str = "gemini-2.0-flash-lite"
+    router_model_name: str = "gemini-2.5-flash-lite"
     
     # Optional configuration with defaults
     max_context_messages: int = 100

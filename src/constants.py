@@ -44,8 +44,8 @@ MAX_REQUESTS_PER_USER_PER_HOUR = 10
 MAX_IMAGE_REQUESTS_PER_MINUTE = 30
 
 # API Configuration
-DEFAULT_ROUTER_MODEL = "gemini-2.0-flash-lite"
-DEFAULT_MAIN_MODEL = "gemini-2.5-flash"
+DEFAULT_ROUTER_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MAIN_MODEL = "gemini-3.0-flash-preview"
 
 # Token Limits
 MIN_TOKEN_LENGTH_DISCORD = 50

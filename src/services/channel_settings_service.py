@@ -7,25 +7,19 @@ Manages per-channel settings such as personality/tone stored in SQLite.
 import logging
 import sqlite3
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-VALID_PERSONALITIES = {
-    "default": "You are a helpful AI assistant. Respond naturally and informatively.",
-    "professional": "Respond in a professional, formal tone. Be precise, structured, and business-appropriate. Avoid slang and humor.",
-    "casual": "Respond in a casual, friendly tone with humor. Use conversational language, contractions, and feel free to joke around.",
-    "sarcastic": "Respond with witty sarcasm and dry humor, but still be helpful. Think of yourself as a clever friend who can't resist a good quip.",
-    "academic": "Respond in an academic, scholarly tone. Use precise terminology, cite reasoning, and structure responses like a knowledgeable professor.",
-    "friendly": "Respond in a warm, encouraging, and supportive tone. Be enthusiastic and uplifting, like a cheerful friend who genuinely wants to help.",
-}
 
 
 class ChannelSettingsService:
     """Manages per-channel settings persisted in SQLite."""
 
-    def __init__(self, db_path: str = "data/token_usage.db"):
+    def __init__(self, db_path: str = "data/token_usage.db", personalities: Dict[str, str] = None):
         self.db_path = db_path
+        self.personalities = personalities or {
+            "default": "You are a helpful AI assistant. Respond naturally and informatively.",
+        }
         self._ensure_table()
 
     def _ensure_table(self):
@@ -65,7 +59,7 @@ class ChannelSettingsService:
         personality = self.get_personality(channel_id)
         if personality == "default":
             return None
-        return VALID_PERSONALITIES.get(personality)
+        return self.personalities.get(personality)
 
     def set_personality(self, channel_id: int, personality: str) -> bool:
         """
@@ -78,7 +72,7 @@ class ChannelSettingsService:
         Returns:
             True if successful, False otherwise
         """
-        if personality not in VALID_PERSONALITIES:
+        if personality not in self.personalities:
             logger.error(f"Invalid personality: {personality}")
             return False
 
@@ -99,7 +93,6 @@ class ChannelSettingsService:
             logger.error(f"Failed to set personality for channel {channel_id}: {e}")
             return False
 
-    @staticmethod
-    def list_personalities() -> dict:
+    def list_personalities(self) -> dict:
         """Return a dict of personality name -> description."""
-        return {name: desc for name, desc in VALID_PERSONALITIES.items()}
+        return {name: desc for name, desc in self.personalities.items()}

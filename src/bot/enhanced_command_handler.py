@@ -101,7 +101,7 @@ Most everyday questions should be "low". Most work-related tasks should be "medi
 
             # Create router model instance for classification
             # Use configured router model or default to gemini-2.5-flash-lite
-            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.5-flash-lite")
+            router_model = self.bot.config.router_model_name
 
             if not self.gemini_client.client:
                 logger.warning("Gemini client not initialized, skipping router")
@@ -113,8 +113,8 @@ Most everyday questions should be "low". Most work-related tasks should be "medi
                 model=router_model,
                 contents=classification_prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=100,
+                    temperature=self.bot.config.router_temperature,
+                    max_output_tokens=self.bot.config.router_max_output_tokens,
                     response_mime_type="application/json"
                 )
             )
@@ -246,8 +246,7 @@ Categories:
 
 Respond with EXACTLY one word (the category name):"""
 
-            # Use configured router model or default to gemini-2.5-flash-lite
-            router_model = getattr(self.bot.config, 'router_model_name', "gemini-2.5-flash-lite")
+            router_model = self.bot.config.router_model_name
 
             if not self.gemini_client.client:
                 logger.warning("Gemini client not initialized, defaulting to GENERAL_EDIT")
@@ -258,8 +257,8 @@ Respond with EXACTLY one word (the category name):"""
                 model=router_model,
                 contents=classification_prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=10
+                    temperature=self.bot.config.router_temperature,
+                    max_output_tokens=self.bot.config.edit_detection_max_output_tokens
                 )
             )
             
@@ -544,8 +543,8 @@ Respond with EXACTLY one word (the category name):"""
         
         await message.reply(embed=embed)
     
-    async def _wait_for_job_completion(self, job_id: str, processing_msg: discord.Message, 
-                                      timeout: int = 60) -> ImageEditResult:
+    async def _wait_for_job_completion(self, job_id: str, processing_msg: discord.Message,
+                                      timeout: int = None) -> ImageEditResult:
         """
         Wait for an image processing job to complete.
         
@@ -562,23 +561,26 @@ Respond with EXACTLY one word (the category name):"""
             RuntimeError: If job fails
         """
         import asyncio
-        
+
+        if timeout is None:
+            timeout = self.bot.config.job_timeout
+
         start_time = asyncio.get_event_loop().time()
         last_progress = 0.0
-        
+
         while True:
             # Check timeout
             if asyncio.get_event_loop().time() - start_time > timeout:
                 raise TimeoutError(f"Image processing timed out after {timeout}s")
-            
+
             # Get job status
             job = await self.image_processing_service.get_job_status(job_id)
-            
+
             if not job:
                 raise RuntimeError(f"Job {job_id} not found")
-            
+
             # Update progress message if progress changed significantly
-            if job.progress - last_progress >= 0.1:
+            if job.progress - last_progress >= self.bot.config.progress_update_threshold:
                 try:
                     await processing_msg.edit(
                         content=f"🎨 Processing your image edit... {int(job.progress * 100)}%"

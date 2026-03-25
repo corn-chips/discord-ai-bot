@@ -1,213 +1,386 @@
 """
 Configuration management for Discord Grok Bot.
+
+Loads all non-secret configuration from config.yaml and secrets from .env.
 """
 
 import os
 import sys
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional, Dict, List, Any
 
-from .constants import (
-    DISCORD_MESSAGE_LIMIT,
-    MIN_TOKEN_LENGTH_DISCORD,
-    MIN_TOKEN_LENGTH_GEMINI,
-)
+import yaml
+
+from .constants import DISCORD_MESSAGE_LIMIT
 from .utils.logging_config import setup_logging
 
-# Available Gemini models for the /config model command
-AVAILABLE_MODELS = [
-    {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
-    {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
-    {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
-]
+
+# Path to the config file (project root)
+CONFIG_FILE_PATH = Path(__file__).parent.parent / "config.yaml"
 
 
 @dataclass
 class BotConfig:
     """Configuration class for the Discord Grok Bot."""
-    
-    # Required configuration
-    discord_token: str
-    gemini_api_key: str
-    
-    # Router configuration
-    router_model_name: str = "gemini-2.5-flash-lite"
-    
-    # Optional configuration with defaults
-    max_context_messages: int = 100
-    reply_context_range: int = 10
-    response_timeout: int = 30
-    max_retries: int = 3
+
+    # === Secrets (from .env) ===
+    discord_token: str = ""
+    gemini_api_key: str = ""
+    nano_banana_api_key: str = ""
+
+    # === Bot ===
+    dev_mode_enabled: bool = False
+    token_db_path: str = "data/token_usage.db"
+
+    # === Logging ===
     log_level: str = "INFO"
     log_file: Optional[str] = None
     enable_performance_logging: bool = True
-    token_db_path: str = "data/token_usage.db"
-    
-    # Image processing configuration (uses Gemini 2.5 Flash Image model)
-    # Note: nano_banana_api_key should be the same as gemini_api_key
-    nano_banana_api_key: str = ""
-    max_image_size_mb: int = 10
-    image_processing_timeout: int = 60
-    max_concurrent_image_edits: int = 3
-    
-    # Message formatting settings
+
+    # === Context ===
+    max_context_messages: int = 100
+    reply_context_range: int = 10
+    context_cutoff_hours: int = 24
+
+    # === Response ===
+    response_timeout: int = 30
+    extended_timeout: int = 120
+    api_timeout_buffer: int = 10
+    max_retries: int = 3
+
+    # === Messages ===
     message_split_length: int = 2000
+    safe_split_length: int = 1900
+    continuation_overhead: int = 50
     preserve_code_blocks: bool = True
     add_continuation_indicators: bool = True
-    
-    # UX enhancement settings
+
+    # === UX ===
     show_typing_indicators: bool = True
     use_rich_embeds: bool = True
     enable_reaction_feedback: bool = True
     command_suggestion_threshold: float = 0.7
-    
-    # Developer mode (detailed error output)
-    dev_mode_enabled: bool = False
-    
+
+    # === Models ===
+    default_model: str = "gemini-3.0-flash-preview"
+    router_model_name: str = "gemini-2.5-flash-lite"
+    available_models: List[Dict[str, str]] = field(default_factory=lambda: [
+        {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
+        {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
+        {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
+    ])
+    valid_models: List[str] = field(default_factory=lambda: [
+        "gemini-3.0-flash-preview",
+        "gemini-2.5-flash-lite",
+        "gemini-3.1-pro-preview",
+    ])
+    model_display_names: Dict[str, str] = field(default_factory=lambda: {
+        "gemini-3.0-flash-preview": "Gemini Flash 3 Preview",
+        "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+        "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
+    })
+
+    # === Generation Parameters ===
+    temperature: float = 0.7
+    top_p: float = 0.8
+    top_k: int = 40
+    max_output_tokens: int = 65536
+    router_temperature: float = 0.1
+    router_max_output_tokens: int = 100
+    edit_detection_max_output_tokens: int = 10
+
+    # === Safety Settings ===
+    safety_harassment: str = "BLOCK_NONE"
+    safety_hate_speech: str = "BLOCK_NONE"
+    safety_sexually_explicit: str = "BLOCK_NONE"
+    safety_dangerous_content: str = "BLOCK_NONE"
+
+    # === Image Processing ===
+    max_image_size_mb: int = 10
+    image_processing_timeout: int = 60
+    max_concurrent_image_edits: int = 3
+
+    # === Rate Limiting ===
+    max_requests_per_user_per_hour: int = 10
+    max_image_requests_per_minute: int = 30
+
+    # === Nano Banana ===
+    nano_banana_timeout: int = 60
+    nano_banana_max_retries: int = 3
+    nano_banana_retry_delay: float = 1.0
+
+    # === Languages ===
+    valid_languages: List[str] = field(default_factory=lambda: [
+        "english", "spanish", "french", "german", "italian",
+        "portuguese", "russian", "japanese", "korean", "chinese",
+        "arabic", "hindi", "dutch", "swedish", "polish",
+        "turkish", "vietnamese", "thai", "indonesian", "auto",
+    ])
+
+    # === Personalities ===
+    personalities: Dict[str, str] = field(default_factory=lambda: {
+        "default": "You are a helpful AI assistant. Respond naturally and informatively.",
+        "professional": "Respond in a professional, formal tone. Be precise, structured, and business-appropriate. Avoid slang and humor.",
+        "casual": "Respond in a casual, friendly tone with humor. Use conversational language, contractions, and feel free to joke around.",
+        "sarcastic": "Respond with witty sarcasm and dry humor, but still be helpful. Think of yourself as a clever friend who can't resist a good quip.",
+        "academic": "Respond in an academic, scholarly tone. Use precise terminology, cite reasoning, and structure responses like a knowledgeable professor.",
+        "friendly": "Respond in a warm, encouraging, and supportive tone. Be enthusiastic and uplifting, like a cheerful friend who genuinely wants to help.",
+    })
+
+    # === System Prompts ===
+    system_prompt_high_complexity: str = ""
+    system_prompt_low_complexity: str = ""
+    system_prompt_medium_complexity: str = ""
+    system_prompt_thinking_addon: str = ""
+
+    # === Validation ===
+    min_token_length_discord: int = 50
+    min_token_length_gemini: int = 30
+    max_text_file_size_bytes: int = 5 * 1024 * 1024
+    pdf_render_scale: float = 2.0
+
+    # === Misc ===
+    leaderboard_limit: int = 10
+    channel_history_limit: int = 500
+    job_timeout: int = 60
+    progress_update_threshold: float = 0.1
+
     @classmethod
-    def from_environment(cls) -> 'BotConfig':
-        """Create BotConfig instance from environment variables."""
-        return cls(
+    def from_yaml(cls, config_path: Path = None) -> 'BotConfig':
+        """Create BotConfig from config.yaml + .env secrets."""
+        if config_path is None:
+            config_path = CONFIG_FILE_PATH
+
+        # Load YAML config
+        if not config_path.exists():
+            print(f"Config file not found at {config_path}")
+            print("Copy config.yaml.example to config.yaml and edit it.")
+            sys.exit(1)
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+
+        # Helper to safely get nested values
+        def get(section: str, key: str, default=None):
+            return cfg.get(section, {}).get(key, default)
+
+        # Build config from YAML + env secrets
+        config = cls(
+            # Secrets from .env
             discord_token=os.getenv('DISCORD_BOT_TOKEN', ''),
             gemini_api_key=os.getenv('GEMINI_API_KEY', ''),
-            max_context_messages=int(os.getenv('MAX_CONTEXT_MESSAGES', '100')),
-            reply_context_range=int(os.getenv('REPLY_CONTEXT_RANGE', '10')),
-            response_timeout=int(os.getenv('RESPONSE_TIMEOUT', '30')),
-            max_retries=int(os.getenv('MAX_RETRIES', '3')),
-            log_level=os.getenv('LOG_LEVEL', 'INFO'),
-            log_file=os.getenv('LOG_FILE'),
-            enable_performance_logging=os.getenv('ENABLE_PERFORMANCE_LOGGING', 'true').lower() == 'true',
-            token_db_path=os.getenv('TOKEN_DB_PATH', 'data/token_usage.db'),
-            
-            # Image processing configuration (uses Gemini 2.5 Flash Image)
-            # If not set, falls back to GEMINI_API_KEY
             nano_banana_api_key=os.getenv('NANO_BANANA_API_KEY', os.getenv('GEMINI_API_KEY', '')),
-            max_image_size_mb=int(os.getenv('MAX_IMAGE_SIZE_MB', '10')),
-            image_processing_timeout=int(os.getenv('IMAGE_PROCESSING_TIMEOUT', '60')),
-            max_concurrent_image_edits=int(os.getenv('MAX_CONCURRENT_IMAGE_EDITS', '3')),
-            
-            # Message formatting settings
-            message_split_length=int(os.getenv('MESSAGE_SPLIT_LENGTH', '2000')),
-            preserve_code_blocks=os.getenv('PRESERVE_CODE_BLOCKS', 'true').lower() == 'true',
-            add_continuation_indicators=os.getenv('ADD_CONTINUATION_INDICATORS', 'true').lower() == 'true',
-            
-            # UX enhancement settings
-            show_typing_indicators=os.getenv('SHOW_TYPING_INDICATORS', 'true').lower() == 'true',
-            use_rich_embeds=os.getenv('USE_RICH_EMBEDS', 'true').lower() == 'true',
-            enable_reaction_feedback=os.getenv('ENABLE_REACTION_FEEDBACK', 'true').lower() == 'true',
-            command_suggestion_threshold=float(os.getenv('COMMAND_SUGGESTION_THRESHOLD', '0.7')),
-            
-            # Developer mode settings
-            dev_mode_enabled=os.getenv('DEV_MODE_ENABLED', 'false').lower() == 'true'
+
+            # Bot
+            dev_mode_enabled=get('bot', 'dev_mode', False),
+            token_db_path=get('bot', 'token_db_path', 'data/token_usage.db'),
+
+            # Logging
+            log_level=get('logging', 'level', 'INFO'),
+            log_file=get('logging', 'file', None),
+            enable_performance_logging=get('logging', 'enable_performance_logging', True),
+
+            # Context
+            max_context_messages=get('context', 'max_messages', 100),
+            reply_context_range=get('context', 'reply_range', 10),
+            context_cutoff_hours=get('context', 'cutoff_hours', 24),
+
+            # Response
+            response_timeout=get('response', 'timeout', 30),
+            extended_timeout=get('response', 'extended_timeout', 120),
+            api_timeout_buffer=get('response', 'api_timeout_buffer', 10),
+            max_retries=get('response', 'max_retries', 3),
+
+            # Messages
+            message_split_length=get('messages', 'split_length', 2000),
+            safe_split_length=get('messages', 'safe_split_length', 1900),
+            continuation_overhead=get('messages', 'continuation_overhead', 50),
+            preserve_code_blocks=get('messages', 'preserve_code_blocks', True),
+            add_continuation_indicators=get('messages', 'add_continuation_indicators', True),
+
+            # UX
+            show_typing_indicators=get('ux', 'show_typing_indicators', True),
+            use_rich_embeds=get('ux', 'use_rich_embeds', True),
+            enable_reaction_feedback=get('ux', 'enable_reaction_feedback', True),
+            command_suggestion_threshold=get('ux', 'command_suggestion_threshold', 0.7),
+
+            # Models
+            default_model=get('models', 'default', 'gemini-3.0-flash-preview'),
+            router_model_name=get('models', 'router', 'gemini-2.5-flash-lite'),
+            available_models=get('models', 'available', None) or [
+                {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
+                {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
+                {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
+            ],
+            valid_models=get('models', 'valid', None) or [
+                "gemini-3.0-flash-preview", "gemini-2.5-flash-lite", "gemini-3.1-pro-preview",
+            ],
+            model_display_names=get('models', 'display_names', None) or {
+                "gemini-3.0-flash-preview": "Gemini Flash 3 Preview",
+                "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+                "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
+            },
+
+            # Generation
+            temperature=get('generation', 'temperature', 0.7),
+            top_p=get('generation', 'top_p', 0.8),
+            top_k=get('generation', 'top_k', 40),
+            max_output_tokens=get('generation', 'max_output_tokens', 65536),
+            router_temperature=get('generation', 'router_temperature', 0.1),
+            router_max_output_tokens=get('generation', 'router_max_output_tokens', 100),
+            edit_detection_max_output_tokens=get('generation', 'edit_detection_max_output_tokens', 10),
+
+            # Safety
+            safety_harassment=get('safety', 'harassment', 'BLOCK_NONE'),
+            safety_hate_speech=get('safety', 'hate_speech', 'BLOCK_NONE'),
+            safety_sexually_explicit=get('safety', 'sexually_explicit', 'BLOCK_NONE'),
+            safety_dangerous_content=get('safety', 'dangerous_content', 'BLOCK_NONE'),
+
+            # Image Processing
+            max_image_size_mb=get('image_processing', 'max_size_mb', 10),
+            image_processing_timeout=get('image_processing', 'timeout', 60),
+            max_concurrent_image_edits=get('image_processing', 'max_concurrent_edits', 3),
+
+            # Rate Limiting
+            max_requests_per_user_per_hour=get('rate_limiting', 'max_requests_per_user_per_hour', 10),
+            max_image_requests_per_minute=get('rate_limiting', 'max_image_requests_per_minute', 30),
+
+            # Nano Banana
+            nano_banana_timeout=get('nano_banana', 'timeout', 60),
+            nano_banana_max_retries=get('nano_banana', 'max_retries', 3),
+            nano_banana_retry_delay=get('nano_banana', 'retry_delay', 1.0),
+
+            # Languages
+            valid_languages=cfg.get('languages', None) or [
+                "english", "spanish", "french", "german", "italian",
+                "portuguese", "russian", "japanese", "korean", "chinese",
+                "arabic", "hindi", "dutch", "swedish", "polish",
+                "turkish", "vietnamese", "thai", "indonesian", "auto",
+            ],
+
+            # Personalities
+            personalities=cfg.get('personalities', None) or {
+                "default": "You are a helpful AI assistant. Respond naturally and informatively.",
+            },
+
+            # System Prompts
+            system_prompt_high_complexity=cfg.get('system_prompts', {}).get('high_complexity', ''),
+            system_prompt_low_complexity=cfg.get('system_prompts', {}).get('low_complexity', ''),
+            system_prompt_medium_complexity=cfg.get('system_prompts', {}).get('medium_complexity', ''),
+            system_prompt_thinking_addon=cfg.get('system_prompts', {}).get('thinking_mode_addon', ''),
+
+            # Validation
+            min_token_length_discord=get('validation', 'min_token_length_discord', 50),
+            min_token_length_gemini=get('validation', 'min_token_length_gemini', 30),
+            max_text_file_size_bytes=get('validation', 'max_text_file_size_bytes', 5 * 1024 * 1024),
+            pdf_render_scale=get('validation', 'pdf_render_scale', 2.0),
+
+            # Misc
+            leaderboard_limit=get('misc', 'leaderboard_limit', 10),
+            channel_history_limit=get('misc', 'channel_history_limit', 500),
+            job_timeout=get('misc', 'job_timeout', 60),
+            progress_update_threshold=get('misc', 'progress_update_threshold', 0.1),
         )
-    
+
+        return config
+
     def validate(self) -> list[str]:
         """Validate configuration and return list of errors."""
         errors = []
-        
-        # Required configuration validation
-        if not self.discord_token:
-            errors.append("DISCORD_BOT_TOKEN is required")
-        
-        if not self.gemini_api_key:
-            errors.append("GEMINI_API_KEY is required")
-        
-        # Core bot settings validation
-        if self.max_context_messages <= 0:
-            errors.append("MAX_CONTEXT_MESSAGES must be positive")
 
+        # Required secrets
+        if not self.discord_token:
+            errors.append("DISCORD_BOT_TOKEN is required (set in .env)")
+        if not self.gemini_api_key:
+            errors.append("GEMINI_API_KEY is required (set in .env)")
+
+        # Core settings
+        if self.max_context_messages <= 0:
+            errors.append("context.max_messages must be positive")
         if not self.token_db_path or not self.token_db_path.strip():
-            errors.append("TOKEN_DB_PATH must be a valid filesystem path")
-        
+            errors.append("bot.token_db_path must be a valid filesystem path")
         if self.reply_context_range <= 0:
-            errors.append("REPLY_CONTEXT_RANGE must be positive")
-        
+            errors.append("context.reply_range must be positive")
         if self.response_timeout <= 0:
-            errors.append("RESPONSE_TIMEOUT must be positive")
-        
+            errors.append("response.timeout must be positive")
         if self.max_retries < 0:
-            errors.append("MAX_RETRIES must be non-negative")
-        
-        # Image processing validation
+            errors.append("response.max_retries must be non-negative")
+
+        # Image processing
         if self.max_image_size_mb <= 0:
-            errors.append("MAX_IMAGE_SIZE_MB must be positive")
-        elif self.max_image_size_mb > 25:  # Discord's file size limit
-            errors.append("MAX_IMAGE_SIZE_MB cannot exceed 25MB (Discord limit)")
-        
+            errors.append("image_processing.max_size_mb must be positive")
+        elif self.max_image_size_mb > 25:
+            errors.append("image_processing.max_size_mb cannot exceed 25MB (Discord limit)")
         if self.image_processing_timeout <= 0:
-            errors.append("IMAGE_PROCESSING_TIMEOUT must be positive")
-        elif self.image_processing_timeout > 300:  # 5 minutes max
-            errors.append("IMAGE_PROCESSING_TIMEOUT should not exceed 300 seconds")
-        
+            errors.append("image_processing.timeout must be positive")
+        elif self.image_processing_timeout > 300:
+            errors.append("image_processing.timeout should not exceed 300 seconds")
         if self.max_concurrent_image_edits <= 0:
-            errors.append("MAX_CONCURRENT_IMAGE_EDITS must be positive")
+            errors.append("image_processing.max_concurrent_edits must be positive")
         elif self.max_concurrent_image_edits > 10:
-            errors.append("MAX_CONCURRENT_IMAGE_EDITS should not exceed 10 for performance")
-        
-        # Gemini image generation validation (nano-banana is Gemini 2.5 Flash Image)
-        # API key validation handled by main Gemini validation
-        
-        # Message formatting validation
+            errors.append("image_processing.max_concurrent_edits should not exceed 10")
+
+        # Message formatting
         if self.message_split_length <= 0:
-            errors.append("MESSAGE_SPLIT_LENGTH must be positive")
-        
+            errors.append("messages.split_length must be positive")
         if self.message_split_length > DISCORD_MESSAGE_LIMIT:
-            errors.append(f"MESSAGE_SPLIT_LENGTH cannot exceed Discord's {DISCORD_MESSAGE_LIMIT} character limit")
-        
+            errors.append(f"messages.split_length cannot exceed Discord's {DISCORD_MESSAGE_LIMIT} character limit")
         if self.message_split_length < 100:
-            errors.append("MESSAGE_SPLIT_LENGTH should be at least 100 characters for effective splitting")
-        
-        # UX settings validation
+            errors.append("messages.split_length should be at least 100 characters")
+
+        # UX
         if not (0.0 <= self.command_suggestion_threshold <= 1.0):
-            errors.append("COMMAND_SUGGESTION_THRESHOLD must be between 0.0 and 1.0")
-        
+            errors.append("ux.command_suggestion_threshold must be between 0.0 and 1.0")
+
+        # Generation params
+        if not (0.0 <= self.temperature <= 2.0):
+            errors.append("generation.temperature must be between 0.0 and 2.0")
+        if self.max_output_tokens <= 0:
+            errors.append("generation.max_output_tokens must be positive")
+
+        # System prompts
+        if not self.system_prompt_high_complexity.strip():
+            errors.append("system_prompts.high_complexity must not be empty")
+        if not self.system_prompt_low_complexity.strip():
+            errors.append("system_prompts.low_complexity must not be empty")
+        if not self.system_prompt_medium_complexity.strip():
+            errors.append("system_prompts.medium_complexity must not be empty")
+
         return errors
-    
+
     def validate_tokens(self) -> tuple[bool, list[str]]:
-        """
-        Validate Discord and Gemini API tokens.
-        Returns (is_valid, error_messages).
-        """
+        """Validate Discord and Gemini API tokens."""
         errors = []
-        
-        # Basic token format validation
+
         if self.discord_token:
-            if len(self.discord_token) < MIN_TOKEN_LENGTH_DISCORD:
+            if len(self.discord_token) < self.min_token_length_discord:
                 errors.append("DISCORD_BOT_TOKEN appears to be invalid (too short)")
-        
+
         if self.gemini_api_key:
-            if len(self.gemini_api_key) < MIN_TOKEN_LENGTH_GEMINI:
+            if len(self.gemini_api_key) < self.min_token_length_gemini:
                 errors.append("GEMINI_API_KEY appears to be invalid (too short)")
-        
-        # Nano-banana API key validation
+
         if self.nano_banana_api_key:
             if len(self.nano_banana_api_key) < 20:
                 errors.append("NANO_BANANA_API_KEY appears to be invalid (too short)")
-        
+
         return len(errors) == 0, errors
-    
+
     async def validate_service_connectivity(self) -> tuple[bool, dict[str, str]]:
-        """
-        Validate connectivity to external services.
-        Returns (all_services_ok, service_status_dict).
-        """
+        """Validate connectivity to external services."""
         service_status = {}
         all_ok = True
-        
-        # Gemini image generation (nano-banana) uses the Gemini SDK directly
-        # No separate API endpoint to test - availability is determined by API key
+
         if self.nano_banana_api_key:
-            service_status['gemini_image'] = "✅ Configured (uses Gemini SDK)"
+            service_status['gemini_image'] = "Configured (uses Gemini SDK)"
         else:
-            service_status['gemini_image'] = "⚪ Not configured"
-        
+            service_status['gemini_image'] = "Not configured"
+
         return all_ok, service_status
-    
+
     def get_feature_availability(self) -> dict[str, bool]:
-        """
-        Get availability status of optional features based on configuration.
-        Returns dictionary of feature names to availability status.
-        """
+        """Get availability status of optional features."""
         return {
             'image_generation': bool(self.nano_banana_api_key),
             'enhanced_ux': self.show_typing_indicators or self.use_rich_embeds or self.enable_reaction_feedback,
@@ -215,6 +388,16 @@ class BotConfig:
             'command_suggestions': self.command_suggestion_threshold > 0.0,
             'performance_logging': self.enable_performance_logging
         }
+
+    def get_safety_threshold(self, category: str) -> str:
+        """Get the safety threshold string for a given category."""
+        mapping = {
+            'harassment': self.safety_harassment,
+            'hate_speech': self.safety_hate_speech,
+            'sexually_explicit': self.safety_sexually_explicit,
+            'dangerous_content': self.safety_dangerous_content,
+        }
+        return mapping.get(category, 'BLOCK_NONE')
 
 
 class ConfigurationError(Exception):
@@ -224,100 +407,79 @@ class ConfigurationError(Exception):
 
 def load_and_validate_config() -> BotConfig:
     """
-    Load configuration from environment and validate it.
+    Load configuration from config.yaml and .env, then validate it.
     Exits the application with clear error messages if configuration is invalid.
     """
     try:
-        config = BotConfig.from_environment()
-    except ValueError as e:
-        print(f"❌ Configuration Error: Invalid environment variable format - {e}")
-        print("Please check your environment variables and ensure numeric values are valid.")
+        config = BotConfig.from_yaml()
+    except yaml.YAMLError as e:
+        print(f"Config file syntax error: {e}")
+        print("Please check config.yaml for YAML syntax errors.")
         sys.exit(1)
-    
+    except ValueError as e:
+        print(f"Configuration Error: Invalid value - {e}")
+        sys.exit(1)
+
     # Validate required fields
     validation_errors = config.validate()
     if validation_errors:
-        print("❌ Configuration Error: Missing or invalid required configuration:")
+        print("Configuration Error: Missing or invalid configuration:")
         for error in validation_errors:
-            print(f"   • {error}")
-        print("\nPlease set the required environment variables:")
-        print("   • DISCORD_BOT_TOKEN - Your Discord bot token")
-        print("   • GEMINI_API_KEY - Your Google Gemini API key")
-        print("\nOptional environment variables:")
-        print("   • MAX_CONTEXT_MESSAGES (default: 100)")
-        print("   • REPLY_CONTEXT_RANGE (default: 10)")
-        print("   • RESPONSE_TIMEOUT (default: 30)")
-        print("   • MAX_RETRIES (default: 3)")
-        print("   • LOG_LEVEL (default: INFO)")
-        print("\nImage generation/editing configuration:")
-        print("   • NANO_BANANA_API_KEY - API key for Gemini image generation (defaults to GEMINI_API_KEY)")
-        print("   • MAX_IMAGE_SIZE_MB (default: 10)")
-        print("   • IMAGE_PROCESSING_TIMEOUT (default: 60)")
-        print("   • MAX_CONCURRENT_IMAGE_EDITS (default: 3)")
-        print("\nMessage formatting settings:")
-        print("   • MESSAGE_SPLIT_LENGTH (default: 2000)")
-        print("   • PRESERVE_CODE_BLOCKS (default: true)")
-        print("   • ADD_CONTINUATION_INDICATORS (default: true)")
-        print("\nUX enhancement settings:")
-        print("   • SHOW_TYPING_INDICATORS (default: true)")
-        print("   • USE_RICH_EMBEDS (default: true)")
-        print("   • ENABLE_REACTION_FEEDBACK (default: true)")
-        print("   • COMMAND_SUGGESTION_THRESHOLD (default: 0.7)")
+            print(f"   - {error}")
+        print("\nSecrets go in .env:")
+        print("   DISCORD_BOT_TOKEN - Your Discord bot token")
+        print("   GEMINI_API_KEY - Your Google Gemini API key")
+        print("   NANO_BANANA_API_KEY - (optional, defaults to GEMINI_API_KEY)")
+        print("\nAll other settings go in config.yaml")
         sys.exit(1)
-    
+
     # Validate token formats
     token_valid, token_errors = config.validate_tokens()
     if not token_valid:
-        print("❌ Configuration Error: Invalid API tokens:")
+        print("Configuration Error: Invalid API tokens:")
         for error in token_errors:
-            print(f"   • {error}")
-        print("\nPlease verify your API tokens are correct:")
-        print("   • Discord Bot Token: Get from https://discord.com/developers/applications")
-        print("   • Gemini API Key: Get from https://makersuite.google.com/app/apikey")
-        if config.nano_banana_api_key:
-            print("   • Nano-Banana API Key: Verify with your service provider")
+            print(f"   - {error}")
+        print("\nPlease verify your API tokens in .env:")
+        print("   Discord Bot Token: https://discord.com/developers/applications")
+        print("   Gemini API Key: https://makersuite.google.com/app/apikey")
         sys.exit(1)
-    
-    # Set up logging with the configuration
+
+    # Set up logging
     setup_logging(
         log_level=config.log_level,
         log_file=config.log_file,
         enable_console=True,
         enable_performance_logging=config.enable_performance_logging
     )
-    
+
     # Display feature availability
     features = config.get_feature_availability()
-    print("✅ Configuration loaded successfully")
-    print("🔧 Feature availability:")
+    print("Configuration loaded successfully from config.yaml")
+    print("Feature availability:")
     for feature, available in features.items():
-        status = "✅ Enabled" if available else "❌ Disabled"
-        print(f"   • {feature.replace('_', ' ').title()}: {status}")
-    
+        status = "Enabled" if available else "Disabled"
+        print(f"   - {feature.replace('_', ' ').title()}: {status}")
+
     return config
 
 
 async def validate_startup_connectivity(config: BotConfig) -> bool:
-    """
-    Validate connectivity to external services during startup.
-    Returns True if all critical services are available, False otherwise.
-    """
-    print("🔍 Checking service connectivity...")
-    
+    """Validate connectivity to external services during startup."""
+    print("Checking service connectivity...")
+
     try:
         all_ok, service_status = await config.validate_service_connectivity()
-        
-        print("📡 Service connectivity status:")
+
+        print("Service connectivity status:")
         for service, status in service_status.items():
-            print(f"   • {service.replace('_', ' ').title()}: {status}")
-        
+            print(f"   - {service.replace('_', ' ').title()}: {status}")
+
         if not all_ok:
-            print("⚠️  Some services are unavailable. The bot will start with reduced functionality.")
-            print("   Image editing features may not work if nano-banana service is unavailable.")
-        
-        return True  # Always return True to allow startup with degraded functionality
-        
+            print("Some services are unavailable. The bot will start with reduced functionality.")
+
+        return True
+
     except Exception as e:
-        print(f"❌ Error checking service connectivity: {e}")
-        print("⚠️  Continuing startup without connectivity validation...")
+        print(f"Error checking service connectivity: {e}")
+        print("Continuing startup without connectivity validation...")
         return True

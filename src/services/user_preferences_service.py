@@ -24,21 +24,11 @@ class UserPreferences:
 class UserPreferencesService:
     """Manages per-user preferences persisted in SQLite."""
 
-    VALID_MODELS = [
-        "gemini-3.0-flash-preview",
-        "gemini-2.5-flash-lite",
-        "gemini-3.1-pro-preview",
-    ]
-
-    VALID_LANGUAGES = [
-        "english", "spanish", "french", "german", "italian",
-        "portuguese", "russian", "japanese", "korean", "chinese",
-        "arabic", "hindi", "dutch", "swedish", "polish",
-        "turkish", "vietnamese", "thai", "indonesian", "auto",
-    ]
-
-    def __init__(self, db_path: str = "data/token_usage.db"):
+    def __init__(self, db_path: str = "data/token_usage.db",
+                 valid_models: list = None, valid_languages: list = None):
         self.db_path = db_path
+        self.valid_models = valid_models or ["gemini-3.0-flash-preview"]
+        self.valid_languages = valid_languages or ["english", "auto"]
         self._ensure_table()
 
     def _ensure_table(self):
@@ -83,13 +73,13 @@ class UserPreferencesService:
 
     def set_model(self, user_id: int, model: str) -> bool:
         """Set preferred model for a user."""
-        if model not in self.VALID_MODELS:
+        if model not in self.valid_models:
             return False
         return self._upsert(user_id, "preferred_model", model)
 
     def set_language(self, user_id: int, language: str) -> bool:
         """Set preferred response language for a user."""
-        if language.lower() not in self.VALID_LANGUAGES:
+        if language.lower() not in self.valid_languages:
             return False
         return self._upsert(user_id, "preferred_language", language.lower())
 

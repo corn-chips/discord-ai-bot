@@ -22,16 +22,19 @@ class ContextCollector:
     and enhancing context for reply-based interactions.
     """
     
-    def __init__(self, max_context_messages: int = 100, reply_context_range: int = 10):
+    def __init__(self, max_context_messages: int = 100, reply_context_range: int = 10,
+                 cutoff_hours: int = 24):
         """
         Initialize the ContextCollector.
-        
+
         Args:
             max_context_messages: Maximum number of messages to retrieve for context
             reply_context_range: Number of messages before/after a replied-to message
+            cutoff_hours: Exclude messages older than this many hours
         """
         self.max_context_messages = max_context_messages
         self.reply_context_range = reply_context_range
+        self.cutoff_hours = cutoff_hours
         self.logger = logging.getLogger(__name__)
     
     async def get_channel_context(self, channel: discord.TextChannel, limit: int = None, bot_user: discord.User = None) -> List[MessageContext]:
@@ -59,7 +62,7 @@ class ContextCollector:
         # Calculate 24-hour cutoff time using timezone-aware datetime
         from datetime import timezone
         now = datetime.now(timezone.utc)
-        cutoff_time = now - timedelta(hours=24)
+        cutoff_time = now - timedelta(hours=self.cutoff_hours)
         
         messages = []
         message_count = 0

@@ -133,9 +133,88 @@ class ContentRenderer:
         Detect raw LaTeX commands in text (not wrapped in $..$ or $$..$$)
         and wrap them so the rendering pipeline can process them.
         
-        Handles cases where the AI model outputs LaTeX commands directly
-        in text without dollar sign delimiters.
+        Handles:
+        - Multi-line environments: \\begin{aligned}...\\end{aligned}
+        - LaTeX inside inline backticks: `\\frac{p}{q}`
+        - Raw LaTeX commands in plain text: \\sqrt{2} = \\frac{p}{q}
         """
+        # Phase 1: Wrap multi-line \begin{...}...\end{...} environments
+        text = self._wrap_latex_environments(text)
+        
+        # Phase 2: Wrap remaining single-line raw LaTeX
+        text = self._wrap_single_line_latex(text)
+        
+        return text
+    
+    def _wrap_latex_environments(self, text: str) -> str:
+        """
+        Split multi-line LaTeX environments (\\begin{aligned}, etc.) into
+        individual equations that mathtext can render.
+        """
+        # Match \begin{env}...\end{env} blocks
+        env_re = re.compile(
+            r'\\begin\{(\w+)\}(.*?)\\end\{\1\}',
+            re.DOTALL
+        )
+        
+        def _split_environment(match: re.Match) -> str:
+            env_name = match.group(1)
+            content = match.group(2).strip()
+            
+            # Split on \\\\ (LaTeX newline)
+            rows = re.split(r'\\\\', content)
+            result_parts = []
+            
+            for row in rows:
+                row = row.strip()
+                if not row:
+                    continue
+                
+                # Remove alignment markers (&)
+                row = row.replace('&', ' ')
+                
+                # Extract \text{...} blocks and convert to plain text outside math
+                text_parts = []
+                remaining = row
+                
+                while '\\text{' in remaining:
+                    idx = remaining.index('\\text{')
+                    # Find matching closing brace
+                    depth = 0
+                    end = idx + 6  # after \text{
+                    for j in range(end, len(remaining)):
+                        if remaining[j] == '{':
+                            depth += 1
+                        elif remaining[j] == '}':
+                            if depth == 0:
+                                end = j
+                                break
+                            depth -= 1
+                    
+                    before = remaining[:idx].strip()
+                    text_content = remaining[idx + 6:end].strip()
+                    remaining = remaining[end + 1:]
+                    
+                    if before:
+                        text_parts.append(f'$${before}$$')
+                    if text_content:
+                        text_parts.append(text_content)
+                
+                # Handle remaining math after last \text{}
+                remaining = remaining.strip()
+                if remaining:
+                    text_parts.append(f'$${remaining}$$')
+                
+                if text_parts:
+                    result_parts.append(' '.join(text_parts))
+                
+            logger.debug(f"Split \\begin{{{env_name}}} into {len(result_parts)} equations")
+            return '\n'.join(result_parts)
+        
+        return env_re.sub(_split_environment, text)
+    
+    def _wrap_single_line_latex(self, text: str) -> str:
+        """Wrap single-line raw LaTeX commands that aren't in $...$ or code blocks."""
         lines = text.split('\n')
         result_lines = []
         in_code_block = False
@@ -152,7 +231,7 @@ class ContentRenderer:
                 result_lines.append(line)
                 continue
             
-            # First, check for LaTeX inside inline backticks: `\frac{p}{q}`
+            # Check for LaTeX inside inline backticks: `\frac{p}{q}`
             # Convert to $$...$$ if LaTeX commands are detected inside backticks
             def _unwrap_backtick_latex(m):
                 content = m.group(1)
@@ -171,6 +250,7 @@ class ContentRenderer:
             if not stripped:
                 result_lines.append(line)
                 continue
+            
             # Check if line contains any raw LaTeX commands
             has_latex = any(
                 re.search(cmd, line) for cmd in self.RAW_LATEX_COMMANDS
@@ -181,7 +261,6 @@ class ContentRenderer:
                 continue
             
             # Find the LaTeX portion of the line
-            # Look for the first LaTeX command and take everything from there
             first_cmd_pos = len(line)
             for cmd in self.RAW_LATEX_COMMANDS:
                 m = re.search(cmd, line)
@@ -203,6 +282,44 @@ class ContentRenderer:
             logger.debug(f"Wrapped raw LaTeX: {line[:60]}...")
         
         return '\n'.join(result_lines)
+
+    @staticmethod
+    def _clean_for_mathtext(expr: str) -> str:
+        """
+        Clean LaTeX expression for matplotlib mathtext compatibility.
+        
+        Mathtext doesn't support \\text{}, \\mathbb{}, \\begin{}, etc.
+        Convert or strip them.
+        """
+        # Convert \text{...} to \mathrm{...} (mathtext supports \mathrm)
+        expr = re.sub(r'\\text\{([^}]*)\}', r'\\mathrm{\1}', expr)
+        
+        # \implies -> \Rightarrow (mathtext supports this)
+        expr = expr.replace('\\implies', '\\Rightarrow')
+        
+        # \therefore -> unicode
+        expr = expr.replace('\\therefore', '\u2234')
+        
+        # \gcd -> \mathrm{gcd}
+        expr = re.sub(r'\\gcd', r'\\mathrm{gcd}', expr)
+        
+        # \mathbb{X} -> \mathrm{X} (mathtext approximation)
+        expr = re.sub(r'\\mathbb\{([^}]*)\}', r'\\mathrm{\1}', expr)
+        
+        # Remove \left and \right (mathtext auto-sizes delimiters)
+        expr = expr.replace('\\left', '').replace('\\right', '')
+        
+        # Remove alignment markers
+        expr = expr.replace('&', ' ')
+        
+        # Strip any remaining \begin{}/\end{} wrappers
+        expr = re.sub(r'\\begin\{\w+\}', '', expr)
+        expr = re.sub(r'\\end\{\w+\}', '', expr)
+        
+        # Clean up excessive whitespace
+        expr = re.sub(r'\s+', ' ', expr).strip()
+        
+        return expr
 
     def _collect_and_render_latex(self, text: str, attachments: List[discord.File]) -> str:
         """
@@ -287,18 +404,42 @@ class ContentRenderer:
             return None
 
         try:
+            import matplotlib
             import matplotlib.pyplot as plt
 
+            # Enable amsmath/amssymb for \begin{aligned}, \mathbb, etc.
+            matplotlib.rcParams['text.usetex'] = False  # Use mathtext, not system LaTeX
+            matplotlib.rcParams['mathtext.fontset'] = 'dejavusans'
+
             n = len(labeled_exprs)
-            # Each row gets ~0.7 inches, with padding
-            fig_height = max(n * 0.7 + 0.4, 1.0)
-            fig, ax = plt.subplots(figsize=(8, fig_height))
+            
+            # Calculate height: multi-line expressions need more space
+            total_height = 0.4  # padding
+            row_heights = []
+            for _, latex_expr in labeled_exprs:
+                line_count = latex_expr.count('\\\\') + 1  # \\\\ = newline in LaTeX
+                h = max(0.7, line_count * 0.45)
+                row_heights.append(h)
+                total_height += h
+            
+            fig_height = max(total_height, 1.0)
+            fig, ax = plt.subplots(figsize=(10, fig_height))
             ax.axis('off')
             fig.patch.set_facecolor('white')
 
-            # Render each expression as a labeled row, spaced evenly top-to-bottom
+            # Calculate y positions based on variable row heights
+            cumulative = 0.2  # start padding
+            y_positions = []
+            for h in row_heights:
+                y_positions.append(1.0 - (cumulative + h / 2) / total_height)
+                cumulative += h
+
+            # Render each expression as a labeled row
             for i, (label, latex_expr) in enumerate(labeled_exprs):
-                y_pos = 1.0 - (i + 0.5) / n  # Top to bottom
+                y_pos = y_positions[i]
+
+                # Clean the expression for mathtext compatibility
+                clean_expr = self._clean_for_mathtext(latex_expr)
 
                 # Label on the left
                 ax.text(
@@ -310,10 +451,10 @@ class ContentRenderer:
                     fontfamily='monospace'
                 )
 
-                # LaTeX expression
+                # Render the LaTeX expression
                 ax.text(
                     0.08, y_pos,
-                    f"${latex_expr}$",
+                    f"${clean_expr}$",
                     fontsize=15,
                     ha='left', va='center',
                     transform=ax.transAxes,
@@ -322,7 +463,7 @@ class ContentRenderer:
 
                 # Subtle separator line (except after last)
                 if i < n - 1:
-                    sep_y = 1.0 - (i + 1) / n
+                    sep_y = (y_positions[i] + y_positions[i + 1]) / 2
                     ax.axhline(y=sep_y, xmin=0.02, xmax=0.98,
                                color='#E0E0E0', linewidth=0.5,
                                transform=ax.transAxes)

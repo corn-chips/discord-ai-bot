@@ -16,34 +16,16 @@ import discord
 import jinja2
 from discord import app_commands
 
-from ..config import BotConfig, AVAILABLE_MODELS
+from ..config import BotConfig
 from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
+from ..services.channel_settings_service import ChannelSettingsService
+from ..services.user_preferences_service import UserPreferencesService
 from ..models.data_models import MessageContext
 
 
 logger = logging.getLogger(__name__)
 
-
-class BotCommands(app_commands.CommandTree):
-    """Command tree for Discord bot slash commands."""
-    
-    def __init__(self, client, config: BotConfig, gemini_client: GeminiClient, performance_logger):
-        """
-        Initialize bot commands.
-        
-        Args:
-            client: Discord client instance
-            config: Bot configuration
-            gemini_client: Gemini API client
-            performance_logger: Performance logging instance
-        """
-        super().__init__(client)
-        self.config = config
-        self.gemini_client = gemini_client
-        self.performance_logger = performance_logger
-        self.client = client
-        
 
 async def setup_commands(
     bot,
@@ -87,7 +69,7 @@ async def setup_commands(
     )
     @app_commands.choices(model_name=[
         app_commands.Choice(name=model["name"], value=model["value"])
-        for model in AVAILABLE_MODELS
+        for model in config.available_models
     ])
     async def model(interaction: discord.Interaction, model_name: app_commands.Choice[str]):
         """Switch the Gemini AI model."""
@@ -154,6 +136,31 @@ async def setup_commands(
             title=f"🌐 DeepSearch {status}",
             description=description,
             color=discord.Color.blue() if enabled else discord.Color.light_grey()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @config_group.command(name="image-generation", description="Enable or disable AI image generation")
+    @app_commands.describe(enabled="Enable or disable image generation requests")
+    async def image_generation(interaction: discord.Interaction, enabled: bool):
+        """Toggle runtime image generation availability."""
+        if not getattr(bot, "image_processing_service", None):
+            await interaction.response.send_message(
+                "Image processing service is not configured, so image generation cannot be toggled.",
+                ephemeral=True,
+            )
+            return
+
+        bot.image_generation_enabled = enabled
+        status = "✅ Enabled" if enabled else "❌ Disabled"
+        description = (
+            "Users can now request image generation prompts."
+            if enabled
+            else "Image generation requests are now disabled."
+        )
+        embed = discord.Embed(
+            title=f"🖼️ Image Generation {status}",
+            description=description,
+            color=discord.Color.green() if enabled else discord.Color.light_grey(),
         )
         await interaction.response.send_message(embed=embed)
 
@@ -300,7 +307,7 @@ async def setup_commands(
             return
 
         try:
-            entries = await token_tracker.get_top_users(interaction.guild.id, limit=10)
+            entries = await token_tracker.get_top_users(interaction.guild.id, limit=config.leaderboard_limit)
         except Exception as exc:
             logger.error("Failed to load token leaderboard: %s", exc, exc_info=True)
             await interaction.response.send_message(
@@ -382,11 +389,13 @@ async def setup_commands(
         
         # Image processing settings (if available)
         if hasattr(bot, 'image_processing_service') and bot.image_processing_service:
+            generation_enabled = getattr(bot, "image_generation_enabled", True)
             embed.add_field(
                 name="🖼️ Image Processing",
                 value=f"**Max Image Size:** {config.max_image_size_mb}MB\n"
                       f"**Processing Timeout:** {config.image_processing_timeout}s\n"
-                      f"**Max Concurrent:** {config.max_concurrent_image_edits}",
+                      f"**Max Concurrent:** {config.max_concurrent_image_edits}\n"
+                      f"**Image Generation:** {'Enabled' if generation_enabled else 'Disabled'}",
                 inline=True
             )
         
@@ -412,6 +421,8 @@ async def setup_commands(
         
         # Feature availability
         features = config.get_feature_availability()
+        if hasattr(bot, "image_processing_service") and bot.image_processing_service:
+            features["image_generation"] = bool(getattr(bot, "image_generation_enabled", True))
         feature_status = []
         for feature, available in features.items():
             status = "✅" if available else "❌"
@@ -839,7 +850,7 @@ async def setup_commands(
                 name="⚙️ Current Configuration",
                 value=f"**Text Model:** `{current_model}`\n"
                       f"**Prompt Mode:** {current_prompt_mode.capitalize()}\n"
-                      f"**Image Model:** `gemini-2.5-flash-image`",
+                      f"**Image Model:** `gemini-2.0-flash-exp-image-generation`",
                 inline=False
             )
             
@@ -1130,7 +1141,7 @@ async def setup_commands(
             
             research_response = await gemini_client.generate_response(
                 prompt=research_prompt,
-                model_override="gemini-2.5-flash",
+                model_override="gemini-3-flash-preview",
                 search_override=True
             )
             
@@ -1173,7 +1184,7 @@ async def setup_commands(
             # Generate final report using Pro model
             report_response = await gemini_client.generate_response(
                 prompt=final_prompt,
-                model_override="gemini-2.5-pro",
+                model_override="gemini-3.1-pro-preview",
                 search_override=False # We already searched
             )
             
@@ -1210,7 +1221,7 @@ async def setup_commands(
         try:
             # Fetch messages backwards
             # Limit to 500 to avoid excessive processing, but should cover most "current" conversations
-            async for message in interaction.channel.history(limit=500):
+            async for message in interaction.channel.history(limit=config.channel_history_limit):
                 current_msg_time = message.created_at
                 
                 if last_msg_time:
@@ -1261,9 +1272,10 @@ async def setup_commands(
             if response.success:
                 summary = response.content
                 # Check length limits
-                if len(summary) > 1900:
-                    # Split into chunks of 1900 characters
-                    chunks = [summary[i:i+1900] for i in range(0, len(summary), 1900)]
+                safe_len = config.safe_split_length
+                if len(summary) > safe_len:
+                    # Split into chunks
+                    chunks = [summary[i:i+safe_len] for i in range(0, len(summary), safe_len)]
                     
                     await interaction.followup.send(f"✅ **Conversation Summary** (Part 1/{len(chunks)})")
                     
@@ -1281,15 +1293,160 @@ async def setup_commands(
         except Exception as e:
             logger.error(f"Summarize error: {e}", exc_info=True)
             await interaction.followup.send(f"❌ An error occurred while summarizing: {str(e)}")
-    
-    
+
+    # ── Personality / Tone Command ────────────────────────────────────
+
+    channel_settings_service = ChannelSettingsService(
+        db_path=config.token_db_path,
+        personalities=config.personalities,
+    )
+    # Store on bot so discord_bot.py can access it
+    bot._channel_settings_service = channel_settings_service
+
+    async def personality_autocomplete(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Dynamically provide personality choices from config."""
+        return [
+            app_commands.Choice(name=name.replace("-", " ").replace("_", " ").title(), value=name)
+            for name in config.personalities.keys()
+            if current.lower() in name.lower()
+        ][:25]  # Discord max 25 choices
+
+    @bot.tree.command(name="personality", description="Set the bot's personality/tone for this channel")
+    @app_commands.describe(style="The personality style to use")
+    @app_commands.autocomplete(style=personality_autocomplete)
+    async def personality(interaction: discord.Interaction, style: str):
+        """Set the bot's personality for the current channel."""
+        if style not in config.personalities:
+            await interaction.response.send_message(
+                f"Unknown personality `{style}`. Valid options: {', '.join(config.personalities.keys())}",
+                ephemeral=True
+            )
+            return
+
+        success = channel_settings_service.set_personality(interaction.channel_id, style)
+        if success:
+            desc = config.personalities[style]
+            display_name = style.replace("-", " ").replace("_", " ").title()
+            embed = discord.Embed(
+                title=f"Personality set to **{display_name}**",
+                description=desc,
+                color=discord.Color.purple()
+            )
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(
+                f"Failed to set personality. Valid options: {', '.join(config.personalities.keys())}",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name="personality-info", description="Show the current personality setting for this channel")
+    async def personality_info(interaction: discord.Interaction):
+        """Show the current personality for this channel."""
+        current = channel_settings_service.get_personality(interaction.channel_id)
+        desc = config.personalities.get(current, "Unknown")
+        embed = discord.Embed(
+            title=f"Current Personality: **{current.capitalize()}**",
+            description=desc,
+            color=discord.Color.purple()
+        )
+        all_styles = "\n".join(f"- **{name}**: {d[:80]}..." if len(d) > 80 else f"- **{name}**: {d}"
+                               for name, d in config.personalities.items())
+        embed.add_field(name="Available Styles", value=all_styles, inline=False)
+        await interaction.response.send_message(embed=embed)
+
+    # ── User Preferences Commands ─────────────────────────────────────
+
+    user_prefs_service = UserPreferencesService(
+        db_path=config.token_db_path,
+        valid_models=config.valid_models,
+        valid_languages=config.valid_languages,
+    )
+    # Store on bot so discord_bot.py can access it
+    bot._user_prefs_service = user_prefs_service
+
+    prefs_group = app_commands.Group(name="preferences", description="Manage your personal bot preferences")
+
+    model_choices = [
+        app_commands.Choice(name=model_name, value=model_name)
+        for model_name in config.valid_models
+    ]
+
+    @prefs_group.command(name="model", description="Set your preferred AI model")
+    @app_commands.describe(model="The model to use for your requests")
+    @app_commands.choices(model=model_choices)
+    async def prefs_model(interaction: discord.Interaction, model: app_commands.Choice[str]):
+        success = user_prefs_service.set_model(interaction.user.id, model.value)
+        if success:
+            await interaction.response.send_message(
+                f"Your preferred model is now **{model.name}**. It will be used for all your future requests.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("Failed to set model preference.", ephemeral=True)
+
+    lang_choices = [
+        app_commands.Choice(name=lang.capitalize(), value=lang)
+        for lang in config.valid_languages[:25]  # Discord max 25 choices
+    ]
+
+    @prefs_group.command(name="language", description="Set your preferred response language")
+    @app_commands.describe(language="The language for bot responses")
+    @app_commands.choices(language=lang_choices)
+    async def prefs_language(interaction: discord.Interaction, language: app_commands.Choice[str]):
+        success = user_prefs_service.set_language(interaction.user.id, language.value)
+        if success:
+            if language.value == "auto":
+                await interaction.response.send_message(
+                    "Language preference set to **Auto** (bot will respond in the same language you use).",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"Your preferred language is now **{language.name}**.",
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message("Failed to set language preference.", ephemeral=True)
+
+    @prefs_group.command(name="show", description="Show your current preferences")
+    async def prefs_show(interaction: discord.Interaction):
+        prefs = user_prefs_service.get_preferences(interaction.user.id)
+        embed = discord.Embed(
+            title="Your Preferences",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="Preferred Model",
+            value=prefs.preferred_model or "Not set (uses channel/server default)",
+            inline=False
+        )
+        embed.add_field(
+            name="Preferred Language",
+            value=(prefs.preferred_language or "auto").capitalize(),
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @prefs_group.command(name="clear", description="Reset all your preferences to defaults")
+    async def prefs_clear(interaction: discord.Interaction):
+        user_prefs_service.clear_preferences(interaction.user.id)
+        await interaction.response.send_message(
+            "All your preferences have been reset to defaults.",
+            ephemeral=True
+        )
+
+    bot.tree.add_command(prefs_group)
+
+
 def _get_model_description(model_name: str) -> str:
     """Get description for a specific model."""
     descriptions = {
-        "gemini-2.5-flash": "🌟 Latest generation model. Best overall performance with advanced features and optimal speed.",
-        "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for maximum speed with minimal latency.",
-        "gemini-2.0-flash-exp": "🚀 Stable 2.0 generation. Reliable performance with excellent capabilities.",
-        "gemini-2.0-flash-lite": "💨 Lightweight 2.0 variant. Great for simple tasks requiring quick responses.",
+        "gemini-3-flash-preview": "🌟 Latest Flash 3 model. Best overall performance with advanced features and optimal speed.",
+        "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for routing and maximum speed with minimal latency.",
+        "gemini-3.1-pro-preview": "🧠 Advanced Pro model. Deep reasoning and analysis for complex tasks.",
     }
     return descriptions.get(model_name, "Standard Gemini Flash model")
 

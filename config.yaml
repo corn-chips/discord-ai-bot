@@ -46,24 +46,24 @@ ux:
 
 # --- Model Configuration ---
 models:
-  default: "gemini-3.0-flash-preview"
+  default: "gemini-3-flash-preview"
   router: "gemini-2.5-flash-lite"
 
   available:
-    - name: "Gemini Flash 3 Preview (Default)"
-      value: "gemini-3.0-flash-preview"
+    - name: "Gemini 3 Flash Preview (Default)"
+      value: "gemini-3-flash-preview"
     - name: "Gemini 2.5 Flash-Lite (Router / Fast)"
       value: "gemini-2.5-flash-lite"
     - name: "Gemini 3.1 Pro Preview (Advanced)"
       value: "gemini-3.1-pro-preview"
 
   valid:
-    - "gemini-3.0-flash-preview"
+    - "gemini-3-flash-preview"
     - "gemini-2.5-flash-lite"
     - "gemini-3.1-pro-preview"
 
   display_names:
-    "gemini-3.0-flash-preview": "Gemini Flash 3 Preview"
+    "gemini-3-flash-preview": "Gemini 3 Flash Preview"
     "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite"
     "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview"
 

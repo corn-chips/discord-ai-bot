@@ -40,6 +40,9 @@ class BotConfig:
 
     # === Context ===
     max_context_messages: int = 100
+    context_messages_low: int = 10
+    context_messages_medium: int = 30
+    context_messages_high: int = 50
     reply_context_range: int = 10
     context_cutoff_hours: int = 24
     max_context_images: int = 6
@@ -81,12 +84,17 @@ class BotConfig:
         "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
         "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
     })
+    router_cache_size: int = 256
+    router_cache_ttl: int = 300
 
     # === Generation Parameters ===
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 40
     max_output_tokens: int = 65536
+    max_output_tokens_low: int = 4096
+    max_output_tokens_medium: int = 16384
+    max_output_tokens_high: int = 65536
     router_temperature: float = 0.1
     router_max_output_tokens: int = 100
     edit_detection_max_output_tokens: int = 10
@@ -105,6 +113,8 @@ class BotConfig:
     # === Rate Limiting ===
     max_requests_per_user_per_hour: int = 10
     max_image_requests_per_minute: int = 30
+    text_rate_limit_per_minute: int = 10
+    text_rate_limit_per_hour: int = 60
 
     # === Nano Banana ===
     nano_banana_timeout: int = 60
@@ -140,6 +150,7 @@ class BotConfig:
     min_token_length_gemini: int = 30
     max_text_file_size_bytes: int = 5 * 1024 * 1024
     pdf_render_scale: float = 2.0
+    max_pdf_pages: int = 20
 
     # === Misc ===
     leaderboard_limit: int = 10
@@ -184,6 +195,9 @@ class BotConfig:
 
             # Context
             max_context_messages=get('context', 'max_messages', 100),
+            context_messages_low=get('context', 'context_messages_low', 10),
+            context_messages_medium=get('context', 'context_messages_medium', 30),
+            context_messages_high=get('context', 'context_messages_high', 50),
             reply_context_range=get('context', 'reply_range', 10),
             context_cutoff_hours=get('context', 'cutoff_hours', 24),
             max_context_images=get('context', 'max_images', 6),
@@ -223,12 +237,17 @@ class BotConfig:
                 "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
                 "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
             },
+            router_cache_size=get('models', 'router_cache_size', 256),
+            router_cache_ttl=get('models', 'router_cache_ttl', 300),
 
             # Generation
             temperature=get('generation', 'temperature', 0.7),
             top_p=get('generation', 'top_p', 0.8),
             top_k=get('generation', 'top_k', 40),
             max_output_tokens=get('generation', 'max_output_tokens', 65536),
+            max_output_tokens_low=get('generation', 'max_output_tokens_low', 4096),
+            max_output_tokens_medium=get('generation', 'max_output_tokens_medium', 16384),
+            max_output_tokens_high=get('generation', 'max_output_tokens_high', 65536),
             router_temperature=get('generation', 'router_temperature', 0.1),
             router_max_output_tokens=get('generation', 'router_max_output_tokens', 100),
             edit_detection_max_output_tokens=get('generation', 'edit_detection_max_output_tokens', 10),
@@ -247,6 +266,8 @@ class BotConfig:
             # Rate Limiting
             max_requests_per_user_per_hour=get('rate_limiting', 'max_requests_per_user_per_hour', 10),
             max_image_requests_per_minute=get('rate_limiting', 'max_image_requests_per_minute', 30),
+            text_rate_limit_per_minute=get('rate_limiting', 'text_rate_limit_per_minute', 10),
+            text_rate_limit_per_hour=get('rate_limiting', 'text_rate_limit_per_hour', 60),
 
             # Nano Banana
             nano_banana_timeout=get('nano_banana', 'timeout', 60),
@@ -277,6 +298,7 @@ class BotConfig:
             min_token_length_gemini=get('validation', 'min_token_length_gemini', 30),
             max_text_file_size_bytes=get('validation', 'max_text_file_size_bytes', 5 * 1024 * 1024),
             pdf_render_scale=get('validation', 'pdf_render_scale', 2.0),
+            max_pdf_pages=get('validation', 'max_pdf_pages', 20),
 
             # Misc
             leaderboard_limit=get('misc', 'leaderboard_limit', 10),
@@ -300,6 +322,10 @@ class BotConfig:
         # Core settings
         if self.max_context_messages <= 0:
             errors.append("context.max_messages must be positive")
+        if self.context_messages_low <= 0 or self.context_messages_medium <= 0 or self.context_messages_high <= 0:
+            errors.append("context.context_messages_low/medium/high must all be positive")
+        if not (self.context_messages_low <= self.context_messages_medium <= self.context_messages_high):
+            errors.append("context.context_messages_low <= medium <= high is required")
         if not self.token_db_path or not self.token_db_path.strip():
             errors.append("bot.token_db_path must be a valid filesystem path")
         if self.reply_context_range <= 0:
@@ -342,6 +368,18 @@ class BotConfig:
             errors.append("generation.temperature must be between 0.0 and 2.0")
         if self.max_output_tokens <= 0:
             errors.append("generation.max_output_tokens must be positive")
+        if self.max_output_tokens_low <= 0 or self.max_output_tokens_medium <= 0 or self.max_output_tokens_high <= 0:
+            errors.append("generation.max_output_tokens_low/medium/high must all be positive")
+        if not (self.max_output_tokens_low <= self.max_output_tokens_medium <= self.max_output_tokens_high):
+            errors.append("generation.max_output_tokens_low <= medium <= high is required")
+        if self.router_cache_size <= 0:
+            errors.append("models.router_cache_size must be positive")
+        if self.router_cache_ttl <= 0:
+            errors.append("models.router_cache_ttl must be positive")
+        if self.text_rate_limit_per_minute <= 0 or self.text_rate_limit_per_hour <= 0:
+            errors.append("rate_limiting.text_rate_limit_per_minute/hour must be positive")
+        if self.text_rate_limit_per_minute > self.text_rate_limit_per_hour:
+            errors.append("rate_limiting.text_rate_limit_per_minute cannot exceed text_rate_limit_per_hour")
 
         # System prompts
         if not self.system_prompt_high_complexity.strip():
@@ -350,6 +388,8 @@ class BotConfig:
             errors.append("system_prompts.low_complexity must not be empty")
         if not self.system_prompt_medium_complexity.strip():
             errors.append("system_prompts.medium_complexity must not be empty")
+        if self.max_pdf_pages <= 0:
+            errors.append("validation.max_pdf_pages must be positive")
 
         return errors
 

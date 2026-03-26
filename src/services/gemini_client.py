@@ -44,6 +44,7 @@ class GeminiClient:
         self.performance_logger = PerformanceLogger("gemini_client")
         self.client = None
         self._current_model_name = config.default_model
+        self._current_complexity_level = "low"
         self._prompt_mode = "short"  # Default to short mode, can be "short" or "thinking"
         self._thinking_single_use = False  # Changed to False for persistent mode via command
         self._force_search = False  # Force search on/off
@@ -151,7 +152,7 @@ class GeminiClient:
                 },
                 "model_capabilities": {
                     "max_input_tokens": 1048576,  # 1M tokens context window
-                    "max_output_tokens": 65536,   # 64K tokens output
+                    "max_output_tokens": self.config.max_output_tokens_high,
                     "supports_images": True,
                     "supports_video": False,
                     "supports_audio": False
@@ -251,6 +252,7 @@ class GeminiClient:
         # But we can still upgrade the model if needed
         
         logger.info(f"Setting model based on complexity level: {complexity_level}")
+        self._current_complexity_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"
         
         if complexity_level == "low":
             # Only downgrade to short mode if not manually set to thinking
@@ -277,6 +279,21 @@ class GeminiClient:
         else:
             logger.error(f"Invalid complexity level: {complexity_level}. Must be 'low', 'medium', or 'high'")
             return False
+
+    def _get_max_output_tokens_for_complexity(self, target_model: Optional[str] = None) -> int:
+        """
+        Select max output token budget from complexity tier.
+
+        Pro model overrides always use the high tier.
+        """
+        if target_model == "gemini-3.1-pro-preview":
+            return self.config.max_output_tokens_high
+
+        if self._current_complexity_level == "high":
+            return self.config.max_output_tokens_high
+        if self._current_complexity_level == "medium":
+            return self.config.max_output_tokens_medium
+        return self.config.max_output_tokens_low
     
     def _get_model_display_name(self) -> str:
         """
@@ -784,12 +801,20 @@ class GeminiClient:
             for cat, thresh in safety_mapping.values()
         ]
 
+        max_output_tokens = self._get_max_output_tokens_for_complexity(target_model=target_model)
+        logger.info(
+            "Using max_output_tokens=%s for complexity=%s (target_model=%s)",
+            max_output_tokens,
+            self._current_complexity_level,
+            target_model,
+        )
+
         config = types.GenerateContentConfig(
             tools=tools,
             temperature=self.config.temperature,
             top_p=self.config.top_p,
             top_k=self.config.top_k,
-            max_output_tokens=self.config.max_output_tokens,
+            max_output_tokens=max_output_tokens,
             safety_settings=safety_settings,
         )
         

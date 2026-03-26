@@ -110,7 +110,7 @@ class ContextCollector:
             with TimingContext(self.logger, f"Retrieving {limit} messages from channel",
                              channel_id=channel.id, channel_name=getattr(channel, 'name', 'DM')):
                 # Retrieve messages from the channel
-                async for message in channel.history(limit=limit * 2):  # Get extra to account for filtering
+                async for message in channel.history(limit=limit + 20):  # Small buffer to account for filtering
                     # Skip messages older than 24 hours
                     if message.created_at < cutoff_time:
                         continue

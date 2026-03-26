@@ -19,6 +19,9 @@ logging:
 # --- Context Collection ---
 context:
   max_messages: 100                    # Max messages to retrieve for conversation context
+  context_messages_low: 10             # Context window for low-complexity prompts
+  context_messages_medium: 30          # Context window for medium-complexity prompts
+  context_messages_high: 50            # Context window for high-complexity prompts
   reply_range: 10                      # Messages before/after a replied-to message
   cutoff_hours: 24                     # Exclude messages older than this
   max_images: 6                        # Max recent channel images to include as model context
@@ -49,6 +52,8 @@ ux:
 models:
   default: "gemini-3-flash-preview"
   router: "gemini-2.5-flash-lite"
+  router_cache_size: 256               # Max cached router decisions
+  router_cache_ttl: 300                # Router cache TTL in seconds
 
   available:
     - name: "Gemini 3 Flash Preview (Default)"
@@ -74,6 +79,9 @@ generation:
   top_p: 0.8                           # Nucleus sampling parameter
   top_k: 40                            # Top-k sampling parameter
   max_output_tokens: 65536             # Maximum output tokens (64K)
+  max_output_tokens_low: 4096          # Output cap for low-complexity prompts
+  max_output_tokens_medium: 16384      # Output cap for medium-complexity prompts
+  max_output_tokens_high: 65536        # Output cap for high-complexity prompts
 
   # Router model parameters (for intent classification)
   router_temperature: 0.1
@@ -98,6 +106,8 @@ image_processing:
 rate_limiting:
   max_requests_per_user_per_hour: 10   # Image edit rate limit per user
   max_image_requests_per_minute: 30    # Global image request rate limit
+  text_rate_limit_per_minute: 10       # Per-user text request limit/minute
+  text_rate_limit_per_hour: 60         # Per-user text request limit/hour
 
 # --- Nano Banana (Gemini Image) Client ---
 nano_banana:
@@ -284,6 +294,7 @@ validation:
   min_token_length_gemini: 30          # Minimum Gemini API key length for validation
   max_text_file_size_bytes: 5242880    # 5MB max text file size
   pdf_render_scale: 2.0                # PDF rendering zoom level (2x)
+  max_pdf_pages: 20                    # Maximum PDF pages to render per attachment
 
 # --- Miscellaneous ---
 misc:

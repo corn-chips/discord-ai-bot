@@ -10,7 +10,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import uuid
 
@@ -44,6 +44,7 @@ class ProcessingJob:
     estimated_time: float = 0.0
     result: Optional[ImageEditResult] = None
     error_message: Optional[str] = None
+    completion_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class ImageProcessingService:
@@ -87,6 +88,8 @@ class ImageProcessingService:
         # Service state
         self._is_running = False
         self._worker_tasks: List[asyncio.Task] = []
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._lock = asyncio.Lock()
         
         # Progress callbacks
         self._progress_callbacks: Dict[str, Callable[[str, float], None]] = {}
@@ -113,7 +116,12 @@ class ImageProcessingService:
         # Start worker tasks
         for i in range(self._max_concurrent_jobs):
             task = asyncio.create_task(self._worker_loop(f"worker-{i}"))
+            task.add_done_callback(self._task_error_handler)
             self._worker_tasks.append(task)
+
+        # Start periodic cleanup task
+        self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        self._cleanup_task.add_done_callback(self._task_error_handler)
         
         # Check service health
         await self._check_service_health()
@@ -131,16 +139,26 @@ class ImageProcessingService:
         # Cancel all worker tasks
         for task in self._worker_tasks:
             task.cancel()
+
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
         
         # Wait for tasks to complete
         if self._worker_tasks:
             await asyncio.gather(*self._worker_tasks, return_exceptions=True)
+
+        if self._cleanup_task:
+            await asyncio.gather(self._cleanup_task, return_exceptions=True)
+            self._cleanup_task = None
         
         self._worker_tasks.clear()
         
         # Cancel any remaining jobs
-        for job in self._active_jobs.values():
-            job.status = ProcessingStatus.CANCELLED
+        async with self._lock:
+            for job in self._active_jobs.values():
+                job.status = ProcessingStatus.CANCELLED
+                job.completed_at = datetime.now()
+                job.completion_event.set()
         
         logger.info("Image processing service stopped")
     
@@ -179,16 +197,17 @@ class ImageProcessingService:
             estimated_time=estimate_processing_time(request.image_data, request.edit_type.value)
         )
         
-        # Store job and add to queue
-        self._jobs[job_id] = job
-        if progress_callback:
-            self._progress_callbacks[job_id] = progress_callback
-        
+        # Store job and callback under lock before enqueueing
+        async with self._lock:
+            self._jobs[job_id] = job
+            if progress_callback:
+                self._progress_callbacks[job_id] = progress_callback
+            self._stats['total_requests'] += 1
+
         await self._job_queue.put(job)
-        
-        # Update statistics
-        self._stats['total_requests'] += 1
-        self._stats['queue_size'] = self._job_queue.qsize()
+
+        async with self._lock:
+            self._stats['queue_size'] = self._job_queue.qsize()
         
         logger.info(f"Queued image edit job {job_id} for user {request.user_id}")
         return job_id
@@ -203,7 +222,17 @@ class ImageProcessingService:
         Returns:
             ProcessingJob if found, None otherwise
         """
-        return self._jobs.get(job_id)
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                return job
+
+            # Fallback for recently-completed jobs removed from _jobs
+            for completed_job in reversed(self._completed_jobs):
+                if completed_job.job_id == job_id:
+                    return completed_job
+
+        return None
     
     async def cancel_job(self, job_id: str) -> bool:
         """
@@ -215,24 +244,34 @@ class ImageProcessingService:
         Returns:
             True if job was cancelled, False if not found or already completed
         """
-        job = self._jobs.get(job_id)
-        if not job:
-            return False
-        
-        if job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]:
-            return False
-        
-        job.status = ProcessingStatus.CANCELLED
-        job.completed_at = datetime.now()
-        
-        # Remove from active jobs if present
-        if job_id in self._active_jobs:
-            del self._active_jobs[job_id]
-        
-        # Clean up progress callback
-        if job_id in self._progress_callbacks:
-            del self._progress_callbacks[job_id]
-        
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return False
+
+            if job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]:
+                return False
+
+            job.status = ProcessingStatus.CANCELLED
+            job.completed_at = datetime.now()
+            job.completion_event.set()
+
+            # Remove from active jobs if present
+            if job_id in self._active_jobs:
+                del self._active_jobs[job_id]
+
+            # Clean up progress callback
+            if job_id in self._progress_callbacks:
+                del self._progress_callbacks[job_id]
+
+            self._completed_jobs.append(job)
+            if len(self._completed_jobs) > 100:
+                self._completed_jobs.pop(0)
+
+            # Remove terminal job from active lookup map
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+
         logger.info(f"Cancelled job {job_id}")
         return True
     
@@ -305,9 +344,10 @@ class ImageProcessingService:
             
             try:
                 # Update job status
-                job.status = ProcessingStatus.PROCESSING
-                job.started_at = datetime.now()
-                self._active_jobs[job_id] = job
+                async with self._lock:
+                    job.status = ProcessingStatus.PROCESSING
+                    job.started_at = datetime.now()
+                    self._active_jobs[job_id] = job
                 
                 logger.info(f"Worker {worker_name} processing job {job_id}")
                 
@@ -350,31 +390,35 @@ class ImageProcessingService:
                 )
                 
                 # Update job status
+                now = datetime.now()
                 job.status = ProcessingStatus.COMPLETED
-                job.completed_at = datetime.now()
+                job.completed_at = now
                 
                 await self._update_progress(job_id, 1.0, "Complete!")
                 
                 # Update statistics
-                if job.result.success:
-                    self._stats['successful_requests'] += 1
-                else:
-                    self._stats['failed_requests'] += 1
-                
-                # Update average processing time
-                total_time = (job.completed_at - job.started_at).total_seconds()
-                current_avg = self._stats['average_processing_time']
-                total_completed = self._stats['successful_requests'] + self._stats['failed_requests']
-                self._stats['average_processing_time'] = (current_avg * (total_completed - 1) + total_time) / total_completed
+                total_time = (job.completed_at - job.started_at).total_seconds() if job.started_at else 0.0
+                async with self._lock:
+                    if job.result.success:
+                        self._stats['successful_requests'] += 1
+                    else:
+                        self._stats['failed_requests'] += 1
+
+                    current_avg = self._stats['average_processing_time']
+                    total_completed = self._stats['successful_requests'] + self._stats['failed_requests']
+                    self._stats['average_processing_time'] = (
+                        (current_avg * (total_completed - 1) + total_time) / total_completed
+                    ) if total_completed > 0 else 0.0
                 
                 logger.info(f"Completed job {job_id} in {total_time:.1f}s (success: {job.result.success})")
                 
             except Exception as e:
                 # Handle job failure
+                now = datetime.now()
                 job.status = ProcessingStatus.FAILED
-                job.completed_at = datetime.now()
+                job.completed_at = now
                 job.error_message = str(e)
-                
+
                 job.result = ImageEditResult(
                     success=False,
                     error_message=str(e),
@@ -382,25 +426,29 @@ class ImageProcessingService:
                     metadata=None,
                     token_usage=None,
                 )
-                
-                self._stats['failed_requests'] += 1
+
+                async with self._lock:
+                    self._stats['failed_requests'] += 1
                 
                 logger.error(f"Job {job_id} failed: {e}")
                 
             finally:
-                # Clean up
-                if job_id in self._active_jobs:
-                    del self._active_jobs[job_id]
-                
-                if job_id in self._progress_callbacks:
-                    del self._progress_callbacks[job_id]
-                
-                # Move to completed jobs (keep last 100)
-                self._completed_jobs.append(job)
-                if len(self._completed_jobs) > 100:
-                    old_job = self._completed_jobs.pop(0)
-                    if old_job.job_id in self._jobs:
-                        del self._jobs[old_job.job_id]
+                # Signal completion and remove terminal jobs from active maps
+                job.completion_event.set()
+
+                async with self._lock:
+                    if job_id in self._active_jobs:
+                        del self._active_jobs[job_id]
+
+                    if job_id in self._progress_callbacks:
+                        del self._progress_callbacks[job_id]
+
+                    self._completed_jobs.append(job)
+                    if len(self._completed_jobs) > 100:
+                        self._completed_jobs.pop(0)
+
+                    if job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]:
+                        self._jobs.pop(job_id, None)
     
     async def _validate_request(self, request: ImageEditRequest):
         """
@@ -441,26 +489,27 @@ class ImageProcessingService:
             RuntimeError: If user has exceeded rate limit
         """
         now = datetime.now()
-        
-        # Initialize user rate limit tracking
-        if user_id not in self._user_rate_limits:
-            self._user_rate_limits[user_id] = []
-        
-        # Remove requests older than 1 hour
-        user_requests = self._user_rate_limits[user_id]
-        user_requests[:] = [
-            req_time for req_time in user_requests 
-            if now - req_time < timedelta(hours=1)
-        ]
-        
-        # Check rate limit
-        if len(user_requests) >= self._max_requests_per_user_per_hour:
-            oldest_request = min(user_requests)
-            reset_time = oldest_request + timedelta(hours=1)
-            raise RuntimeError(f"Rate limit exceeded. Try again after {reset_time.strftime('%H:%M:%S')}")
-        
-        # Record this request
-        user_requests.append(now)
+
+        async with self._lock:
+            # Initialize user rate limit tracking
+            if user_id not in self._user_rate_limits:
+                self._user_rate_limits[user_id] = []
+
+            # Remove requests older than 1 hour
+            user_requests = self._user_rate_limits[user_id]
+            user_requests[:] = [
+                req_time for req_time in user_requests
+                if now - req_time < timedelta(hours=1)
+            ]
+
+            # Check rate limit
+            if len(user_requests) >= self._max_requests_per_user_per_hour:
+                oldest_request = min(user_requests)
+                reset_time = oldest_request + timedelta(hours=1)
+                raise RuntimeError(f"Rate limit exceeded. Try again after {reset_time.strftime('%H:%M:%S')}")
+
+            # Record this request
+            user_requests.append(now)
     
     async def _update_progress(self, job_id: str, progress: float, message: str = ""):
         """
@@ -471,17 +520,45 @@ class ImageProcessingService:
             progress: Progress value (0.0 to 1.0)
             message: Progress message
         """
-        job = self._jobs.get(job_id)
-        if job:
-            job.progress = progress
-        
-        # Call progress callback if registered
-        callback = self._progress_callbacks.get(job_id)
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job:
+                job.progress = progress
+            callback = self._progress_callbacks.get(job_id)
+
         if callback:
             try:
                 callback(job_id, progress)
             except Exception as e:
                 logger.warning(f"Progress callback error for job {job_id}: {e}")
+
+    def _task_error_handler(self, task: asyncio.Task) -> None:
+        """Log unhandled task exceptions from background tasks."""
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except Exception as callback_exc:
+            logger.error(f"Failed to inspect background task exception: {callback_exc}")
+            return
+        if exc:
+            logger.error(
+                f"Unhandled background task exception in image processing service: {exc}",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+    async def _periodic_cleanup(self):
+        """Periodically clean up old completed jobs."""
+        while self._is_running:
+            try:
+                await asyncio.sleep(3600)
+                if not self._is_running:
+                    break
+                await self.cleanup_old_jobs(max_age_hours=1)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Periodic cleanup task failed: {e}", exc_info=True)
     
     async def _check_service_health(self):
         """Check the health of the nano-banana service."""
@@ -495,8 +572,17 @@ class ImageProcessingService:
                 logger.info("Nano-banana service is healthy")
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
+
+    async def get_service_health(self) -> bool:
+        """Return whether the underlying image service is healthy enough to serve requests."""
+        try:
+            status = await self.client.check_service_status()
+            return status != ServiceStatus.UNAVAILABLE
+        except Exception as e:
+            logger.error(f"Failed to read service health: {e}")
+            return False
     
-    def cleanup_old_jobs(self, max_age_hours: int = 24):
+    async def cleanup_old_jobs(self, max_age_hours: int = 24):
         """
         Clean up old completed jobs to free memory.
         
@@ -505,21 +591,22 @@ class ImageProcessingService:
         """
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
         
-        # Remove old jobs from main storage
-        jobs_to_remove = []
-        for job_id, job in self._jobs.items():
-            if (job.completed_at and job.completed_at < cutoff_time and 
-                job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]):
-                jobs_to_remove.append(job_id)
-        
-        for job_id in jobs_to_remove:
-            del self._jobs[job_id]
-        
-        # Remove old jobs from completed list
-        self._completed_jobs[:] = [
-            job for job in self._completed_jobs 
-            if not (job.completed_at and job.completed_at < cutoff_time)
-        ]
+        async with self._lock:
+            # Remove old jobs from main storage
+            jobs_to_remove = []
+            for job_id, job in self._jobs.items():
+                if (job.completed_at and job.completed_at < cutoff_time and
+                    job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]):
+                    jobs_to_remove.append(job_id)
+
+            for job_id in jobs_to_remove:
+                del self._jobs[job_id]
+
+            # Remove old jobs from completed list
+            self._completed_jobs[:] = [
+                job for job in self._completed_jobs
+                if not (job.completed_at and job.completed_at < cutoff_time)
+            ]
         
         if jobs_to_remove:
             logger.info(f"Cleaned up {len(jobs_to_remove)} old jobs")
@@ -535,31 +622,38 @@ class ImageProcessingService:
             Dictionary with rate limit information
         """
         now = datetime.now()
-        
-        if user_id not in self._user_rate_limits:
-            return {
-                'requests_used': 0,
-                'requests_remaining': self._max_requests_per_user_per_hour,
-                'reset_time': None
-            }
-        
-        # Clean up old requests
-        user_requests = self._user_rate_limits[user_id]
-        user_requests[:] = [
-            req_time for req_time in user_requests 
-            if now - req_time < timedelta(hours=1)
-        ]
-        
-        requests_used = len(user_requests)
-        requests_remaining = max(0, self._max_requests_per_user_per_hour - requests_used)
-        
-        reset_time = None
-        if user_requests:
+
+        async with self._lock:
+            if user_id not in self._user_rate_limits:
+                return {
+                    'requests_used': 0,
+                    'requests_remaining': self._max_requests_per_user_per_hour,
+                    'reset_time': None
+                }
+
+            # Clean up old requests
+            user_requests = self._user_rate_limits[user_id]
+            user_requests[:] = [
+                req_time for req_time in user_requests
+                if now - req_time < timedelta(hours=1)
+            ]
+
+            if not user_requests:
+                del self._user_rate_limits[user_id]
+                return {
+                    'requests_used': 0,
+                    'requests_remaining': self._max_requests_per_user_per_hour,
+                    'reset_time': None
+                }
+
+            requests_used = len(user_requests)
+            requests_remaining = max(0, self._max_requests_per_user_per_hour - requests_used)
+
             oldest_request = min(user_requests)
             reset_time = oldest_request + timedelta(hours=1)
-        
-        return {
-            'requests_used': requests_used,
-            'requests_remaining': requests_remaining,
-            'reset_time': reset_time.isoformat() if reset_time else None
-        }
+
+            return {
+                'requests_used': requests_used,
+                'requests_remaining': requests_remaining,
+                'reset_time': reset_time.isoformat() if reset_time else None
+            }

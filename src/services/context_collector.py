@@ -36,6 +36,45 @@ class ContextCollector:
         self.reply_context_range = reply_context_range
         self.cutoff_hours = cutoff_hours
         self.logger = logging.getLogger(__name__)
+
+    @staticmethod
+    def _build_message_content(message: discord.Message) -> str:
+        """
+        Build message content with attachment metadata for AI context.
+
+        Adds attachment names/types so the model can reference non-text messages.
+        """
+        base_content = (message.content or "").strip()
+        if not message.attachments:
+            return base_content
+
+        image_names = []
+        other_names = []
+        for attachment in message.attachments:
+            if attachment.content_type and attachment.content_type.startswith("image/"):
+                image_names.append(attachment.filename)
+            else:
+                other_names.append(attachment.filename)
+
+        suffix_parts = []
+        if image_names:
+            suffix_parts.append(f"Attached images: {', '.join(image_names)}")
+        if other_names:
+            suffix_parts.append(f"Attached files: {', '.join(other_names)}")
+
+        attachment_suffix = f" [{' | '.join(suffix_parts)}]" if suffix_parts else ""
+        return f"{base_content}{attachment_suffix}" if base_content else attachment_suffix.strip()
+
+    def _to_message_context(self, message: discord.Message) -> MessageContext:
+        """Convert a Discord message to MessageContext including attachment metadata."""
+        return MessageContext(
+            content=self._build_message_content(message),
+            author=message.author.display_name,
+            timestamp=message.created_at,
+            message_id=message.id,
+            is_reply=message.reference is not None,
+            replied_to_id=message.reference.message_id if message.reference else None
+        )
     
     async def get_channel_context(self, channel: discord.TextChannel, limit: int = None, bot_user: discord.User = None) -> List[MessageContext]:
         """
@@ -86,14 +125,7 @@ class ContextCollector:
                         continue
                     
                     # Convert Discord message to MessageContext
-                    message_context = MessageContext(
-                        content=message.content,
-                        author=message.author.display_name,
-                        timestamp=message.created_at,
-                        message_id=message.id,
-                        is_reply=message.reference is not None,
-                        replied_to_id=message.reference.message_id if message.reference else None
-                    )
+                    message_context = self._to_message_context(message)
                     
                     messages.append(message_context)
                     message_count += 1
@@ -154,28 +186,14 @@ class ContextCollector:
                 
                 # Add messages before (in chronological order)
                 for msg in reversed(before_messages):
-                    # Skip messages with no text content
-                    if not msg.content or not msg.content.strip():
+                    # Skip messages with no text content and no attachments
+                    if (not msg.content or not msg.content.strip()) and not msg.attachments:
                         continue
-                    reply_context.append(MessageContext(
-                        content=msg.content,
-                        author=msg.author.display_name,
-                        timestamp=msg.created_at,
-                        message_id=msg.id,
-                        is_reply=msg.reference is not None,
-                        replied_to_id=msg.reference.message_id if msg.reference else None
-                    ))
+                    reply_context.append(self._to_message_context(msg))
                 
-                # Add the replied-to message itself (if it has text content)
-                if replied_to_message.content and replied_to_message.content.strip():
-                    reply_context.append(MessageContext(
-                        content=replied_to_message.content,
-                        author=replied_to_message.author.display_name,
-                        timestamp=replied_to_message.created_at,
-                        message_id=replied_to_message.id,
-                        is_reply=replied_to_message.reference is not None,
-                        replied_to_id=replied_to_message.reference.message_id if replied_to_message.reference else None
-                    ))
+                # Add the replied-to message itself (if it has text content or attachments)
+                if (replied_to_message.content and replied_to_message.content.strip()) or replied_to_message.attachments:
+                    reply_context.append(self._to_message_context(replied_to_message))
                 
                 # Get messages after the replied-to message
                 async for msg in message.channel.history(
@@ -184,17 +202,10 @@ class ContextCollector:
                     oldest_first=True
                 ):
                     if not msg.author.bot and msg.id != message.id:  # Skip bot messages and the original message
-                        # Skip messages with no text content
-                        if not msg.content or not msg.content.strip():
+                        # Skip messages with no text content and no attachments
+                        if (not msg.content or not msg.content.strip()) and not msg.attachments:
                             continue
-                        reply_context.append(MessageContext(
-                            content=msg.content,
-                            author=msg.author.display_name,
-                            timestamp=msg.created_at,
-                            message_id=msg.id,
-                            is_reply=msg.reference is not None,
-                            replied_to_id=msg.reference.message_id if msg.reference else None
-                        ))
+                        reply_context.append(self._to_message_context(msg))
                 
                 return reply_context
             

@@ -672,6 +672,72 @@ class DiscordBot(discord.Client):
                             logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
         
         return images
+
+    async def _extract_context_images(
+        self,
+        message: discord.Message,
+        context: List[MessageContext],
+        exclude_message_ids: Optional[set[int]] = None
+    ) -> List[Image.Image]:
+        """
+        Extract recent image attachments from context messages in the same channel.
+
+        Args:
+            message: The current Discord message
+            context: Collected MessageContext list
+            exclude_message_ids: Optional message IDs to skip (e.g., current/replied message)
+
+        Returns:
+            List of PIL Images from recent context messages
+        """
+        max_context_images = max(0, getattr(self.config, "max_context_images", 6))
+        if max_context_images == 0 or not context:
+            return []
+
+        excluded_ids = exclude_message_ids or set()
+        context_message_ids = {msg.message_id for msg in context if msg.message_id not in excluded_ids}
+        if not context_message_ids:
+            return []
+
+        images = []
+        history_limit = max(len(context_message_ids) * 2, self.config.max_context_messages * 2)
+
+        try:
+            async for ctx_message in message.channel.history(limit=history_limit):
+                if len(images) >= max_context_images:
+                    break
+                if ctx_message.id not in context_message_ids:
+                    continue
+
+                for attachment in ctx_message.attachments:
+                    if len(images) >= max_context_images:
+                        break
+                    is_image = (
+                        (attachment.content_type and attachment.content_type.startswith("image/"))
+                        or attachment.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))
+                    )
+                    if not is_image:
+                        continue
+                    try:
+                        image_bytes = await attachment.read()
+                        image = Image.open(io.BytesIO(image_bytes))
+                        image = self._convert_image_to_rgb(image)
+                        images.append(image)
+                        logger.info(
+                            f"Loaded context image: {attachment.filename} from message {ctx_message.id} "
+                            f"({image.size[0]}x{image.size[1]})"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to load context image {attachment.filename} "
+                            f"from message {ctx_message.id}: {e}"
+                        )
+        except discord.Forbidden:
+            logger.warning(f"No permission to read channel history for context images in channel {message.channel.id}")
+        except discord.HTTPException as e:
+            logger.error(f"Discord API error retrieving context images: {e}")
+
+        return images
     
     async def _extract_audio_from_message(self, message: discord.Message) -> List[Dict[str, Any]]:
         """
@@ -1061,6 +1127,18 @@ class DiscordBot(discord.Client):
                     
                     # Extract images from the message
                     images = await self._extract_images_from_message(message)
+
+                    # Also include recent channel images from the collected context
+                    exclude_context_ids = {message.id}
+                    if message.reference and message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
+                        exclude_context_ids.add(message.reference.resolved.id)
+                    context_images = await self._extract_context_images(message, context, exclude_context_ids)
+                    if context_images:
+                        images.extend(context_images)
+                        logger.info(
+                            f"✅ Added {len(context_images)} context image(s) from recent channel history "
+                            f"(total images sent: {len(images)})"
+                        )
                     
                     # Extract audio files from the message
                     audio_files = await self._extract_audio_from_message(message)

@@ -42,6 +42,7 @@ class BotConfig:
     max_context_messages: int = 100
     reply_context_range: int = 10
     context_cutoff_hours: int = 24
+    max_context_images: int = 6
 
     # === Response ===
     response_timeout: int = 30
@@ -185,6 +186,7 @@ class BotConfig:
             max_context_messages=get('context', 'max_messages', 100),
             reply_context_range=get('context', 'reply_range', 10),
             context_cutoff_hours=get('context', 'cutoff_hours', 24),
+            max_context_images=get('context', 'max_images', 6),
 
             # Response
             response_timeout=get('response', 'timeout', 30),
@@ -302,6 +304,8 @@ class BotConfig:
             errors.append("bot.token_db_path must be a valid filesystem path")
         if self.reply_context_range <= 0:
             errors.append("context.reply_range must be positive")
+        if self.max_context_images < 0:
+            errors.append("context.max_images must be zero or positive")
         if self.response_timeout <= 0:
             errors.append("response.timeout must be positive")
         if self.max_retries < 0:

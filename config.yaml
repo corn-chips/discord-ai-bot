@@ -21,6 +21,7 @@ context:
   max_messages: 100                    # Max messages to retrieve for conversation context
   reply_range: 10                      # Messages before/after a replied-to message
   cutoff_hours: 24                     # Exclude messages older than this
+  max_images: 6                        # Max recent channel images to include as model context
 
 # --- Response Settings ---
 response:

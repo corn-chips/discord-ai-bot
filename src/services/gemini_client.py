@@ -898,6 +898,9 @@ class GeminiClient:
                 'STOP': 1,
                 'MAX_TOKENS': 2,
                 'SAFETY': 3,
+                'PROHIBITED_CONTENT': 3,
+                'BLOCKLIST': 3,
+                'SPII': 3,
                 'RECITATION': 4,
                 'OTHER': 5,
                 'UNSPECIFIED': 0
@@ -910,7 +913,7 @@ class GeminiClient:
             return 1
         elif 'MAX_TOKENS' in reason_str:
             return 2
-        elif 'SAFETY' in reason_str:
+        elif 'SAFETY' in reason_str or 'PROHIBITED' in reason_str or 'BLOCK' in reason_str or 'SPII' in reason_str:
             return 3
         elif 'RECITATION' in reason_str:
             return 4

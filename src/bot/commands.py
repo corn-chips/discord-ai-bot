@@ -1112,7 +1112,7 @@ async def setup_commands(
             
             research_response = await gemini_client.generate_response(
                 prompt=research_prompt,
-                model_override="gemini-3.0-flash-preview",
+                model_override="gemini-3-flash-preview",
                 search_override=True
             )
             
@@ -1274,21 +1274,35 @@ async def setup_commands(
     # Store on bot so discord_bot.py can access it
     bot._channel_settings_service = channel_settings_service
 
-    personality_choices = [
-        app_commands.Choice(name=name.capitalize(), value=name)
-        for name in config.personalities.keys()
-    ]
+    async def personality_autocomplete(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Dynamically provide personality choices from config."""
+        return [
+            app_commands.Choice(name=name.replace("-", " ").replace("_", " ").title(), value=name)
+            for name in config.personalities.keys()
+            if current.lower() in name.lower()
+        ][:25]  # Discord max 25 choices
 
     @bot.tree.command(name="personality", description="Set the bot's personality/tone for this channel")
     @app_commands.describe(style="The personality style to use")
-    @app_commands.choices(style=personality_choices)
-    async def personality(interaction: discord.Interaction, style: app_commands.Choice[str]):
+    @app_commands.autocomplete(style=personality_autocomplete)
+    async def personality(interaction: discord.Interaction, style: str):
         """Set the bot's personality for the current channel."""
-        success = channel_settings_service.set_personality(interaction.channel_id, style.value)
+        if style not in config.personalities:
+            await interaction.response.send_message(
+                f"Unknown personality `{style}`. Valid options: {', '.join(config.personalities.keys())}",
+                ephemeral=True
+            )
+            return
+
+        success = channel_settings_service.set_personality(interaction.channel_id, style)
         if success:
-            desc = config.personalities[style.value]
+            desc = config.personalities[style]
+            display_name = style.replace("-", " ").replace("_", " ").title()
             embed = discord.Embed(
-                title=f"Personality set to **{style.name}**",
+                title=f"Personality set to **{display_name}**",
                 description=desc,
                 color=discord.Color.purple()
             )
@@ -1401,7 +1415,7 @@ async def setup_commands(
 def _get_model_description(model_name: str) -> str:
     """Get description for a specific model."""
     descriptions = {
-        "gemini-3.0-flash-preview": "🌟 Latest Flash 3 model. Best overall performance with advanced features and optimal speed.",
+        "gemini-3-flash-preview": "🌟 Latest Flash 3 model. Best overall performance with advanced features and optimal speed.",
         "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for routing and maximum speed with minimal latency.",
         "gemini-3.1-pro-preview": "🧠 Advanced Pro model. Deep reasoning and analysis for complex tasks.",
     }

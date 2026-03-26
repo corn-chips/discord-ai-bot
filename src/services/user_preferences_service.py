@@ -27,7 +27,7 @@ class UserPreferencesService:
     def __init__(self, db_path: str = "data/token_usage.db",
                  valid_models: list = None, valid_languages: list = None):
         self.db_path = db_path
-        self.valid_models = valid_models or ["gemini-3.0-flash-preview"]
+        self.valid_models = valid_models or ["gemini-3-flash-preview"]
         self.valid_languages = valid_languages or ["english", "auto"]
         self._ensure_table()
 

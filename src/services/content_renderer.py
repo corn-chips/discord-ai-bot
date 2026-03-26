@@ -79,6 +79,19 @@ class ContentRenderer:
     )
     SEPARATOR_ROW_RE = re.compile(r'^\|[\s\-:|]+\|$')
 
+    # LaTeX commands that indicate raw (unwrapped) LaTeX in text
+    RAW_LATEX_COMMANDS = [
+        r'\\frac', r'\\sqrt', r'\\implies', r'\\int', r'\\sum',
+        r'\\prod', r'\\lim', r'\\begin', r'\\end', r'\\left',
+        r'\\right', r'\\binom', r'\\vec', r'\\hat', r'\\bar',
+        r'\\dot', r'\\ddot', r'\\overline', r'\\underline',
+        r'\\mathbb', r'\\mathcal', r'\\text', r'\\log',
+    ]
+    # Matches a segment containing at least one LaTeX command, not already inside $
+    RAW_LATEX_RE = re.compile(
+        r'(?<!\$)(?:(?:[^$\n]*?)(?:' + '|'.join(RAW_LATEX_COMMANDS) + r')(?:[^$\n]*?))+',
+    )
+
     def __init__(self):
         self._matplotlib_available = False
         try:
@@ -102,67 +115,235 @@ class ContentRenderer:
         """
         attachments: List[discord.File] = []
 
-        # 1. Render block LaTeX ($$...$$) to images
-        text = self._process_block_latex(text, attachments)
+        # 0. Detect raw LaTeX (no $ delimiters) and wrap in $$...$$
+        text = self._wrap_raw_latex(text)
 
-        # 2. Process inline LaTeX ($...$) — Unicode where possible, image fallback
-        text = self._process_inline_latex(text, attachments)
+        # 1. Collect and render all LaTeX that needs image rendering into one combined image
+        text = self._collect_and_render_latex(text, attachments)
 
-        # 3. Convert markdown tables to code blocks
+        # 2. Convert markdown tables to code blocks
         text = self._process_tables(text)
 
         return RenderedContent(text=text, attachments=attachments)
 
     # ── LaTeX Processing ──────────────────────────────────────────────
 
-    def _process_block_latex(self, text: str, attachments: List[discord.File]) -> str:
-        """Replace $$...$$ blocks with rendered PNG images."""
-        if not self.BLOCK_LATEX_RE.search(text):
-            return text
-
-        def _replace_block(match: re.Match) -> str:
-            latex_expr = match.group(1).strip()
-            if not latex_expr:
-                return match.group(0)
-
-            img_bytes = self._render_latex_to_png(latex_expr, fontsize=16)
-            if img_bytes:
-                idx = len(attachments) + 1
-                filename = f"equation_{idx}.png"
-                attachments.append(discord.File(io.BytesIO(img_bytes), filename=filename))
-                return f"[equation {idx} - see attached image]"
+    def _wrap_raw_latex(self, text: str) -> str:
+        """
+        Detect raw LaTeX commands in text (not wrapped in $..$ or $$..$$)
+        and wrap them so the rendering pipeline can process them.
+        
+        Handles cases where the AI model outputs LaTeX commands directly
+        in text without dollar sign delimiters.
+        """
+        lines = text.split('\n')
+        result_lines = []
+        in_code_block = False
+        
+        for line in lines:
+            # Track triple-backtick code blocks — skip contents entirely
+            stripped = line.strip()
+            if stripped.startswith('```'):
+                in_code_block = not in_code_block
+                result_lines.append(line)
+                continue
+            
+            if in_code_block:
+                result_lines.append(line)
+                continue
+            
+            # First, check for LaTeX inside inline backticks: `\frac{p}{q}`
+            # Convert to $$...$$ if LaTeX commands are detected inside backticks
+            def _unwrap_backtick_latex(m):
+                content = m.group(1)
+                if any(re.search(cmd, content) for cmd in self.RAW_LATEX_COMMANDS):
+                    return f'$${content}$$'
+                return m.group(0)
+            
+            line = re.sub(r'`([^`]+)`', _unwrap_backtick_latex, line)
+            
+            # Skip lines already containing $ (already wrapped or just converted)
+            if '$' in line:
+                result_lines.append(line)
+                continue
+            
+            # Skip empty lines
+            if not stripped:
+                result_lines.append(line)
+                continue
+            # Check if line contains any raw LaTeX commands
+            has_latex = any(
+                re.search(cmd, line) for cmd in self.RAW_LATEX_COMMANDS
+            )
+            
+            if not has_latex:
+                result_lines.append(line)
+                continue
+            
+            # Find the LaTeX portion of the line
+            # Look for the first LaTeX command and take everything from there
+            first_cmd_pos = len(line)
+            for cmd in self.RAW_LATEX_COMMANDS:
+                m = re.search(cmd, line)
+                if m and m.start() < first_cmd_pos:
+                    first_cmd_pos = m.start()
+            
+            if first_cmd_pos == 0:
+                # Entire line is LaTeX
+                result_lines.append(f'$${stripped}$$')
             else:
-                # Fallback: wrap in code block
-                return f"`{latex_expr}`"
+                # Mixed line: text prefix + LaTeX portion
+                prefix = line[:first_cmd_pos].rstrip(' :')
+                latex_part = line[first_cmd_pos:].strip()
+                if prefix.strip():
+                    result_lines.append(f'{prefix}: $${latex_part}$$')
+                else:
+                    result_lines.append(f'$${latex_part}$$')
+            
+            logger.debug(f"Wrapped raw LaTeX: {line[:60]}...")
+        
+        return '\n'.join(result_lines)
 
-        return self.BLOCK_LATEX_RE.sub(_replace_block, text)
+    def _collect_and_render_latex(self, text: str, attachments: List[discord.File]) -> str:
+        """
+        Collect all LaTeX expressions, render them into one combined image,
+        and replace each with a numbered citation in the text.
 
-    def _process_inline_latex(self, text: str, attachments: List[discord.File]) -> str:
-        """Replace $...$ with Unicode approximation or rendered image."""
-        if not self.INLINE_LATEX_RE.search(text):
-            return text
+        Simple inline LaTeX that converts cleanly to Unicode is left inline
+        with no citation.
+        """
+        # Collect expressions that need image rendering
+        # Each entry: (original_match_text, latex_expr, is_block)
+        expressions_to_render: List[Tuple[str, str]] = []
 
-        def _replace_inline(match: re.Match) -> str:
+        # Track which inline expressions convert to Unicode (no image needed)
+        unicode_replacements: List[Tuple[str, str]] = []
+
+        # First pass: identify block LaTeX ($$...$$)
+        for match in self.BLOCK_LATEX_RE.finditer(text):
+            latex_expr = match.group(1).strip()
+            if latex_expr:
+                expressions_to_render.append((match.group(0), latex_expr))
+
+        # Second pass: identify inline LaTeX ($...$) that can't be Unicode-converted
+        for match in self.INLINE_LATEX_RE.finditer(text):
             latex_expr = match.group(1).strip()
             if not latex_expr:
-                return match.group(0)
+                continue
+
+            # Skip if this is inside a block expression (already captured)
+            if any(match.group(0) in block_match for block_match, _ in expressions_to_render):
+                continue
 
             # Try Unicode conversion first
             unicode_result = self._latex_to_unicode(latex_expr)
             if unicode_result is not None:
-                return unicode_result
-
-            # Fall back to image rendering for complex expressions
-            img_bytes = self._render_latex_to_png(latex_expr, fontsize=14)
-            if img_bytes:
-                idx = len(attachments) + 1
-                filename = f"equation_{idx}.png"
-                attachments.append(discord.File(io.BytesIO(img_bytes), filename=filename))
-                return f"[eq. {idx}]"
+                unicode_replacements.append((match.group(0), unicode_result))
             else:
-                return f"`{latex_expr}`"
+                expressions_to_render.append((match.group(0), latex_expr))
 
-        return self.INLINE_LATEX_RE.sub(_replace_inline, text)
+        # Apply Unicode replacements (no citation needed)
+        for original, replacement in unicode_replacements:
+            text = text.replace(original, replacement, 1)
+
+        # If nothing needs image rendering, return early
+        if not expressions_to_render:
+            return text
+
+        # Assign citation numbers and replace in text
+        for idx, (original_text, _latex_expr) in enumerate(expressions_to_render, 1):
+            text = text.replace(original_text, f"**[{idx}]**", 1)
+
+        # Render combined image with all expressions
+        labeled_exprs = [
+            (f"[{idx}]", latex_expr)
+            for idx, (_original, latex_expr) in enumerate(expressions_to_render, 1)
+        ]
+        img_bytes = self._render_combined_latex_image(labeled_exprs)
+
+        if img_bytes:
+            attachments.append(discord.File(io.BytesIO(img_bytes), filename="equations.png"))
+            logger.info(f"Rendered {len(labeled_exprs)} LaTeX expression(s) into combined image")
+        else:
+            # Fallback: put raw LaTeX in code blocks
+            for idx, (original_text, latex_expr) in enumerate(expressions_to_render, 1):
+                text = text.replace(f"**[{idx}]**", f"`{latex_expr}`")
+            logger.warning("Failed to render combined LaTeX image, falling back to code blocks")
+
+        return text
+
+    def _render_combined_latex_image(self, labeled_exprs: List[Tuple[str, str]]) -> Optional[bytes]:
+        """
+        Render multiple LaTeX expressions into one vertically-stacked PNG image,
+        each prefixed with its citation label.
+
+        Args:
+            labeled_exprs: List of (label, latex_expr) tuples, e.g. [("[1]", "E=mc^2")]
+
+        Returns:
+            PNG image bytes, or None on failure
+        """
+        if not self._matplotlib_available or not labeled_exprs:
+            return None
+
+        try:
+            import matplotlib.pyplot as plt
+
+            n = len(labeled_exprs)
+            # Each row gets ~0.7 inches, with padding
+            fig_height = max(n * 0.7 + 0.4, 1.0)
+            fig, ax = plt.subplots(figsize=(8, fig_height))
+            ax.axis('off')
+            fig.patch.set_facecolor('white')
+
+            # Render each expression as a labeled row, spaced evenly top-to-bottom
+            for i, (label, latex_expr) in enumerate(labeled_exprs):
+                y_pos = 1.0 - (i + 0.5) / n  # Top to bottom
+
+                # Label on the left
+                ax.text(
+                    0.02, y_pos, label,
+                    fontsize=13, fontweight='bold',
+                    ha='left', va='center',
+                    transform=ax.transAxes,
+                    color='#333333',
+                    fontfamily='monospace'
+                )
+
+                # LaTeX expression
+                ax.text(
+                    0.08, y_pos,
+                    f"${latex_expr}$",
+                    fontsize=15,
+                    ha='left', va='center',
+                    transform=ax.transAxes,
+                    color='black'
+                )
+
+                # Subtle separator line (except after last)
+                if i < n - 1:
+                    sep_y = 1.0 - (i + 1) / n
+                    ax.axhline(y=sep_y, xmin=0.02, xmax=0.98,
+                               color='#E0E0E0', linewidth=0.5,
+                               transform=ax.transAxes)
+
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                        pad_inches=0.15, facecolor='white', edgecolor='none')
+            plt.close(fig)
+            buf.seek(0)
+
+            logger.debug(f"Rendered combined LaTeX image with {n} expression(s)")
+            return buf.read()
+
+        except Exception as e:
+            logger.warning(f"Failed to render combined LaTeX image: {e}")
+            try:
+                import matplotlib.pyplot as plt
+                plt.close('all')
+            except Exception:
+                pass
+            return None
 
     def _latex_to_unicode(self, expr: str) -> Optional[str]:
         """
@@ -227,67 +408,6 @@ class ContentRenderer:
         except Exception:
             return f'_({text})'
 
-    def _render_latex_to_png(self, latex_expr: str, fontsize: int = 14) -> Optional[bytes]:
-        """
-        Render a LaTeX expression to PNG bytes using matplotlib.
-
-        Args:
-            latex_expr: LaTeX expression (without $ delimiters)
-            fontsize: Font size for rendering
-
-        Returns:
-            PNG image bytes, or None on failure
-        """
-        if not self._matplotlib_available:
-            return None
-
-        try:
-            import matplotlib.pyplot as plt
-            import matplotlib
-
-            fig, ax = plt.subplots(figsize=(0.1, 0.1))
-            ax.axis('off')
-            fig.patch.set_facecolor('white')
-
-            # Render the LaTeX expression
-            text_obj = ax.text(
-                0.5, 0.5,
-                f"${latex_expr}$",
-                fontsize=fontsize,
-                ha='center', va='center',
-                transform=ax.transAxes,
-                color='black'
-            )
-
-            # Fit the figure to the text
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            bbox = text_obj.get_window_extent(renderer=renderer)
-
-            # Convert bbox from display coords to inches
-            dpi = fig.dpi
-            width_in = bbox.width / dpi + 0.4  # padding
-            height_in = bbox.height / dpi + 0.4
-
-            fig.set_size_inches(max(width_in, 1.0), max(height_in, 0.5))
-
-            # Save to bytes
-            buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
-                        pad_inches=0.15, facecolor='white', edgecolor='none')
-            plt.close(fig)
-            buf.seek(0)
-
-            logger.debug(f"Rendered LaTeX to PNG: {latex_expr[:50]}...")
-            return buf.read()
-
-        except Exception as e:
-            logger.warning(f"Failed to render LaTeX '{latex_expr[:80]}': {e}")
-            try:
-                plt.close('all')
-            except Exception:
-                pass
-            return None
 
     # ── Table Processing ──────────────────────────────────────────────
 

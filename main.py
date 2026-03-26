@@ -19,6 +19,12 @@ load_dotenv()
 async def main():
     """Main application entry point."""
     
+    # Early stdout logging - visible in 'docker logs' even if logging setup fails
+    print("=" * 60, flush=True)
+    print("Discord Grok Bot - Starting up...", flush=True)
+    print(f"Python: {sys.version}", flush=True)
+    print("=" * 60, flush=True)
+    
     # Load and validate configuration first
     config = load_and_validate_config()
     logger = logging.getLogger(__name__)

@@ -63,20 +63,20 @@ class BotConfig:
     command_suggestion_threshold: float = 0.7
 
     # === Models ===
-    default_model: str = "gemini-3.0-flash-preview"
+    default_model: str = "gemini-3-flash-preview"
     router_model_name: str = "gemini-2.5-flash-lite"
     available_models: List[Dict[str, str]] = field(default_factory=lambda: [
-        {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
+        {"name": "Gemini 3 Flash Preview (Default)", "value": "gemini-3-flash-preview"},
         {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
         {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
     ])
     valid_models: List[str] = field(default_factory=lambda: [
-        "gemini-3.0-flash-preview",
+        "gemini-3-flash-preview",
         "gemini-2.5-flash-lite",
         "gemini-3.1-pro-preview",
     ])
     model_display_names: Dict[str, str] = field(default_factory=lambda: {
-        "gemini-3.0-flash-preview": "Gemini Flash 3 Preview",
+        "gemini-3-flash-preview": "Gemini 3 Flash Preview",
         "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
         "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
     })
@@ -174,11 +174,11 @@ class BotConfig:
 
             # Bot
             dev_mode_enabled=get('bot', 'dev_mode', False),
-            token_db_path=get('bot', 'token_db_path', 'data/token_usage.db'),
+            token_db_path=os.getenv('TOKEN_DB_PATH') or get('bot', 'token_db_path', 'data/token_usage.db'),
 
             # Logging
             log_level=get('logging', 'level', 'INFO'),
-            log_file=get('logging', 'file', None),
+            log_file=os.getenv('LOG_FILE') or get('logging', 'file', None),
             enable_performance_logging=get('logging', 'enable_performance_logging', True),
 
             # Context
@@ -206,18 +206,18 @@ class BotConfig:
             command_suggestion_threshold=get('ux', 'command_suggestion_threshold', 0.7),
 
             # Models
-            default_model=get('models', 'default', 'gemini-3.0-flash-preview'),
+            default_model=get('models', 'default', 'gemini-3-flash-preview'),
             router_model_name=get('models', 'router', 'gemini-2.5-flash-lite'),
             available_models=get('models', 'available', None) or [
-                {"name": "Gemini Flash 3 Preview (Default)", "value": "gemini-3.0-flash-preview"},
+                {"name": "Gemini 3 Flash Preview (Default)", "value": "gemini-3-flash-preview"},
                 {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
                 {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
             ],
             valid_models=get('models', 'valid', None) or [
-                "gemini-3.0-flash-preview", "gemini-2.5-flash-lite", "gemini-3.1-pro-preview",
+                "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3.1-pro-preview",
             ],
             model_display_names=get('models', 'display_names', None) or {
-                "gemini-3.0-flash-preview": "Gemini Flash 3 Preview",
+                "gemini-3-flash-preview": "Gemini 3 Flash Preview",
                 "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
                 "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
             },

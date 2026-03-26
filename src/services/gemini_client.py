@@ -256,23 +256,23 @@ class GeminiClient:
             # Only downgrade to short mode if not manually set to thinking
             if self._prompt_mode != "thinking":
                 self.set_prompt_mode("short")
-            return self.set_model("gemini-3.0-flash-preview")
+            return self.set_model("gemini-3-flash-preview")
 
         elif complexity_level == "medium":
             # Medium complexity implies thinking mode is beneficial
             # But if we are already in thinking mode, stay there
             if self._prompt_mode != "thinking":
                 self.set_prompt_mode("thinking")
-            return self.set_model("gemini-3.0-flash-preview")
+            return self.set_model("gemini-3-flash-preview")
 
         elif complexity_level == "high":
             # High complexity uses Pro model
             # Pro model is smart enough without explicit thinking prompt, but we can keep it if set
             success = self.set_model("gemini-3.1-pro-preview")
             if not success:
-                logger.warning("gemini-3.1-pro-preview not available, falling back to gemini-3.0-flash-preview with thinking")
+                logger.warning("gemini-3.1-pro-preview not available, falling back to gemini-3-flash-preview with thinking")
                 self.set_prompt_mode("thinking")
-                return self.set_model("gemini-3.0-flash-preview")
+                return self.set_model("gemini-3-flash-preview")
             return success
         else:
             logger.error(f"Invalid complexity level: {complexity_level}. Must be 'low', 'medium', or 'high'")
@@ -959,7 +959,7 @@ class GeminiClient:
 
             return self.config.system_prompt_high_complexity.rstrip() + thinking_instruction
 
-        elif self._current_model_name in ["gemini-3.0-flash-preview"]:
+        elif self._current_model_name in ["gemini-3-flash-preview"]:
             logger.info("Using LOW COMPLEXITY system prompt")
             return self.config.system_prompt_low_complexity.rstrip()
 

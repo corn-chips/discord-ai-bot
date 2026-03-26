@@ -38,9 +38,9 @@ except ImportError as e:
 
 
 def _load_config() -> tuple[bool, BotConfig | None, str]:
-    """Load bot configuration from environment variables."""
+    """Load bot configuration from config.yaml and .env."""
     try:
-        config = BotConfig.from_environment()
+        config = BotConfig.from_yaml()
         return True, config, ""
     except Exception as exc:  # noqa: BLE001
         return False, None, f"Failed to load configuration: {exc}"

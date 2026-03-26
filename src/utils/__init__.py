@@ -6,5 +6,11 @@ bot operations including error handling, logging, and text processing.
 """
 
 from .markdown_utils import MarkdownParser, detect_markdown_elements, find_safe_split_points
+from .token_extraction import extract_token_usage
 
-__all__ = ['MarkdownParser', 'detect_markdown_elements', 'find_safe_split_points']
+__all__ = [
+    'MarkdownParser',
+    'detect_markdown_elements',
+    'find_safe_split_points',
+    'extract_token_usage',
+]

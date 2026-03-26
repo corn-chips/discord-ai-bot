@@ -7,9 +7,9 @@ rich embeds, reaction-based feedback, and progress updates.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 import discord
 
@@ -54,7 +54,8 @@ class UserExperienceService:
             config: Bot configuration containing UX settings
         """
         self.config = config
-        self.active_typing_tasks: Dict[int, asyncio.Task] = {}
+        self.active_typing_tasks: Dict[int, Tuple[Any, datetime]] = {}
+        self._typing_entry_ttl = timedelta(minutes=5)
         
         # Color mapping for different status types
         self.status_colors = {
@@ -74,6 +75,50 @@ class UserExperienceService:
             Status.PROCESSING: "⏳"
         }
     
+    def _task_error_handler(self, task: asyncio.Task) -> None:
+        """Log unhandled exceptions from detached tasks."""
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except Exception as callback_exc:
+            logger.error(f"Failed to inspect detached task exception: {callback_exc}")
+            return
+        if exc:
+            logger.error(
+                f"Unhandled detached task exception in UX service: {exc}",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+    async def _close_typing_entry(self, entry: Any) -> None:
+        """Close or cancel a stored typing entry."""
+        if isinstance(entry, asyncio.Task):
+            entry.cancel()
+            try:
+                await entry
+            except asyncio.CancelledError:
+                pass
+        else:
+            await entry.__aexit__(None, None, None)
+
+    async def _sweep_stale_typing_entries(self) -> None:
+        """Remove stale typing entries to avoid unbounded growth."""
+        cutoff = datetime.now(timezone.utc) - self._typing_entry_ttl
+        stale_channel_ids = [
+            channel_id
+            for channel_id, (_entry, created_at) in self.active_typing_tasks.items()
+            if created_at < cutoff
+        ]
+
+        for channel_id in stale_channel_ids:
+            entry, _created_at = self.active_typing_tasks.pop(channel_id, (None, None))
+            if entry is None:
+                continue
+            try:
+                await self._close_typing_entry(entry)
+            except Exception as e:
+                logger.debug(f"Failed to clean stale typing indicator for channel {channel_id}: {e}")
+
     async def show_typing_indicator(self, channel: discord.abc.Messageable, duration: int = 0):
         """
         Show typing indicator for long operations.
@@ -89,10 +134,12 @@ class UserExperienceService:
         
         try:
             channel_id = channel.id
+            await self._sweep_stale_typing_entries()
             
             # Cancel any existing typing task for this channel
             if channel_id in self.active_typing_tasks:
-                self.active_typing_tasks[channel_id].cancel()
+                existing_entry, _created_at = self.active_typing_tasks.pop(channel_id)
+                await self._close_typing_entry(existing_entry)
             
             # Start typing
             typing_context = channel.typing()
@@ -111,10 +158,11 @@ class UserExperienceService:
                         raise
                 
                 task = asyncio.create_task(stop_typing_after_delay())
-                self.active_typing_tasks[channel_id] = task
+                task.add_done_callback(self._task_error_handler)
+                self.active_typing_tasks[channel_id] = (task, datetime.now(timezone.utc))
             else:
                 # Store the typing context for manual stopping
-                self.active_typing_tasks[channel_id] = typing_context
+                self.active_typing_tasks[channel_id] = (typing_context, datetime.now(timezone.utc))
             
             logger.debug(f"Started typing indicator in channel {channel_id}")
             
@@ -136,19 +184,8 @@ class UserExperienceService:
         
         if channel_id in self.active_typing_tasks:
             try:
-                task_or_context = self.active_typing_tasks[channel_id]
-                
-                if isinstance(task_or_context, asyncio.Task):
-                    task_or_context.cancel()
-                    try:
-                        await task_or_context
-                    except asyncio.CancelledError:
-                        pass
-                else:
-                    # It's a typing context
-                    await task_or_context.__aexit__(None, None, None)
-                
-                del self.active_typing_tasks[channel_id]
+                task_or_context, _created_at = self.active_typing_tasks.pop(channel_id)
+                await self._close_typing_entry(task_or_context)
                 logger.debug(f"Stopped typing indicator in channel {channel_id}")
                 
             except Exception as e:
@@ -197,7 +234,7 @@ class UserExperienceService:
             title=embed_title,
             description=description,
             color=color,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         
         # Add fields if provided
@@ -269,7 +306,8 @@ class UserExperienceService:
                     except Exception as e:
                         logger.error(f"Error removing reaction: {e}")
                 
-                asyncio.create_task(remove_reaction_after_delay())
+                task = asyncio.create_task(remove_reaction_after_delay())
+                task.add_done_callback(self._task_error_handler)
         
         except discord.Forbidden:
             logger.warning(f"No permission to add reaction to message {message.id}")
@@ -466,16 +504,9 @@ class UserExperienceService:
     
     async def cleanup_typing_indicators(self):
         """Clean up any remaining typing indicators."""
-        for channel_id, task_or_context in list(self.active_typing_tasks.items()):
+        for channel_id, (task_or_context, _created_at) in list(self.active_typing_tasks.items()):
             try:
-                if isinstance(task_or_context, asyncio.Task):
-                    task_or_context.cancel()
-                    try:
-                        await task_or_context
-                    except asyncio.CancelledError:
-                        pass
-                else:
-                    await task_or_context.__aexit__(None, None, None)
+                await self._close_typing_entry(task_or_context)
             except Exception as e:
                 logger.error(f"Error cleaning up typing indicator: {e}")
         

@@ -8,7 +8,7 @@ message processing, and coordinates with other services to provide AI responses.
 import asyncio
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 import discord
@@ -35,6 +35,59 @@ from .enhanced_command_handler import EnhancedCommandHandler
 
 
 logger = logging.getLogger(__name__)
+
+
+class TextRateLimiter:
+    """Per-user text request limiter with minute/hour windows."""
+
+    def __init__(self, per_minute: int, per_hour: int):
+        self.per_minute = per_minute
+        self.per_hour = per_hour
+        self._requests: Dict[int, List[datetime]] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_record(self, user_id: int) -> tuple[bool, Optional[str]]:
+        """Validate and record a request for the given user."""
+        now = datetime.now(timezone.utc)
+        minute_cutoff = now - timedelta(minutes=1)
+        hour_cutoff = now - timedelta(hours=1)
+
+        async with self._lock:
+            # Prune expired entries for all users to prevent unbounded growth.
+            for existing_user_id, timestamps in list(self._requests.items()):
+                recent = [ts for ts in timestamps if ts >= hour_cutoff]
+                if recent:
+                    self._requests[existing_user_id] = recent
+                else:
+                    del self._requests[existing_user_id]
+
+            requests = self._requests.get(user_id, [])
+
+            minute_count = sum(1 for ts in requests if ts >= minute_cutoff)
+            hour_count = len(requests)
+
+            if minute_count >= self.per_minute:
+                oldest_minute = min(ts for ts in requests if ts >= minute_cutoff)
+                retry_after = oldest_minute + timedelta(minutes=1)
+                retry_seconds = max(1, int((retry_after - now).total_seconds()))
+                return False, (
+                    f"Text rate limit reached ({self.per_minute}/minute). "
+                    f"Please wait about {retry_seconds}s and try again."
+                )
+
+            if hour_count >= self.per_hour:
+                oldest_hour = min(requests)
+                retry_after = oldest_hour + timedelta(hours=1)
+                retry_minutes = max(1, int((retry_after - now).total_seconds() // 60) + 1)
+                return False, (
+                    f"Text rate limit reached ({self.per_hour}/hour). "
+                    f"Please try again in about {retry_minutes} minute(s)."
+                )
+
+            requests.append(now)
+            self._requests[user_id] = requests
+
+        return True, None
 
 
 class DiscordBot(discord.Client):
@@ -92,13 +145,20 @@ class DiscordBot(discord.Client):
         
         # Initialize image processing service if configured
         self.image_processing_service = None
+        self.image_generation_enabled = False
         if hasattr(config, 'nano_banana_api_key') and config.nano_banana_api_key:
             try:
                 self.image_processing_service = ImageProcessingService(config)
+                self.image_generation_enabled = True
                 logger.info("✅ Image processing service initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize image processing service: {e}")
                 logger.warning("Image editing features will be disabled")
+
+        self.text_rate_limiter = TextRateLimiter(
+            per_minute=config.text_rate_limit_per_minute,
+            per_hour=config.text_rate_limit_per_hour,
+        )
         
         # Initialize enhanced command handler
         self.enhanced_command_handler = None
@@ -172,6 +232,7 @@ class DiscordBot(discord.Client):
             except Exception as e:
                 logger.error(f"Failed to start image processing service: {e}")
                 self.image_processing_service = None
+                self.image_generation_enabled = False
                 # Disable enhanced command handler if image service fails
                 self.enhanced_command_handler = None
         
@@ -245,7 +306,8 @@ class DiscordBot(discord.Client):
                 # Check if image service is responsive
                 health = await self.image_processing_service.get_service_health()
                 status['image_processing'] = "✅ Available" if health else "⚠️ Degraded"
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Image processing service health check failed: {e}")
                 status['image_processing'] = "❌ Unavailable"
         else:
             status['image_processing'] = "⚪ Not configured"
@@ -320,9 +382,19 @@ class DiscordBot(discord.Client):
         logger.debug(f"Message content: {message.content}")
         
         try:
+            is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(message.author.id)
+            if not is_allowed:
+                context_logger.warning(f"Text rate limit triggered for user {message.author.id}")
+                await message.reply(rate_limit_message)
+                return
+
+            complexity_level = "low"
+            routed_intent = "unknown"
+
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:
-                handled, complexity_level = await self.enhanced_command_handler.handle_message(message)
+                handled, complexity_level, intent = await self.enhanced_command_handler.handle_message(message)
+                routed_intent = intent.value
                 if handled:
                     context_logger.info("Message handled by enhanced command handler")
                     return
@@ -349,7 +421,12 @@ class DiscordBot(discord.Client):
             start_time = time.time()
             
             # Collect conversation context
-            await self._process_message_with_context(message, user_prompt)
+            await self._process_message_with_context(
+                message,
+                user_prompt,
+                complexity_level=complexity_level,
+                routed_intent=routed_intent,
+            )
             
             # Log processing completion (will be called from _generate_and_send_response)
             
@@ -381,7 +458,13 @@ class DiscordBot(discord.Client):
             error_context = self.error_manager.handle_discord_error(e, message)
             await self.error_manager.send_error_response(message, error_context)
     
-    async def _process_message_with_context(self, message: discord.Message, user_prompt: str):
+    async def _process_message_with_context(
+        self,
+        message: discord.Message,
+        user_prompt: str,
+        complexity_level: str = "low",
+        routed_intent: str = "unknown",
+    ):
         """
         Process a message with full context collection and response generation.
         
@@ -391,8 +474,18 @@ class DiscordBot(discord.Client):
         Args:
             message: The Discord message object
             user_prompt: The extracted user prompt without mentions
+            complexity_level: Router-detected complexity level
+            routed_intent: Router-detected intent from the first pass
         """
         try:
+            context_limit = self._get_context_limit_for_complexity(complexity_level)
+            logger.debug(
+                "Collecting context (limit=%s) for complexity=%s, intent=%s",
+                context_limit,
+                complexity_level,
+                routed_intent,
+            )
+
             # Check if this is a reply and collect appropriate context
             if message.reference:
                 logger.debug("Message is a reply, collecting enhanced context")
@@ -411,7 +504,11 @@ class DiscordBot(discord.Client):
                 
                 # Get standard channel context
                 try:
-                    standard_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
+                    standard_context = await self.context_collector.get_channel_context(
+                        message.channel,
+                        limit=context_limit,
+                        bot_user=self.user,
+                    )
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     standard_context = []
@@ -427,7 +524,11 @@ class DiscordBot(discord.Client):
                 logger.debug("Message is not a reply, collecting standard context")
                 # Get standard channel context only
                 try:
-                    combined_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
+                    combined_context = await self.context_collector.get_channel_context(
+                        message.channel,
+                        limit=context_limit,
+                        bot_user=self.user,
+                    )
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     combined_context = []
@@ -437,46 +538,9 @@ class DiscordBot(discord.Client):
             
             logger.info(f"Collected {len(combined_context)} messages for context")
 
-            # If router thinks this is an image generation request, we must avoid passing the full conversation context
-            # to the text model (previously a text model might say "I cannot generate images" and pollute history).
-            try:
-                if self.enhanced_command_handler:
-                    has_images = any(
-                        attachment.content_type and attachment.content_type.startswith('image/')
-                        for attachment in message.attachments
-                    )
-                    intent, _complexity = await self.enhanced_command_handler._check_intent_and_complexity(message.content, has_images)
-                    from .enhanced_command_handler import CommandIntent
-                    if intent == CommandIntent.IMAGE_GENERATE:
-                        logger.info("Routing detected IMAGE_GENERATE while processing context; clearing context except reply/current message")
-                        # Keep only the replied-to message context and the current message as per user's request
-                        filtered_context: list[MessageContext] = []
-                        if message.reference:
-                            reply_context = await self.context_collector.get_reply_context(message)
-                            # reply_context contains several messages around the replied-to message; keep only those
-                            filtered_context.extend(reply_context)
-
-                        # Also add a context entry for the current message (so the model knows the prompt in context)
-                        filtered_context.append(MessageContext(
-                            content=message.content,
-                            author=message.author.display_name,
-                            timestamp=message.created_at,
-                            message_id=message.id,
-                            is_reply=message.reference is not None,
-                            replied_to_id=message.reference.message_id if message.reference else None
-                        ))
-
-                        # Either directly invoke image generation handler (preferred) or proceed with a filtered context
-                        try:
-                            await self.enhanced_command_handler.handle_image_generation_command(message)
-                            return
-                        except Exception as exc:
-                            logger.error(f"Failed to handle image generation via enhanced handler: {exc}", exc_info=True)
-                            # Fallback: continue with filtered context and let the text model handle it (safer than full context)
-                            combined_context = filtered_context
-
-            except Exception as e:
-                logger.error(f"Failed to re-check router intent in _process_message_with_context: {e}", exc_info=True)
+            if routed_intent == "image_generate":
+                logger.debug("Image generation intent reached context handler; using minimal context fallback")
+                combined_context = []
 
             # Generate AI response using Gemini API with collected or filtered context
             await self._generate_and_send_response(message, user_prompt, combined_context)
@@ -508,6 +572,14 @@ class DiscordBot(discord.Client):
             
             self.error_manager.log_error(error_context, f"Unexpected error in channel {message.channel.id}")
             await self.error_manager.send_error_response(message, error_context)
+
+    def _get_context_limit_for_complexity(self, complexity_level: str) -> int:
+        """Select context window size by complexity tier."""
+        if complexity_level == "high":
+            return self.config.context_messages_high
+        if complexity_level == "medium":
+            return self.config.context_messages_medium
+        return self.config.context_messages_low
     
     def _extract_user_prompt(self, message: discord.Message) -> str:
         """
@@ -549,36 +621,38 @@ class DiscordBot(discord.Client):
             logger.info(f"PDF CONVERSION STARTED: {filename}")
             logger.info(f"PDF size: {len(pdf_bytes)} bytes ({len(pdf_bytes) / 1024:.2f} KB)")
             
-            # Open PDF with PyMuPDF
-            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-            page_count = len(pdf_document)
-            
-            logger.info(f"PDF has {page_count} page(s)")
-            
-            # Convert each page to an image
-            for page_num in range(page_count):
-                try:
-                    logger.info(f"Converting page {page_num + 1}/{page_count}...")
-                    
-                    page = pdf_document[page_num]
-                    
-                    # Render page to pixmap (image) at 2x resolution for better quality
-                    mat = fitz.Matrix(self.config.pdf_render_scale, self.config.pdf_render_scale)
-                    pix = page.get_pixmap(matrix=mat)
-                    
-                    # Convert pixmap to PIL Image and ensure RGB mode
-                    img_data = pix.tobytes("png")
-                    image = Image.open(io.BytesIO(img_data))
-                    image = self._convert_image_to_rgb(image)
-                    
-                    images.append(image)
-                    logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to convert page {page_num + 1}: {e}")
-                    continue
-            
-            pdf_document.close()
+            # Open PDF with PyMuPDF and ensure cleanup on exceptions
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
+                page_count = len(pdf_document)
+                
+                logger.info(f"PDF has {page_count} page(s)")
+
+                if page_count > self.config.max_pdf_pages:
+                    logger.warning(f"PDF has {page_count} pages, truncating to {self.config.max_pdf_pages}")
+                    page_count = self.config.max_pdf_pages
+                
+                # Convert each page to an image
+                for page_num in range(page_count):
+                    try:
+                        logger.info(f"Converting page {page_num + 1}/{page_count}...")
+                        
+                        page = pdf_document[page_num]
+                        
+                        # Render page to pixmap (image) at configured resolution
+                        mat = fitz.Matrix(self.config.pdf_render_scale, self.config.pdf_render_scale)
+                        pix = page.get_pixmap(matrix=mat)
+                        
+                        # Convert pixmap to PIL Image and ensure RGB mode
+                        img_data = pix.tobytes("png")
+                        image = Image.open(io.BytesIO(img_data))
+                        image = self._convert_image_to_rgb(image)
+                        
+                        images.append(image)
+                        logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to convert page {page_num + 1}: {e}")
+                        continue
             
             logger.info(f"✅ PDF CONVERSION COMPLETE: {len(images)} pages converted successfully")
             logger.info(f"=" * 80)
@@ -1019,8 +1093,8 @@ class DiscordBot(discord.Client):
         """
         try:
             await message.add_reaction("❌")
-        except Exception:
-            pass  # Ignore reaction failures
+        except Exception as e:
+            logger.debug(f"Failed to add error reaction: {e}")
     
     def _get_user_friendly_error_message(self, error_msg: str) -> str:
         """
@@ -1305,7 +1379,7 @@ class DiscordBot(discord.Client):
                                 
                             import time
                             current_time = time.time()
-                            if current_time - last_edit_time > 1.5 and content:
+                            if current_time - last_edit_time > 3.0 and content:
                                 try:
                                     # Show last 1500 chars to keep it dynamic
                                     display_content = content
@@ -1314,8 +1388,8 @@ class DiscordBot(discord.Client):
                                     
                                     await status_message.edit(content=f"🧠 **Thinking Process:**\n{display_content}")
                                     last_edit_time = current_time
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug(f"Failed to update streaming thinking status message: {e}")
                         else:
                             # If we are in thinking mode but no tag yet, maybe show the raw text if it looks like thinking?
                             # But safer to wait for tag.
@@ -1337,8 +1411,8 @@ class DiscordBot(discord.Client):
                     if status_message:
                         try:
                             await status_message.delete()
-                        except Exception:
-                            pass  # Ignore deletion errors
+                        except Exception as e:
+                            logger.debug(f"Failed to delete status message after response: {e}")
                     
                     duration = time.time() - start_time
                     
@@ -1375,8 +1449,8 @@ class DiscordBot(discord.Client):
                     if status_message:
                         try:
                             await status_message.delete()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Failed to delete status message after timeout: {e}")
                     
                     timeout_used = self.gemini_client.get_timeout_for_current_model()
                     logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")

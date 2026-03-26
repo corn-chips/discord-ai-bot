@@ -139,6 +139,31 @@ async def setup_commands(
         )
         await interaction.response.send_message(embed=embed)
 
+    @config_group.command(name="image-generation", description="Enable or disable AI image generation")
+    @app_commands.describe(enabled="Enable or disable image generation requests")
+    async def image_generation(interaction: discord.Interaction, enabled: bool):
+        """Toggle runtime image generation availability."""
+        if not getattr(bot, "image_processing_service", None):
+            await interaction.response.send_message(
+                "Image processing service is not configured, so image generation cannot be toggled.",
+                ephemeral=True,
+            )
+            return
+
+        bot.image_generation_enabled = enabled
+        status = "✅ Enabled" if enabled else "❌ Disabled"
+        description = (
+            "Users can now request image generation prompts."
+            if enabled
+            else "Image generation requests are now disabled."
+        )
+        embed = discord.Embed(
+            title=f"🖼️ Image Generation {status}",
+            description=description,
+            color=discord.Color.green() if enabled else discord.Color.light_grey(),
+        )
+        await interaction.response.send_message(embed=embed)
+
     @config_group.command(name="debug", description="Toggle Debug Logging")
     @app_commands.describe(enabled="Enable or disable verbose debug logging")
     async def debug(interaction: discord.Interaction, enabled: bool):
@@ -364,11 +389,13 @@ async def setup_commands(
         
         # Image processing settings (if available)
         if hasattr(bot, 'image_processing_service') and bot.image_processing_service:
+            generation_enabled = getattr(bot, "image_generation_enabled", True)
             embed.add_field(
                 name="🖼️ Image Processing",
                 value=f"**Max Image Size:** {config.max_image_size_mb}MB\n"
                       f"**Processing Timeout:** {config.image_processing_timeout}s\n"
-                      f"**Max Concurrent:** {config.max_concurrent_image_edits}",
+                      f"**Max Concurrent:** {config.max_concurrent_image_edits}\n"
+                      f"**Image Generation:** {'Enabled' if generation_enabled else 'Disabled'}",
                 inline=True
             )
         
@@ -394,6 +421,8 @@ async def setup_commands(
         
         # Feature availability
         features = config.get_feature_availability()
+        if hasattr(bot, "image_processing_service") and bot.image_processing_service:
+            features["image_generation"] = bool(getattr(bot, "image_generation_enabled", True))
         feature_status = []
         for feature, available in features.items():
             status = "✅" if available else "❌"

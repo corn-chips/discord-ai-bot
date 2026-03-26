@@ -12,12 +12,14 @@ requests>=2.31.0
 numpy>=1.24.0
 
 # Message formatting dependencies
+matplotlib>=3.7.0
 markdown>=3.5.0
 beautifulsoup4>=4.12.0
 jinja2>=3.1.0
 
 # Enhanced error handling and logging
 colorlog>=6.7.0
+pyyaml>=6.0
 
 # System monitoring and health checks
 psutil>=5.9.0

@@ -8,19 +8,16 @@ message processing, and coordinates with other services to provide AI responses.
 import asyncio
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 import discord
-from discord.ext import commands
 from PIL import Image
 import fitz  # PyMuPDF
 
 from ..config import BotConfig
 from ..constants import (
     SUPPORTED_TEXT_EXTENSIONS,
-    MAX_TEXT_FILE_SIZE_BYTES,
-    PDF_RENDER_SCALE,
     RGB_WHITE_BACKGROUND,
 )
 from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage, MessageContext
@@ -30,6 +27,7 @@ from ..services.message_splitter import MessageSplitter
 from ..services.image_processing_service import ImageProcessingService
 from ..services.user_experience_service import UserExperienceService
 from ..services.token_tracker import TokenTracker
+from ..services.content_renderer import ContentRenderer
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
@@ -37,6 +35,59 @@ from .enhanced_command_handler import EnhancedCommandHandler
 
 
 logger = logging.getLogger(__name__)
+
+
+class TextRateLimiter:
+    """Per-user text request limiter with minute/hour windows."""
+
+    def __init__(self, per_minute: int, per_hour: int):
+        self.per_minute = per_minute
+        self.per_hour = per_hour
+        self._requests: Dict[int, List[datetime]] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_record(self, user_id: int) -> tuple[bool, Optional[str]]:
+        """Validate and record a request for the given user."""
+        now = datetime.now(timezone.utc)
+        minute_cutoff = now - timedelta(minutes=1)
+        hour_cutoff = now - timedelta(hours=1)
+
+        async with self._lock:
+            # Prune expired entries for all users to prevent unbounded growth.
+            for existing_user_id, timestamps in list(self._requests.items()):
+                recent = [ts for ts in timestamps if ts >= hour_cutoff]
+                if recent:
+                    self._requests[existing_user_id] = recent
+                else:
+                    del self._requests[existing_user_id]
+
+            requests = self._requests.get(user_id, [])
+
+            minute_count = sum(1 for ts in requests if ts >= minute_cutoff)
+            hour_count = len(requests)
+
+            if minute_count >= self.per_minute:
+                oldest_minute = min(ts for ts in requests if ts >= minute_cutoff)
+                retry_after = oldest_minute + timedelta(minutes=1)
+                retry_seconds = max(1, int((retry_after - now).total_seconds()))
+                return False, (
+                    f"Text rate limit reached ({self.per_minute}/minute). "
+                    f"Please wait about {retry_seconds}s and try again."
+                )
+
+            if hour_count >= self.per_hour:
+                oldest_hour = min(requests)
+                retry_after = oldest_hour + timedelta(hours=1)
+                retry_minutes = max(1, int((retry_after - now).total_seconds() // 60) + 1)
+                return False, (
+                    f"Text rate limit reached ({self.per_hour}/hour). "
+                    f"Please try again in about {retry_minutes} minute(s)."
+                )
+
+            requests.append(now)
+            self._requests[user_id] = requests
+
+        return True, None
 
 
 class DiscordBot(discord.Client):
@@ -75,26 +126,39 @@ class DiscordBot(discord.Client):
         # Initialize core services
         self.context_collector = ContextCollector(
             max_context_messages=config.max_context_messages,
-            reply_context_range=config.reply_context_range
+            reply_context_range=config.reply_context_range,
+            cutoff_hours=config.context_cutoff_hours
         )
         self.gemini_client = GeminiClient(config)
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
-            preserve_formatting=config.preserve_code_blocks
+            preserve_formatting=config.preserve_code_blocks,
+            add_continuation_indicators=config.add_continuation_indicators,
+            continuation_overhead=config.continuation_overhead,
         )
         
+        # Initialize content renderer for LaTeX and table formatting
+        self.content_renderer = ContentRenderer()
+
         # Initialize UX enhancement services
         self.user_experience_service = UserExperienceService(config)
         
         # Initialize image processing service if configured
         self.image_processing_service = None
+        self.image_generation_enabled = False
         if hasattr(config, 'nano_banana_api_key') and config.nano_banana_api_key:
             try:
                 self.image_processing_service = ImageProcessingService(config)
+                self.image_generation_enabled = True
                 logger.info("✅ Image processing service initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize image processing service: {e}")
                 logger.warning("Image editing features will be disabled")
+
+        self.text_rate_limiter = TextRateLimiter(
+            per_minute=config.text_rate_limit_per_minute,
+            per_hour=config.text_rate_limit_per_hour,
+        )
         
         # Initialize enhanced command handler
         self.enhanced_command_handler = None
@@ -168,6 +232,7 @@ class DiscordBot(discord.Client):
             except Exception as e:
                 logger.error(f"Failed to start image processing service: {e}")
                 self.image_processing_service = None
+                self.image_generation_enabled = False
                 # Disable enhanced command handler if image service fails
                 self.enhanced_command_handler = None
         
@@ -241,7 +306,8 @@ class DiscordBot(discord.Client):
                 # Check if image service is responsive
                 health = await self.image_processing_service.get_service_health()
                 status['image_processing'] = "✅ Available" if health else "⚠️ Degraded"
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Image processing service health check failed: {e}")
                 status['image_processing'] = "❌ Unavailable"
         else:
             status['image_processing'] = "⚪ Not configured"
@@ -316,9 +382,19 @@ class DiscordBot(discord.Client):
         logger.debug(f"Message content: {message.content}")
         
         try:
+            is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(message.author.id)
+            if not is_allowed:
+                context_logger.warning(f"Text rate limit triggered for user {message.author.id}")
+                await message.reply(rate_limit_message)
+                return
+
+            complexity_level = "low"
+            routed_intent = "unknown"
+
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:
-                handled, complexity_level = await self.enhanced_command_handler.handle_message(message)
+                handled, complexity_level, intent = await self.enhanced_command_handler.handle_message(message)
+                routed_intent = intent.value
                 if handled:
                     context_logger.info("Message handled by enhanced command handler")
                     return
@@ -345,7 +421,12 @@ class DiscordBot(discord.Client):
             start_time = time.time()
             
             # Collect conversation context
-            await self._process_message_with_context(message, user_prompt)
+            await self._process_message_with_context(
+                message,
+                user_prompt,
+                complexity_level=complexity_level,
+                routed_intent=routed_intent,
+            )
             
             # Log processing completion (will be called from _generate_and_send_response)
             
@@ -377,7 +458,13 @@ class DiscordBot(discord.Client):
             error_context = self.error_manager.handle_discord_error(e, message)
             await self.error_manager.send_error_response(message, error_context)
     
-    async def _process_message_with_context(self, message: discord.Message, user_prompt: str):
+    async def _process_message_with_context(
+        self,
+        message: discord.Message,
+        user_prompt: str,
+        complexity_level: str = "low",
+        routed_intent: str = "unknown",
+    ):
         """
         Process a message with full context collection and response generation.
         
@@ -387,8 +474,18 @@ class DiscordBot(discord.Client):
         Args:
             message: The Discord message object
             user_prompt: The extracted user prompt without mentions
+            complexity_level: Router-detected complexity level
+            routed_intent: Router-detected intent from the first pass
         """
         try:
+            context_limit = self._get_context_limit_for_complexity(complexity_level)
+            logger.debug(
+                "Collecting context (limit=%s) for complexity=%s, intent=%s",
+                context_limit,
+                complexity_level,
+                routed_intent,
+            )
+
             # Check if this is a reply and collect appropriate context
             if message.reference:
                 logger.debug("Message is a reply, collecting enhanced context")
@@ -407,7 +504,11 @@ class DiscordBot(discord.Client):
                 
                 # Get standard channel context
                 try:
-                    standard_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
+                    standard_context = await self.context_collector.get_channel_context(
+                        message.channel,
+                        limit=context_limit,
+                        bot_user=self.user,
+                    )
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     standard_context = []
@@ -423,7 +524,11 @@ class DiscordBot(discord.Client):
                 logger.debug("Message is not a reply, collecting standard context")
                 # Get standard channel context only
                 try:
-                    combined_context = await self.context_collector.get_channel_context(message.channel, bot_user=self.user)
+                    combined_context = await self.context_collector.get_channel_context(
+                        message.channel,
+                        limit=context_limit,
+                        bot_user=self.user,
+                    )
                 except discord.Forbidden:
                     logger.warning(f"No permission to read message history in channel {message.channel.id}")
                     combined_context = []
@@ -433,46 +538,9 @@ class DiscordBot(discord.Client):
             
             logger.info(f"Collected {len(combined_context)} messages for context")
 
-            # If router thinks this is an image generation request, we must avoid passing the full conversation context
-            # to the text model (previously a text model might say "I cannot generate images" and pollute history).
-            try:
-                if self.enhanced_command_handler:
-                    has_images = any(
-                        attachment.content_type and attachment.content_type.startswith('image/')
-                        for attachment in message.attachments
-                    )
-                    intent, _complexity = await self.enhanced_command_handler._check_intent_and_complexity(message.content, has_images)
-                    from .enhanced_command_handler import CommandIntent
-                    if intent == CommandIntent.IMAGE_GENERATE:
-                        logger.info("Routing detected IMAGE_GENERATE while processing context; clearing context except reply/current message")
-                        # Keep only the replied-to message context and the current message as per user's request
-                        filtered_context: list[MessageContext] = []
-                        if message.reference:
-                            reply_context = await self.context_collector.get_reply_context(message)
-                            # reply_context contains several messages around the replied-to message; keep only those
-                            filtered_context.extend(reply_context)
-
-                        # Also add a context entry for the current message (so the model knows the prompt in context)
-                        filtered_context.append(MessageContext(
-                            content=message.content,
-                            author=message.author.display_name,
-                            timestamp=message.created_at,
-                            message_id=message.id,
-                            is_reply=message.reference is not None,
-                            replied_to_id=message.reference.message_id if message.reference else None
-                        ))
-
-                        # Either directly invoke image generation handler (preferred) or proceed with a filtered context
-                        try:
-                            await self.enhanced_command_handler.handle_image_generation_command(message)
-                            return
-                        except Exception as exc:
-                            logger.error(f"Failed to handle image generation via enhanced handler: {exc}", exc_info=True)
-                            # Fallback: continue with filtered context and let the text model handle it (safer than full context)
-                            combined_context = filtered_context
-
-            except Exception as e:
-                logger.error(f"Failed to re-check router intent in _process_message_with_context: {e}", exc_info=True)
+            if routed_intent == "image_generate":
+                logger.debug("Image generation intent reached context handler; using minimal context fallback")
+                combined_context = []
 
             # Generate AI response using Gemini API with collected or filtered context
             await self._generate_and_send_response(message, user_prompt, combined_context)
@@ -504,6 +572,14 @@ class DiscordBot(discord.Client):
             
             self.error_manager.log_error(error_context, f"Unexpected error in channel {message.channel.id}")
             await self.error_manager.send_error_response(message, error_context)
+
+    def _get_context_limit_for_complexity(self, complexity_level: str) -> int:
+        """Select context window size by complexity tier."""
+        if complexity_level == "high":
+            return self.config.context_messages_high
+        if complexity_level == "medium":
+            return self.config.context_messages_medium
+        return self.config.context_messages_low
     
     def _extract_user_prompt(self, message: discord.Message) -> str:
         """
@@ -545,36 +621,38 @@ class DiscordBot(discord.Client):
             logger.info(f"PDF CONVERSION STARTED: {filename}")
             logger.info(f"PDF size: {len(pdf_bytes)} bytes ({len(pdf_bytes) / 1024:.2f} KB)")
             
-            # Open PDF with PyMuPDF
-            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-            page_count = len(pdf_document)
-            
-            logger.info(f"PDF has {page_count} page(s)")
-            
-            # Convert each page to an image
-            for page_num in range(page_count):
-                try:
-                    logger.info(f"Converting page {page_num + 1}/{page_count}...")
-                    
-                    page = pdf_document[page_num]
-                    
-                    # Render page to pixmap (image) at 2x resolution for better quality
-                    mat = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
-                    pix = page.get_pixmap(matrix=mat)
-                    
-                    # Convert pixmap to PIL Image and ensure RGB mode
-                    img_data = pix.tobytes("png")
-                    image = Image.open(io.BytesIO(img_data))
-                    image = self._convert_image_to_rgb(image)
-                    
-                    images.append(image)
-                    logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to convert page {page_num + 1}: {e}")
-                    continue
-            
-            pdf_document.close()
+            # Open PDF with PyMuPDF and ensure cleanup on exceptions
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf_document:
+                page_count = len(pdf_document)
+                
+                logger.info(f"PDF has {page_count} page(s)")
+
+                if page_count > self.config.max_pdf_pages:
+                    logger.warning(f"PDF has {page_count} pages, truncating to {self.config.max_pdf_pages}")
+                    page_count = self.config.max_pdf_pages
+                
+                # Convert each page to an image
+                for page_num in range(page_count):
+                    try:
+                        logger.info(f"Converting page {page_num + 1}/{page_count}...")
+                        
+                        page = pdf_document[page_num]
+                        
+                        # Render page to pixmap (image) at configured resolution
+                        mat = fitz.Matrix(self.config.pdf_render_scale, self.config.pdf_render_scale)
+                        pix = page.get_pixmap(matrix=mat)
+                        
+                        # Convert pixmap to PIL Image and ensure RGB mode
+                        img_data = pix.tobytes("png")
+                        image = Image.open(io.BytesIO(img_data))
+                        image = self._convert_image_to_rgb(image)
+                        
+                        images.append(image)
+                        logger.info(f"✓ Page {page_num + 1} converted: {image.size[0]}x{image.size[1]} pixels")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to convert page {page_num + 1}: {e}")
+                        continue
             
             logger.info(f"✅ PDF CONVERSION COMPLETE: {len(images)} pages converted successfully")
             logger.info(f"=" * 80)
@@ -668,6 +746,72 @@ class DiscordBot(discord.Client):
                             logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
         
         return images
+
+    async def _extract_context_images(
+        self,
+        message: discord.Message,
+        context: List[MessageContext],
+        exclude_message_ids: Optional[set[int]] = None
+    ) -> List[Image.Image]:
+        """
+        Extract recent image attachments from context messages in the same channel.
+
+        Args:
+            message: The current Discord message
+            context: Collected MessageContext list
+            exclude_message_ids: Optional message IDs to skip (e.g., current/replied message)
+
+        Returns:
+            List of PIL Images from recent context messages
+        """
+        max_context_images = max(0, getattr(self.config, "max_context_images", 6))
+        if max_context_images == 0 or not context:
+            return []
+
+        excluded_ids = exclude_message_ids or set()
+        context_message_ids = {msg.message_id for msg in context if msg.message_id not in excluded_ids}
+        if not context_message_ids:
+            return []
+
+        images = []
+        history_limit = max(len(context_message_ids) * 2, self.config.max_context_messages * 2)
+
+        try:
+            async for ctx_message in message.channel.history(limit=history_limit):
+                if len(images) >= max_context_images:
+                    break
+                if ctx_message.id not in context_message_ids:
+                    continue
+
+                for attachment in ctx_message.attachments:
+                    if len(images) >= max_context_images:
+                        break
+                    is_image = (
+                        (attachment.content_type and attachment.content_type.startswith("image/"))
+                        or attachment.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))
+                    )
+                    if not is_image:
+                        continue
+                    try:
+                        image_bytes = await attachment.read()
+                        image = Image.open(io.BytesIO(image_bytes))
+                        image = self._convert_image_to_rgb(image)
+                        images.append(image)
+                        logger.info(
+                            f"Loaded context image: {attachment.filename} from message {ctx_message.id} "
+                            f"({image.size[0]}x{image.size[1]})"
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to load context image {attachment.filename} "
+                            f"from message {ctx_message.id}: {e}"
+                        )
+        except discord.Forbidden:
+            logger.warning(f"No permission to read channel history for context images in channel {message.channel.id}")
+        except discord.HTTPException as e:
+            logger.error(f"Discord API error retrieving context images: {e}")
+
+        return images
     
     async def _extract_audio_from_message(self, message: discord.Message) -> List[Dict[str, Any]]:
         """
@@ -760,7 +904,7 @@ class DiscordBot(discord.Client):
         text_extensions = SUPPORTED_TEXT_EXTENSIONS
         
         # Maximum file size to read
-        max_file_size = MAX_TEXT_FILE_SIZE_BYTES
+        max_file_size = self.config.max_text_file_size_bytes
         
         async def process_attachment(attachment: discord.Attachment) -> None:
             """Process a single attachment."""
@@ -881,16 +1025,24 @@ class DiscordBot(discord.Client):
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
-        Check if the bot is mentioned in a Discord message or if the message is a reply to the bot.
+        Check if the bot is directly mentioned in a Discord message or if the message is a reply to the bot.
         
         Implements requirements 1.1, 1.2: Identify bot mentions in messages.
+        
+        Note: Does NOT respond to @everyone or @here to avoid spam in busy servers.
+        Only responds to direct @bot mentions, replies to bot messages, or role mentions
+        where the bot has that role.
         
         Args:
             message: The Discord message to check
             
         Returns:
-            True if the bot is mentioned or message is a reply to bot, False otherwise
+            True if the bot is directly mentioned or message is a reply to bot, False otherwise
         """
+        # Always respond in private DMs (1-on-1 with bot) — no @mention needed
+        if isinstance(message.channel, discord.DMChannel):
+            return True
+
         # Check if this is a reply to a bot message
         if message.reference and message.reference.resolved:
             replied_message = message.reference.resolved
@@ -899,19 +1051,21 @@ class DiscordBot(discord.Client):
                 if replied_message.author == self.user:
                     return True
         
-        # Check if the bot user is in the message mentions
+        # Check if the bot user is directly mentioned
         if self.user in message.mentions:
             return True
         
-        # Check for @everyone or @here mentions if the bot has appropriate permissions
-        if message.mention_everyone:
-            return True
+        # Note: We intentionally do NOT respond to @everyone or @here
+        # to avoid spam in busy servers
         
-        # Check for role mentions that the bot has
+        # Check for role mentions that the bot has (but not @everyone role)
         if message.guild and hasattr(message.guild, 'me'):
             bot_member = message.guild.me
             if bot_member:
                 for role in message.role_mentions:
+                    # Skip the @everyone role
+                    if role.is_default():
+                        continue
                     if role in bot_member.roles:
                         return True
         
@@ -939,8 +1093,8 @@ class DiscordBot(discord.Client):
         """
         try:
             await message.add_reaction("❌")
-        except Exception:
-            pass  # Ignore reaction failures
+        except Exception as e:
+            logger.debug(f"Failed to add error reaction: {e}")
     
     def _get_user_friendly_error_message(self, error_msg: str) -> str:
         """
@@ -1047,23 +1201,38 @@ class DiscordBot(discord.Client):
                     
                     # Extract images from the message
                     images = await self._extract_images_from_message(message)
+
+                    # Also include recent channel images from the collected context
+                    exclude_context_ids = {message.id}
+                    if message.reference and message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
+                        exclude_context_ids.add(message.reference.resolved.id)
+                    context_images = await self._extract_context_images(message, context, exclude_context_ids)
+                    if context_images:
+                        images.extend(context_images)
+                        logger.info(
+                            f"✅ Added {len(context_images)} context image(s) from recent channel history "
+                            f"(total images sent: {len(images)})"
+                        )
                     
                     # Extract audio files from the message
                     audio_files = await self._extract_audio_from_message(message)
                     if audio_files:
                         logger.info(f"✅ Extracted {len(audio_files)} audio file(s)")
                         
-                        # Filter context for audio transcription to only include the replied-to message
+                        # Keep limited context for audio transcription (for tone/speaker identification)
                         if message.reference and message.reference.message_id:
                             replied_id = message.reference.message_id
-                            # Keep only the immediate parent message in context
+                            # Keep the replied-to message + last 5 recent messages
                             original_context_len = len(context)
-                            context = [msg for msg in context if msg.message_id == replied_id]
-                            logger.info(f"Audio transcription: Context restricted to replied message (kept {len(context)}/{original_context_len} messages)")
+                            replied = [msg for msg in context if msg.message_id == replied_id]
+                            recent = context[-5:] if len(context) > 5 else context
+                            context = self.context_collector._remove_duplicate_messages(recent, replied)
+                            logger.info(f"Audio transcription: Context restricted to replied message + recent (kept {len(context)}/{original_context_len} messages)")
                         else:
-                            # No reply, clear context completely
-                            context = []
-                            logger.info("Audio transcription: Context cleared (no reply)")
+                            # No reply, keep last 5 messages for minimal context
+                            original_context_len = len(context)
+                            context = context[-5:] if len(context) > 5 else context
+                            logger.info(f"Audio transcription: Context trimmed to recent messages (kept {len(context)}/{original_context_len} messages)")
                     
                     # Extract files from the message
                     logger.info("=" * 80)
@@ -1153,6 +1322,17 @@ class DiscordBot(discord.Client):
                             logger.info(f"    • {f['name']}")
                     logger.info("=" * 80)
                     
+                    # Load channel personality and user preferences
+                    personality_prompt = None
+                    user_language = None
+                    if hasattr(self, '_channel_settings_service') and self._channel_settings_service:
+                        personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
+                    if hasattr(self, '_user_prefs_service') and self._user_prefs_service:
+                        prefs = self._user_prefs_service.get_preferences(message.author.id)
+                        if prefs.preferred_model:
+                            self.gemini_client.set_model(prefs.preferred_model)
+                        user_language = prefs.preferred_language
+
                     # Get estimated response time and show it to user
                     estimated_time = self.gemini_client.get_estimated_response_time()
                     model_name = self.gemini_client.get_current_model()
@@ -1199,7 +1379,7 @@ class DiscordBot(discord.Client):
                                 
                             import time
                             current_time = time.time()
-                            if current_time - last_edit_time > 1.5 and content:
+                            if current_time - last_edit_time > 3.0 and content:
                                 try:
                                     # Show last 1500 chars to keep it dynamic
                                     display_content = content
@@ -1208,15 +1388,22 @@ class DiscordBot(discord.Client):
                                     
                                     await status_message.edit(content=f"🧠 **Thinking Process:**\n{display_content}")
                                     last_edit_time = current_time
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug(f"Failed to update streaming thinking status message: {e}")
                         else:
                             # If we are in thinking mode but no tag yet, maybe show the raw text if it looks like thinking?
                             # But safer to wait for tag.
                             pass
 
                     api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(enhanced_prompt, context, images=images if images else None, audio_files=audio_files if audio_files else None, on_chunk=on_chunk),
+                        self.gemini_client.generate_response(
+                            enhanced_prompt, context,
+                            images=images if images else None,
+                            audio_files=audio_files if audio_files else None,
+                            on_chunk=on_chunk,
+                            personality_prompt=personality_prompt,
+                            language=user_language,
+                        ),
                         timeout=api_timeout
                     )
                     
@@ -1224,8 +1411,8 @@ class DiscordBot(discord.Client):
                     if status_message:
                         try:
                             await status_message.delete()
-                        except Exception:
-                            pass  # Ignore deletion errors
+                        except Exception as e:
+                            logger.debug(f"Failed to delete status message after response: {e}")
                     
                     duration = time.time() - start_time
                     
@@ -1262,8 +1449,8 @@ class DiscordBot(discord.Client):
                     if status_message:
                         try:
                             await status_message.delete()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Failed to delete status message after timeout: {e}")
                     
                     timeout_used = self.gemini_client.get_timeout_for_current_model()
                     logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
@@ -1319,8 +1506,6 @@ class DiscordBot(discord.Client):
             return
         if not self.token_tracker:
             return
-        if not message.guild:
-            return
 
         username = (
             message.author.display_name
@@ -1330,12 +1515,15 @@ class DiscordBot(discord.Client):
         )
         username = username[:80]  # Avoid storing excessively long names
 
+        guild_id = message.guild.id if message.guild else 0
+        guild_name = message.guild.name if message.guild else "Direct Messages"
+
         try:
             await self.token_tracker.record_usage(
                 user_id=message.author.id,
                 username=username,
-                guild_id=message.guild.id,
-                guild_name=message.guild.name,
+                guild_id=guild_id,
+                guild_name=guild_name,
                 input_tokens=token_usage.input_tokens,
                 output_tokens=token_usage.output_tokens,
                 total_tokens=token_usage.total_tokens,
@@ -1360,24 +1548,26 @@ class DiscordBot(discord.Client):
                 logger.warning("Empty response content generated")
                 await message.reply("I generated a response, but it appears to be empty. Could you try asking differently? 🤔")
                 return
-            
+
+            # Render LaTeX and format tables for Discord
+            rendered = self.content_renderer.process_response(response_content)
+            response_content = rendered.text
+            attachments = rendered.attachments
+            if attachments:
+                logger.info(f"Content renderer produced {len(attachments)} image attachment(s) (LaTeX)")
+
             # Check if response is too long for Discord (2000 character limit)
             if len(response_content) > 2000:
                 logger.info(f"Response too long ({len(response_content)} chars), splitting into multiple messages")
-                sent_message = await self._send_split_response(message, response_content)
+                sent_message = await self._send_split_response(message, response_content, attachments=attachments)
             else:
-                # Send the response as a reply
-                sent_message = await message.reply(response_content)
-                logger.info(f"Successfully sent response to {message.author} in #{message.channel.name}")
+                # Send the response as a reply (with any LaTeX image attachments)
+                sent_message = await message.reply(response_content, files=attachments if attachments else None)
+                logger.info(f"Successfully sent response to {message.author} in #{getattr(message.channel, 'name', 'DM')}")
             
             # Send grounding sources as a separate message if available
             if grounding_sources and len(grounding_sources) > 0:
                 await self._send_grounding_sources(sent_message, grounding_sources)
-            
-            # Check if the response indicates the bot will provide more information
-            if self._should_generate_followup(response_content):
-                logger.info("Response indicates follow-up needed, generating continuation...")
-                await self._generate_and_send_followup(message, sent_message)
             
             return sent_message
             
@@ -1435,47 +1625,46 @@ class DiscordBot(discord.Client):
                 fallback_reaction="⚠️"
             )
     
-    async def _send_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
+    async def _send_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
         """
         Split a long response into multiple messages and send them using intelligent splitting.
-        
+
         Args:
             message: The original Discord message to reply to
             response_content: The long response content to split
-            
+            attachments: Optional list of discord.File attachments (sent with first message)
+
         Returns:
             The first sent message (for reply threading)
         """
         try:
             # Use the intelligent message splitter
             message_parts = self.message_splitter.split_message(response_content)
-            
+
             # Log split statistics
             stats = self.message_splitter.get_split_statistics(message_parts)
             logger.info(f"Message split statistics: {stats}")
-            
+
             # Validate split integrity
             if not self.message_splitter.validate_split_integrity(response_content, message_parts):
                 logger.warning("Split integrity validation failed, falling back to simple split")
                 return await self._send_simple_split_response(message, response_content)
-            
-            # Send the parts
+
+            # Send the parts — first part replies to original, rest are regular messages
             first_message = None
-            last_message = message
-            
+
             for part in message_parts:
-                # Reply to the last message to create a thread
-                sent = await last_message.reply(part.content)
-                
                 if part.part_number == 1:
+                    sent = await message.reply(part.content, files=attachments if attachments else None)
                     first_message = sent
-                last_message = sent
-                
+                else:
+                    sent = await message.channel.send(part.content)
+
                 logger.info(f"Sent message part {part.part_number}/{part.total_parts} ({len(part.content)} chars)")
-            
+
             logger.info(f"Successfully sent response in {len(message_parts)} parts with intelligent splitting")
             return first_message
-            
+
         except Exception as e:
             logger.error(f"Error in intelligent message splitting: {e}", exc_info=True)
             logger.info("Falling back to simple message splitting")
@@ -1492,8 +1681,8 @@ class DiscordBot(discord.Client):
         Returns:
             The first sent message (for reply threading)
         """
-        # Discord limit is 2000 chars, we'll use 1900 to be safe and leave room for continuation indicators
-        max_length = 1900
+        # Use safe split length from config
+        max_length = self.config.safe_split_length
         
         # Split by paragraphs first to avoid breaking mid-sentence
         parts = []
@@ -1528,26 +1717,24 @@ class DiscordBot(discord.Client):
         if current_part.strip():
             parts.append(current_part.strip())
         
-        # Send the parts
+        # Send the parts — first part replies to original, rest are regular messages
         first_message = None
-        last_message = message
-        
+
         for idx, part in enumerate(parts):
             # Add continuation indicator
             if idx > 0:
                 part = f"*(continued...)*\n\n{part}"
             if idx < len(parts) - 1:
                 part = f"{part}\n\n*(continues...)*"
-            
-            # Reply to the last message to create a thread
-            sent = await last_message.reply(part)
-            
+
             if idx == 0:
+                sent = await message.reply(part)
                 first_message = sent
-            last_message = sent
-            
+            else:
+                sent = await message.channel.send(part)
+
             logger.info(f"Sent message part {idx + 1}/{len(parts)}")
-        
+
         logger.info(f"Successfully sent response in {len(parts)} parts using simple splitting")
         return first_message
     
@@ -1592,91 +1779,3 @@ class DiscordBot(discord.Client):
         except Exception as e:
             logger.error(f"Unexpected error sending grounding sources: {e}", exc_info=True)
     
-    def _should_generate_followup(self, response: str) -> bool:
-        """
-        Simple heuristic to detect if bot promised a follow-up.
-        
-        Note: This is a lightweight UX enhancement, NOT a core routing decision.
-        Core routing decisions are made by the AI router model.
-        
-        Args:
-            response: The bot's initial response content
-            
-        Returns:
-            True if a follow-up should be generated
-        """
-        response_lower = response.lower()
-        
-        # Simple keyword check for common "I'll get back to you" phrases
-        # This is just a UX enhancement and doesn't affect routing
-        followup_indicators = [
-            "give me a sec",
-            "let me check",
-            "let me search",
-            "let me look",
-            "one moment",
-            "just a moment",
-            "hold on",
-            "searching for",
-            "looking up",
-            "checking on",
-            "dig up",
-            "find out",
-            "i'll search",
-            "i'll check",
-            "i'll look",
-            "i will search",
-            "i will check",
-            "i will look"
-        ]
-        
-        return any(indicator in response_lower for indicator in followup_indicators)
-    
-    async def _generate_and_send_followup(self, original_message: discord.Message, initial_response: discord.Message):
-        """
-        Generate and send a follow-up response when the initial response indicated more info would come.
-        
-        Args:
-            original_message: The user's original message
-            initial_response: The bot's initial response message
-        """
-        try:
-            # Wait a moment to simulate "working on it"
-            await asyncio.sleep(2)
-            
-            # Show typing indicator
-            async with original_message.channel.typing():
-                # Extract the original user prompt
-                user_prompt = self._extract_user_prompt(original_message)
-                
-                # Create a modified prompt that asks for the actual information
-                followup_prompt = f"Now provide the actual detailed information for: {user_prompt}"
-                
-                # Collect fresh context including the initial response
-                try:
-                    context = await self.context_collector.get_channel_context(original_message.channel)
-                except Exception as e:
-                    logger.error(f"Failed to collect context for follow-up: {e}")
-                    context = []
-                
-                # Generate the follow-up response
-                api_response = await asyncio.wait_for(
-                    self.gemini_client.generate_response(followup_prompt, context),
-                    timeout=self.config.response_timeout + 5
-                )
-                
-                if api_response.success and api_response.content:
-                    # Send as a reply to the initial response
-                    if len(api_response.content) > 2000:
-                        api_response.content = api_response.content[:1997] + "..."
-                    
-                    await initial_response.reply(api_response.content)
-                    logger.info("Successfully sent follow-up response")
-                else:
-                    logger.error(f"Failed to generate follow-up: {api_response.error_type}")
-                    # Don't send an error for follow-up failures, just log them
-                    
-        except asyncio.TimeoutError:
-            logger.error("Follow-up response generation timed out")
-        except Exception as e:
-            logger.error(f"Error generating follow-up response: {e}", exc_info=True)

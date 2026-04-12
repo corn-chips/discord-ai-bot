@@ -42,11 +42,12 @@ class ContextCollector:
         """
         Build message content with attachment metadata for AI context.
 
-        Adds attachment names/types so the model can reference non-text messages.
+        Adds metadata so the model can reference non-text, forwarded, and system messages.
         """
         base_content = (message.content or "").strip()
-        if not message.attachments:
-            return base_content
+        if not base_content:
+            # For system/forwarded messages, Discord may populate system_content but not content.
+            base_content = (getattr(message, "system_content", "") or "").strip()
 
         image_names = []
         other_names = []
@@ -56,14 +57,45 @@ class ContextCollector:
             else:
                 other_names.append(attachment.filename)
 
-        suffix_parts = []
+        suffix_parts = [f"Message type: {getattr(message.type, 'name', str(message.type))}"]
         if image_names:
             suffix_parts.append(f"Attached images: {', '.join(image_names)}")
         if other_names:
             suffix_parts.append(f"Attached files: {', '.join(other_names)}")
 
-        attachment_suffix = f" [{' | '.join(suffix_parts)}]" if suffix_parts else ""
-        return f"{base_content}{attachment_suffix}" if base_content else attachment_suffix.strip()
+        # Include embed/sticker hints for non-text messages.
+        if message.embeds:
+            suffix_parts.append(f"Embeds: {len(message.embeds)}")
+        if message.stickers:
+            sticker_names = [sticker.name for sticker in message.stickers if getattr(sticker, "name", None)]
+            if sticker_names:
+                suffix_parts.append(f"Stickers: {', '.join(sticker_names)}")
+            else:
+                suffix_parts.append(f"Stickers: {len(message.stickers)}")
+
+        # Include forwarded message snapshots so the model can read forwarded context.
+        snapshots = getattr(message, "message_snapshots", None) or []
+        if snapshots:
+            snapshot_summaries = []
+            for idx, snapshot in enumerate(snapshots, start=1):
+                snapshot_text = (getattr(snapshot, "content", "") or "").strip()
+                if snapshot_text:
+                    if len(snapshot_text) > 180:
+                        snapshot_text = f"{snapshot_text[:180]}..."
+                    snapshot_summaries.append(f"Forwarded[{idx}]: {snapshot_text}")
+                else:
+                    snap_attachments = getattr(snapshot, "attachments", None) or []
+                    snap_embeds = getattr(snapshot, "embeds", None) or []
+                    snap_stickers = getattr(snapshot, "stickers", None) or []
+                    snapshot_summaries.append(
+                        f"Forwarded[{idx}] type={getattr(getattr(snapshot, 'type', None), 'name', 'unknown')}, "
+                        f"attachments={len(snap_attachments)}, embeds={len(snap_embeds)}, stickers={len(snap_stickers)}"
+                    )
+            if snapshot_summaries:
+                suffix_parts.extend(snapshot_summaries)
+
+        metadata_suffix = f" [{' | '.join(suffix_parts)}]" if suffix_parts else ""
+        return f"{base_content}{metadata_suffix}" if base_content else metadata_suffix.strip()
 
     def _to_message_context(self, message: discord.Message) -> MessageContext:
         """Convert a Discord message to MessageContext including attachment metadata."""
@@ -117,11 +149,6 @@ class ContextCollector:
                         
                     # Skip ALL bot messages (including our own) to avoid context pollution
                     if message.author.bot:
-                        continue
-                    
-                    # Skip messages with no text content AND no attachments
-                    if (not message.content or not message.content.strip()) and not message.attachments:
-                        self.logger.debug(f"Skipping message {message.id} with no text content or attachments")
                         continue
                     
                     # Convert Discord message to MessageContext
@@ -186,14 +213,10 @@ class ContextCollector:
                 
                 # Add messages before (in chronological order)
                 for msg in reversed(before_messages):
-                    # Skip messages with no text content and no attachments
-                    if (not msg.content or not msg.content.strip()) and not msg.attachments:
-                        continue
                     reply_context.append(self._to_message_context(msg))
                 
-                # Add the replied-to message itself (if it has text content or attachments)
-                if (replied_to_message.content and replied_to_message.content.strip()) or replied_to_message.attachments:
-                    reply_context.append(self._to_message_context(replied_to_message))
+                # Add the replied-to message itself
+                reply_context.append(self._to_message_context(replied_to_message))
                 
                 # Get messages after the replied-to message
                 async for msg in message.channel.history(
@@ -202,9 +225,6 @@ class ContextCollector:
                     oldest_first=True
                 ):
                     if not msg.author.bot and msg.id != message.id:  # Skip bot messages and the original message
-                        # Skip messages with no text content and no attachments
-                        if (not msg.content or not msg.content.strip()) and not msg.attachments:
-                            continue
                         reply_context.append(self._to_message_context(msg))
                 
                 return reply_context

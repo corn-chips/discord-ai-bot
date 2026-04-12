@@ -4,6 +4,10 @@
 .env.*.local
 .claude
 .kiro
+# Virtual environment
+.venv/
+venv/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -60,9 +64,8 @@ cache/
 data/
 !data/.gitkeep
 
-# Docker
+# Misc
 *.pid
-.dockerignore
 
 # Project specific
 bot.log

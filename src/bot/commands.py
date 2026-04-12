@@ -21,6 +21,7 @@ from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
 from ..services.channel_settings_service import ChannelSettingsService
 from ..services.user_preferences_service import UserPreferencesService
+from ..services.pin_service import PinService
 from ..models.data_models import MessageContext
 
 
@@ -1356,6 +1357,94 @@ async def setup_commands(
                                for name, d in config.personalities.items())
         embed.add_field(name="Available Styles", value=all_styles, inline=False)
         await interaction.response.send_message(embed=embed)
+
+    # ── Pin / Memory Commands ─────────────────────────────────────────
+
+    pin_service = PinService(db_path=config.token_db_path)
+    bot._pin_service = pin_service
+
+    class PinDeleteButton(discord.ui.Button):
+        def __init__(self, pin_id: int, display_num: int, channel_id: int):
+            super().__init__(
+                label=f"Delete #{display_num}",
+                style=discord.ButtonStyle.danger,
+            )
+            self.pin_id = pin_id
+            self.display_num = display_num
+            self.channel_id = channel_id
+
+        async def callback(self, interaction: discord.Interaction):
+            deleted = pin_service.delete_pin(self.pin_id, self.channel_id)
+            if deleted:
+                await interaction.response.send_message(
+                    f"Deleted pin #{self.display_num}."
+                )
+            else:
+                await interaction.response.send_message(
+                    f"Pin #{self.display_num} not found or already deleted."
+                )
+
+    class PinDeleteView(discord.ui.View):
+        def __init__(self, channel_pins, channel_id):
+            super().__init__(timeout=120)
+            for i, (pin_id, _content, _author, _pinned_by, _pinned_at) in enumerate(channel_pins[:20], start=1):
+                self.add_item(PinDeleteButton(pin_id, i, channel_id))
+
+    @bot.tree.command(name="pin", description="Pin a memory for the bot to always remember in this channel")
+    @app_commands.describe(memory="The text you want the bot to always remember in this channel")
+    async def pin(interaction: discord.Interaction, memory: str):
+        """Pin a piece of text to the bot's memory for this channel."""
+        guild_id = interaction.guild_id if interaction.guild else None
+        pin_id = pin_service.add_pin(
+            channel_id=interaction.channel_id,
+            content=memory,
+            author_name=interaction.user.display_name,
+            pinned_by=interaction.user.display_name,
+            guild_id=guild_id,
+        )
+
+        if pin_id:
+            preview = memory[:100] + "..." if len(memory) > 100 else memory
+            embed = discord.Embed(
+                title="Pinned to Bot Memory",
+                description=preview,
+                color=discord.Color.gold(),
+            )
+            embed.set_footer(text=f"Pin #{pin_id} | Pinned by {interaction.user.display_name}")
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(
+                "Failed to pin that memory."
+            )
+
+    @bot.tree.command(name="pins", description="List all pinned bot memories for this channel")
+    async def pins(interaction: discord.Interaction):
+        """List pinned messages with delete buttons."""
+        channel_pins = pin_service.get_pins(interaction.channel_id)
+
+        if not channel_pins:
+            await interaction.response.send_message(
+                "No pinned memories in this channel yet.\n"
+                "Use `/pin` to add one.",
+            )
+            return
+
+        embed = discord.Embed(
+            title="Pinned Bot Memories",
+            description=f"{len(channel_pins)} pinned message(s) in this channel",
+            color=discord.Color.gold(),
+        )
+
+        for i, (pin_id, content, author_name, pinned_by, pinned_at) in enumerate(channel_pins, start=1):
+            preview = content[:200] + "..." if len(content) > 200 else content
+            embed.add_field(
+                name=f"#{i} — {author_name}",
+                value=f"{preview}\n*Pinned by {pinned_by}*",
+                inline=False,
+            )
+
+        view = PinDeleteView(channel_pins, interaction.channel_id)
+        await interaction.response.send_message(embed=embed, view=view)
 
     # ── User Preferences Commands ─────────────────────────────────────
 

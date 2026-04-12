@@ -9,7 +9,7 @@ import asyncio
 import io
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import discord
 from PIL import Image
@@ -364,7 +364,7 @@ class DiscordBot(discord.Client):
         # Ignore messages from bots (including ourselves)
         if message.author.bot:
             return
-        
+
         # Check if the bot is mentioned in the message
         if not self.is_bot_mentioned(message):
             return
@@ -662,8 +662,63 @@ class DiscordBot(discord.Client):
             logger.info(f"=" * 80)
         
         return images
+
+    @staticmethod
+    def _create_image_context_entry(
+        source_type: str,
+        source_message: discord.Message,
+        attachment_name: str,
+        attachment_index: int,
+        pdf_page_number: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Create metadata that links an image part back to its source message."""
+        entry = {
+            "source_type": source_type,
+            "source_message_id": source_message.id,
+            "source_timestamp": source_message.created_at.isoformat(),
+            "source_author": source_message.author.display_name,
+            "attachment_name": attachment_name,
+            "attachment_index": attachment_index,
+        }
+        if pdf_page_number is not None:
+            entry["pdf_page_number"] = pdf_page_number
+        return entry
+
+    @staticmethod
+    def _attach_image_order_metadata(
+        image_context: List[Dict[str, Any]],
+        context: List[MessageContext],
+        current_message: discord.Message
+    ) -> List[Dict[str, Any]]:
+        """Annotate image metadata with explicit image and message order labels."""
+        sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
+        context_order_map = {
+            msg.message_id: f"CTX_MSG_{idx:03d}"
+            for idx, msg in enumerate(sorted_context, start=1)
+        }
+        replied_message_id = current_message.reference.message_id if current_message.reference else None
+
+        enriched_entries = []
+        for idx, entry in enumerate(image_context, start=1):
+            enriched = dict(entry)
+            enriched["image_index"] = idx
+
+            source_message_id = enriched.get("source_message_id")
+            if source_message_id in context_order_map:
+                source_order = context_order_map[source_message_id]
+            elif source_message_id == current_message.id:
+                source_order = "CURRENT_USER_MESSAGE"
+            elif replied_message_id and source_message_id == replied_message_id:
+                source_order = "REPLIED_TO_MESSAGE"
+            else:
+                source_order = "NON_CONTEXT_MESSAGE"
+
+            enriched["source_message_order"] = source_order
+            enriched_entries.append(enriched)
+
+        return enriched_entries
     
-    async def _extract_images_from_message(self, message: discord.Message) -> List[Image.Image]:
+    async def _extract_images_from_message(self, message: discord.Message) -> Tuple[List[Image.Image], List[Dict[str, Any]]]:
         """
         Extract and download images from a Discord message.
         Also converts PDF files to images for processing.
@@ -672,12 +727,13 @@ class DiscordBot(discord.Client):
             message: The Discord message to extract images from
             
         Returns:
-            List of PIL Image objects from the message attachments
+            Tuple containing image list and parallel image metadata list
         """
         images = []
+        image_context = []
         
         # Check message attachments for images and PDFs
-        for attachment in message.attachments:
+        for attachment_idx, attachment in enumerate(message.attachments, start=1):
             # Check if attachment is a PDF
             if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
                 try:
@@ -689,7 +745,17 @@ class DiscordBot(discord.Client):
                     pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
                     
                     if pdf_images:
-                        images.extend(pdf_images)
+                        for page_idx, page_image in enumerate(pdf_images, start=1):
+                            images.append(page_image)
+                            image_context.append(
+                                self._create_image_context_entry(
+                                    source_type="current_message",
+                                    source_message=message,
+                                    attachment_name=attachment.filename,
+                                    attachment_index=attachment_idx,
+                                    pdf_page_number=page_idx,
+                                )
+                            )
                         logger.info(f"✅ Added {len(pdf_images)} page(s) from PDF: {attachment.filename}")
                     else:
                         logger.warning(f"⚠️ No pages could be extracted from PDF: {attachment.filename}")
@@ -708,6 +774,14 @@ class DiscordBot(discord.Client):
                     image = self._convert_image_to_rgb(image)
                     
                     images.append(image)
+                    image_context.append(
+                        self._create_image_context_entry(
+                            source_type="current_message",
+                            source_message=message,
+                            attachment_name=attachment.filename,
+                            attachment_index=attachment_idx,
+                        )
+                    )
                     logger.info(f"Loaded image from attachment: {attachment.filename} ({image.size[0]}x{image.size[1]})")
                     
                 except Exception as e:
@@ -717,7 +791,7 @@ class DiscordBot(discord.Client):
         if message.reference and message.reference.resolved:
             replied_message = message.reference.resolved
             if isinstance(replied_message, discord.Message):
-                for attachment in replied_message.attachments:
+                for attachment_idx, attachment in enumerate(replied_message.attachments, start=1):
                     # Check for PDFs in replied message
                     if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
                         try:
@@ -726,7 +800,17 @@ class DiscordBot(discord.Client):
                             pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
                             
                             if pdf_images:
-                                images.extend(pdf_images)
+                                for page_idx, page_image in enumerate(pdf_images, start=1):
+                                    images.append(page_image)
+                                    image_context.append(
+                                        self._create_image_context_entry(
+                                            source_type="replied_message",
+                                            source_message=replied_message,
+                                            attachment_name=attachment.filename,
+                                            attachment_index=attachment_idx,
+                                            pdf_page_number=page_idx,
+                                        )
+                                    )
                                 logger.info(f"✅ Added {len(pdf_images)} page(s) from replied PDF: {attachment.filename}")
                             
                         except Exception as e:
@@ -740,19 +824,27 @@ class DiscordBot(discord.Client):
                             image = self._convert_image_to_rgb(image)
                             
                             images.append(image)
+                            image_context.append(
+                                self._create_image_context_entry(
+                                    source_type="replied_message",
+                                    source_message=replied_message,
+                                    attachment_name=attachment.filename,
+                                    attachment_index=attachment_idx,
+                                )
+                            )
                             logger.info(f"Loaded image from replied message: {attachment.filename} ({image.size[0]}x{image.size[1]})")
                             
                         except Exception as e:
                             logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
         
-        return images
+        return images, image_context
 
     async def _extract_context_images(
         self,
         message: discord.Message,
         context: List[MessageContext],
         exclude_message_ids: Optional[set[int]] = None
-    ) -> List[Image.Image]:
+    ) -> Tuple[List[Image.Image], List[Dict[str, Any]]]:
         """
         Extract recent image attachments from context messages in the same channel.
 
@@ -762,18 +854,19 @@ class DiscordBot(discord.Client):
             exclude_message_ids: Optional message IDs to skip (e.g., current/replied message)
 
         Returns:
-            List of PIL Images from recent context messages
+            Tuple containing context images and parallel metadata entries
         """
         max_context_images = max(0, getattr(self.config, "max_context_images", 6))
         if max_context_images == 0 or not context:
-            return []
+            return [], []
 
         excluded_ids = exclude_message_ids or set()
         context_message_ids = {msg.message_id for msg in context if msg.message_id not in excluded_ids}
         if not context_message_ids:
-            return []
+            return [], []
 
         images = []
+        image_context = []
         history_limit = max(len(context_message_ids) * 2, self.config.max_context_messages * 2)
 
         try:
@@ -783,7 +876,7 @@ class DiscordBot(discord.Client):
                 if ctx_message.id not in context_message_ids:
                     continue
 
-                for attachment in ctx_message.attachments:
+                for attachment_idx, attachment in enumerate(ctx_message.attachments, start=1):
                     if len(images) >= max_context_images:
                         break
                     is_image = (
@@ -797,6 +890,14 @@ class DiscordBot(discord.Client):
                         image = Image.open(io.BytesIO(image_bytes))
                         image = self._convert_image_to_rgb(image)
                         images.append(image)
+                        image_context.append(
+                            self._create_image_context_entry(
+                                source_type="context_message",
+                                source_message=ctx_message,
+                                attachment_name=attachment.filename,
+                                attachment_index=attachment_idx,
+                            )
+                        )
                         logger.info(
                             f"Loaded context image: {attachment.filename} from message {ctx_message.id} "
                             f"({image.size[0]}x{image.size[1]})"
@@ -811,7 +912,7 @@ class DiscordBot(discord.Client):
         except discord.HTTPException as e:
             logger.error(f"Discord API error retrieving context images: {e}")
 
-        return images
+        return images, image_context
     
     async def _extract_audio_from_message(self, message: discord.Message) -> List[Dict[str, Any]]:
         """
@@ -1200,15 +1301,16 @@ class DiscordBot(discord.Client):
                     start_time = time.time()
                     
                     # Extract images from the message
-                    images = await self._extract_images_from_message(message)
+                    images, image_context = await self._extract_images_from_message(message)
 
                     # Also include recent channel images from the collected context
                     exclude_context_ids = {message.id}
                     if message.reference and message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
                         exclude_context_ids.add(message.reference.resolved.id)
-                    context_images = await self._extract_context_images(message, context, exclude_context_ids)
+                    context_images, context_image_context = await self._extract_context_images(message, context, exclude_context_ids)
                     if context_images:
                         images.extend(context_images)
+                        image_context.extend(context_image_context)
                         logger.info(
                             f"✅ Added {len(context_images)} context image(s) from recent channel history "
                             f"(total images sent: {len(images)})"
@@ -1233,6 +1335,10 @@ class DiscordBot(discord.Client):
                             original_context_len = len(context)
                             context = context[-5:] if len(context) > 5 else context
                             logger.info(f"Audio transcription: Context trimmed to recent messages (kept {len(context)}/{original_context_len} messages)")
+
+                    # Recompute image/message ordering against the final context sent to the model
+                    if image_context:
+                        image_context = self._attach_image_order_metadata(image_context, context, message)
                     
                     # Extract files from the message
                     logger.info("=" * 80)
@@ -1399,6 +1505,7 @@ class DiscordBot(discord.Client):
                         self.gemini_client.generate_response(
                             enhanced_prompt, context,
                             images=images if images else None,
+                            image_context=image_context if image_context else None,
                             audio_files=audio_files if audio_files else None,
                             on_chunk=on_chunk,
                             personality_prompt=personality_prompt,

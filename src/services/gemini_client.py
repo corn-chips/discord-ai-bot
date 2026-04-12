@@ -393,7 +393,7 @@ class GeminiClient:
         
         return any(keyword in prompt_lower for keyword in search_keywords)
     
-    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, audio_files: Optional[List[dict]] = None, on_chunk: Optional[callable] = None, model_override: Optional[str] = None, search_override: Optional[bool] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None) -> APIResponse:
+    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, image_context: Optional[List[dict]] = None, audio_files: Optional[List[dict]] = None, on_chunk: Optional[callable] = None, model_override: Optional[str] = None, search_override: Optional[bool] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None) -> APIResponse:
         """
         Generate a response using the Gemini API with retry logic.
         
@@ -401,6 +401,7 @@ class GeminiClient:
             prompt: The user's message/prompt
             context: Optional conversation context for better responses
             images: Optional list of PIL Image objects to include in the request
+            image_context: Optional image metadata aligned to `images` order
             audio_files: Optional list of audio file dicts {'data': bytes, 'mime_type': str}
             on_chunk: Optional async callback for streaming response chunks
             model_override: Optional model name to use for this specific request
@@ -437,9 +438,18 @@ class GeminiClient:
         
         # Build content for API call
         content_parts = []
-        
+
+        # Normalize image metadata to ensure strict alignment with image order
+        normalized_image_context = self._normalize_image_context(images, image_context)
+
         # Add text prompt (with personality and language if provided)
-        formatted_prompt = self.format_prompt(prompt, context, personality_prompt=personality_prompt, language=language)
+        formatted_prompt = self.format_prompt(
+            prompt,
+            context,
+            personality_prompt=personality_prompt,
+            language=language,
+            image_context=normalized_image_context
+        )
         content_parts.append(formatted_prompt)
         
         # Add images - convert PIL Images to bytes for the Gemini SDK
@@ -468,6 +478,18 @@ class GeminiClient:
                 logger.info(f"  Context[{i}]: Author={msg.author}, Length={len(msg.content)} chars, Timestamp={msg.timestamp}")
         else:
             logger.info("No context messages provided")
+
+        if normalized_image_context:
+            logger.info(f"Image context entries provided: {len(normalized_image_context)}")
+            for item in normalized_image_context:
+                logger.info(
+                    "  Image[%s]: source=%s, message_order=%s, message_id=%s, attachment=%s",
+                    item.get("image_index"),
+                    item.get("source_type"),
+                    item.get("source_message_order"),
+                    item.get("source_message_id"),
+                    item.get("attachment_name"),
+                )
         
         # Get dynamic timeout based on current model
         timeout_duration = self.get_timeout_for_current_model()
@@ -995,7 +1017,36 @@ class GeminiClient:
             logger.info("Using MEDIUM COMPLEXITY system prompt")
             return self.config.system_prompt_medium_complexity.rstrip()
     
-    def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None) -> str:
+    @staticmethod
+    def _normalize_image_context(images: Optional[List], image_context: Optional[List[dict]]) -> Optional[List[dict]]:
+        """Ensure image context metadata is 1:1 and in-order with provided images."""
+        if not images:
+            return None
+
+        normalized: List[dict] = []
+        source_context = image_context or []
+
+        if image_context and len(image_context) != len(images):
+            logger.warning(
+                "Image metadata count (%s) does not match image count (%s); filling missing entries.",
+                len(image_context),
+                len(images),
+            )
+
+        for idx in range(len(images)):
+            base = dict(source_context[idx]) if idx < len(source_context) else {}
+            base["image_index"] = idx + 1
+            base.setdefault("source_type", "unknown")
+            base.setdefault("source_message_order", "UNKNOWN")
+            base.setdefault("source_message_id", "unknown")
+            base.setdefault("source_timestamp", "unknown")
+            base.setdefault("attachment_name", f"image_{idx + 1}.png")
+            base.setdefault("attachment_index", 1)
+            normalized.append(base)
+
+        return normalized
+
+    def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None, image_context: Optional[List[dict]] = None) -> str:
         """
         Format the user message and context into an optimal prompt for Gemini API.
 
@@ -1004,6 +1055,7 @@ class GeminiClient:
             context: Optional conversation context
             personality_prompt: Optional personality/tone instruction to prepend
             language: Optional language preference for the response
+            image_context: Optional image metadata aligned to attached image parts
 
         Returns:
             Formatted prompt string for the Gemini API
@@ -1027,26 +1079,54 @@ class GeminiClient:
         # Add language preference if set
         if language and language != "auto":
             prompt_parts.append(f"\n[LANGUAGE INSTRUCTION]: Always respond in {language}.")
-        
+
         # Add conversation context if provided
         if context and len(context) > 0:
-            prompt_parts.append("\n--- Recent Conversation Context ---")
+            prompt_parts.append("\n--- Recent Conversation Context (oldest to newest) ---")
             
             # Sort context by timestamp to ensure chronological order
-            sorted_context = sorted(context, key=lambda msg: msg.timestamp)
+            sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
             
-            for msg in sorted_context:
-                # Format timestamp for readability
-                time_str = msg.timestamp.strftime("%H:%M")
+            for idx, msg in enumerate(sorted_context, start=1):
+                # Include explicit sequence + id for deterministic ordering references
+                time_str = msg.timestamp.isoformat()
                 
                 # Mark replied-to messages for clarity
                 reply_indicator = " (replying)" if msg.is_reply else ""
                 
-                formatted_msg = f"[{time_str}] {msg.author}{reply_indicator}: {msg.content}"
+                formatted_msg = (
+                    f"[CTX_MSG_{idx:03d} | message_id={msg.message_id} | time={time_str}] "
+                    f"{msg.author}{reply_indicator}: {msg.content}"
+                )
                 prompt_parts.append(formatted_msg)
             
             prompt_parts.append("--- End Context ---\n")
-        
+
+        # Add image ordering metadata if images are provided
+        if image_context and len(image_context) > 0:
+            prompt_parts.append("\n--- Image Context Mapping ---")
+            prompt_parts.append(
+                "Images are attached after this text in the exact order listed below. "
+                "Use these mappings to match each image to the correct message context."
+            )
+
+            for item in image_context:
+                image_idx = item.get("image_index", "?")
+                pdf_page = item.get("pdf_page_number")
+                pdf_suffix = f", pdf_page={pdf_page}" if pdf_page else ""
+                prompt_parts.append(
+                    f"[IMG_{image_idx}] "
+                    f"source={item.get('source_type')}, "
+                    f"source_message_order={item.get('source_message_order')}, "
+                    f"source_message_id={item.get('source_message_id')}, "
+                    f"source_time={item.get('source_timestamp')}, "
+                    f"attachment={item.get('attachment_name')}, "
+                    f"attachment_index={item.get('attachment_index')}"
+                    f"{pdf_suffix}"
+                )
+
+            prompt_parts.append("--- End Image Context Mapping ---\n")
+
         # Add the current user message
         prompt_parts.append(f"User: {user_message}")
         

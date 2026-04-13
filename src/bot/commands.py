@@ -22,6 +22,7 @@ from ..services.token_tracker import TokenTracker
 from ..services.channel_settings_service import ChannelSettingsService
 from ..services.user_preferences_service import UserPreferencesService
 from ..services.pin_service import PinService
+from ..services.message_visibility_service import MessageVisibilityService
 from ..models.data_models import MessageContext
 
 
@@ -1362,6 +1363,8 @@ async def setup_commands(
 
     pin_service = PinService(db_path=config.token_db_path)
     bot._pin_service = pin_service
+    message_visibility_service = MessageVisibilityService(db_path=config.token_db_path)
+    bot._message_visibility_service = message_visibility_service
 
     class PinDeleteButton(discord.ui.Button):
         def __init__(self, pin_id: int, display_num: int, channel_id: int):
@@ -1445,6 +1448,143 @@ async def setup_commands(
 
         view = PinDeleteView(channel_pins, interaction.channel_id)
         await interaction.response.send_message(embed=embed, view=view)
+
+    @bot.tree.command(name="hide", description="Replace recent Grok messages in this channel with '.'")
+    async def hide(interaction: discord.Interaction):
+        """Hide recent bot messages in this channel by replacing content with a dot."""
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+        if not interaction.channel:
+            await interaction.followup.send("This command must be run in a channel.", ephemeral=True)
+            return
+
+        hide_limit = 10
+        scan_limit = min(max(hide_limit * 25, 100), max(config.channel_history_limit, hide_limit))
+
+        hidden_count = 0
+        skipped_already_hidden = 0
+        failed_count = 0
+
+        try:
+            async for candidate in interaction.channel.history(limit=scan_limit):
+                if hidden_count >= hide_limit:
+                    break
+                if not bot.user or candidate.author.id != bot.user.id:
+                    continue
+                if not candidate.content:
+                    continue
+                if candidate.content == ".":
+                    skipped_already_hidden += 1
+                    continue
+
+                stored = message_visibility_service.save_hidden_message(
+                    message_id=candidate.id,
+                    channel_id=candidate.channel.id,
+                    original_content=candidate.content,
+                    hidden_by=interaction.user.id,
+                    guild_id=interaction.guild_id,
+                )
+                if not stored:
+                    failed_count += 1
+                    continue
+
+                try:
+                    await candidate.edit(content=".")
+                    hidden_count += 1
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning(f"Failed to hide message {candidate.id}: {exc}")
+                    message_visibility_service.remove_hidden_message(candidate.id)
+                    failed_count += 1
+
+            if hidden_count == 0:
+                await interaction.followup.send(
+                    "No recent visible Grok messages were found to hide in this channel.",
+                    ephemeral=True,
+                )
+                return
+
+            summary = (
+                f"Hidden {hidden_count} message(s) in this channel. "
+                f"Run `/unhide` to restore up to {hide_limit} recent hidden messages."
+            )
+            if skipped_already_hidden > 0 or failed_count > 0:
+                summary += (
+                    f"\nSkipped already hidden: {skipped_already_hidden}. "
+                    f"Failed: {failed_count}."
+                )
+            await interaction.followup.send(summary, ephemeral=True)
+        except Exception as exc:
+            logger.error(f"/hide failed in channel {interaction.channel_id}: {exc}", exc_info=True)
+            await interaction.followup.send(
+                "Failed to hide messages due to an unexpected error. Check logs for details.",
+                ephemeral=True,
+            )
+
+    @bot.tree.command(name="unhide", description="Restore recent Grok messages hidden in this channel")
+    async def unhide(interaction: discord.Interaction):
+        """Restore recent hidden bot messages in this channel."""
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+        if not interaction.channel:
+            await interaction.followup.send("This command must be run in a channel.", ephemeral=True)
+            return
+
+        hide_limit = 10
+        hidden_rows = message_visibility_service.get_recent_hidden_messages(
+            channel_id=interaction.channel.id,
+            limit=hide_limit,
+        )
+
+        if not hidden_rows:
+            await interaction.followup.send(
+                "No hidden Grok messages were found for this channel.",
+                ephemeral=True,
+            )
+            return
+
+        restored_count = 0
+        missing_count = 0
+        failed_count = 0
+
+        try:
+            # Restore oldest first for readability in-channel.
+            for message_id, original_content, _hidden_at in reversed(hidden_rows):
+                try:
+                    target = await interaction.channel.fetch_message(message_id)
+                except discord.NotFound:
+                    message_visibility_service.remove_hidden_message(message_id)
+                    missing_count += 1
+                    continue
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning(f"Failed to fetch hidden message {message_id}: {exc}")
+                    failed_count += 1
+                    continue
+
+                try:
+                    await target.edit(content=original_content)
+                    message_visibility_service.remove_hidden_message(message_id)
+                    restored_count += 1
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning(f"Failed to restore hidden message {message_id}: {exc}")
+                    failed_count += 1
+
+            if restored_count == 0:
+                await interaction.followup.send(
+                    "No hidden messages could be restored.",
+                    ephemeral=True,
+                )
+                return
+
+            summary = f"Restored {restored_count} message(s) in this channel."
+            if missing_count > 0 or failed_count > 0:
+                summary += f"\nMissing/deleted: {missing_count}. Failed: {failed_count}."
+            await interaction.followup.send(summary, ephemeral=True)
+        except Exception as exc:
+            logger.error(f"/unhide failed in channel {interaction.channel_id}: {exc}", exc_info=True)
+            await interaction.followup.send(
+                "Failed to restore messages due to an unexpected error. Check logs for details.",
+                ephemeral=True,
+            )
 
     # ── User Preferences Commands ─────────────────────────────────────
 

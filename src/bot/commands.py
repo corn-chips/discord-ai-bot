@@ -1278,15 +1278,23 @@ async def setup_commands(
                 if len(summary) > safe_len:
                     # Split into chunks
                     chunks = [summary[i:i+safe_len] for i in range(0, len(summary), safe_len)]
-                    
-                    await interaction.followup.send(f"✅ **Conversation Summary** (Part 1/{len(chunks)})")
-                    
-                    # Send first chunk
-                    await interaction.followup.send(chunks[0])
-                    
-                    # Send remaining chunks
-                    for i, chunk in enumerate(chunks[1:], 1):
-                        await interaction.channel.send(f"**(Part {i+1}/{len(chunks)})**\n{chunk}")
+
+                    async def _send_summary_page(**kwargs):
+                        return await interaction.followup.send(wait=True, **kwargs)
+
+                    try:
+                        await bot._send_paginated_embed(
+                            pages=chunks,
+                            sender_user_id=interaction.user.id,
+                            send_page_callable=_send_summary_page,
+                            title="Conversation Summary",
+                        )
+                    except Exception as paginate_error:
+                        logger.warning(f"Falling back to flat summary chunks: {paginate_error}")
+                        await interaction.followup.send(f"\u2705 **Conversation Summary** (Part 1/{len(chunks)})")
+                        await interaction.followup.send(chunks[0])
+                        for i, chunk in enumerate(chunks[1:], 1):
+                            await interaction.channel.send(f"**(Part {i+1}/{len(chunks)})**\n{chunk}")
                 else:
                     await interaction.followup.send(f"✅ **Conversation Summary**\n\n{summary}")
             else:

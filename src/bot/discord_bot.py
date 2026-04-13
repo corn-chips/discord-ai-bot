@@ -8,8 +8,9 @@ message processing, and coordinates with other services to provide AI responses.
 import asyncio
 import io
 import logging
+import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable
 
 import discord
 from PIL import Image
@@ -35,6 +36,88 @@ from .enhanced_command_handler import EnhancedCommandHandler
 
 
 logger = logging.getLogger(__name__)
+
+
+class SplitResponsePaginatorView(discord.ui.View):
+    """Simple paginator for split responses with sender-priority navigation."""
+
+    def __init__(
+        self,
+        pages: List[str],
+        sender_user_id: int,
+        title: str,
+        priority_window_seconds: float = 2.0,
+        timeout: float = 120.0,
+    ):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.sender_user_id = sender_user_id
+        self.title = title
+        self.priority_window_seconds = priority_window_seconds
+        self.current_page_index = 0
+        self.last_sender_click_time: Optional[datetime] = None
+        self._interaction_lock = asyncio.Lock()
+        self.message: Optional[discord.Message] = None
+        self._update_button_states()
+
+    def build_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title=self.title,
+            description=self.pages[self.current_page_index],
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Page {self.current_page_index + 1}/{len(self.pages)}")
+        return embed
+
+    def _update_button_states(self, *, disable_all: bool = False) -> None:
+        self.previous_page.disabled = disable_all or self.current_page_index <= 0
+        self.next_page.disabled = disable_all or self.current_page_index >= len(self.pages) - 1
+
+    def _priority_window_remaining(self) -> float:
+        if self.last_sender_click_time is None:
+            return 0.0
+        elapsed = (datetime.now(timezone.utc) - self.last_sender_click_time).total_seconds()
+        return max(0.0, self.priority_window_seconds - elapsed)
+
+    async def _handle_navigation(self, interaction: discord.Interaction, delta: int) -> None:
+        async with self._interaction_lock:
+            if interaction.user.id != self.sender_user_id:
+                remaining = self._priority_window_remaining()
+                if remaining > 0:
+                    await interaction.response.send_message(
+                        f"The message sender has priority for {remaining:.1f}s.",
+                        ephemeral=True,
+                    )
+                    return
+
+            new_index = self.current_page_index + delta
+            if new_index < 0 or new_index >= len(self.pages):
+                await interaction.response.defer()
+                return
+
+            self.current_page_index = new_index
+            if interaction.user.id == self.sender_user_id:
+                self.last_sender_click_time = datetime.now(timezone.utc)
+
+            self._update_button_states()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="\u2B05\uFE0F", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._handle_navigation(interaction, -1)
+
+    @discord.ui.button(label="\u27A1\uFE0F", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._handle_navigation(interaction, 1)
+
+    async def on_timeout(self) -> None:
+        self._update_button_states(disable_all=True)
+        if not self.message:
+            return
+        try:
+            await self.message.edit(view=self)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
 
 
 class TextRateLimiter:
@@ -1732,6 +1815,45 @@ class DiscordBot(discord.Client):
                 fallback_reaction="⚠️"
             )
     
+    @staticmethod
+    def _clean_split_part_for_embed(content: str) -> str:
+        """Remove continuation markers so embed pages show clean content."""
+        cleaned = re.sub(r'^\*\(continued from part \d+/\d+\)\*\n\n', '', content)
+        cleaned = re.sub(r'\n\n\*\(continues in part \d+/\d+\)\*$', '', cleaned)
+        cleaned = re.sub(r'^\*\(continued\.\.\.\)\*\n\n', '', cleaned)
+        cleaned = re.sub(r'\n\n\*\(continues\.\.\.\)\*$', '', cleaned)
+        cleaned = cleaned.strip()
+        return cleaned if cleaned else content.strip()
+
+    async def _send_paginated_embed(
+        self,
+        pages: List[str],
+        sender_user_id: int,
+        send_page_callable: Callable[..., Awaitable[discord.Message]],
+        *,
+        attachments: Optional[List[discord.File]] = None,
+        title: str = "Response",
+    ) -> discord.Message:
+        """Send split content as a single message embed with arrow navigation."""
+        view = SplitResponsePaginatorView(
+            pages=pages,
+            sender_user_id=sender_user_id,
+            title=title,
+            priority_window_seconds=2.0,
+            timeout=120.0,
+        )
+
+        send_kwargs = {
+            "embed": view.build_embed(),
+            "view": view,
+        }
+        if attachments:
+            send_kwargs["files"] = attachments
+
+        sent_message = await send_page_callable(**send_kwargs)
+        view.message = sent_message
+        return sent_message
+
     async def _send_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
         """
         Split a long response into multiple messages and send them using intelligent splitting.
@@ -1755,29 +1877,33 @@ class DiscordBot(discord.Client):
             # Validate split integrity
             if not self.message_splitter.validate_split_integrity(response_content, message_parts):
                 logger.warning("Split integrity validation failed, falling back to simple split")
-                return await self._send_simple_split_response(message, response_content)
+                return await self._send_simple_split_response(message, response_content, attachments=attachments)
 
             # Send the parts — first part replies to original, rest are regular messages
-            first_message = None
+            if len(message_parts) <= 1:
+                return await message.reply(message_parts[0].content, files=attachments if attachments else None)
 
-            for part in message_parts:
-                if part.part_number == 1:
-                    sent = await message.reply(part.content, files=attachments if attachments else None)
-                    first_message = sent
-                else:
-                    sent = await message.channel.send(part.content)
+            embed_pages = [self._clean_split_part_for_embed(part.content) for part in message_parts]
 
-                logger.info(f"Sent message part {part.part_number}/{part.total_parts} ({len(part.content)} chars)")
+            async def _send_first_page(**kwargs) -> discord.Message:
+                return await message.reply(**kwargs)
 
-            logger.info(f"Successfully sent response in {len(message_parts)} parts with intelligent splitting")
-            return first_message
+            sent_message = await self._send_paginated_embed(
+                pages=embed_pages,
+                sender_user_id=message.author.id,
+                send_page_callable=_send_first_page,
+                attachments=attachments,
+                title="Response",
+            )
+            logger.info(f"Successfully sent response in paginated embed with {len(embed_pages)} pages")
+            return sent_message
 
         except Exception as e:
             logger.error(f"Error in intelligent message splitting: {e}", exc_info=True)
             logger.info("Falling back to simple message splitting")
-            return await self._send_simple_split_response(message, response_content)
+            return await self._send_simple_split_response(message, response_content, attachments=attachments)
     
-    async def _send_simple_split_response(self, message: discord.Message, response_content: str) -> discord.Message:
+    async def _send_simple_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
         """
         Fallback method for simple message splitting when intelligent splitting fails.
         
@@ -1835,7 +1961,7 @@ class DiscordBot(discord.Client):
                 part = f"{part}\n\n*(continues...)*"
 
             if idx == 0:
-                sent = await message.reply(part)
+                sent = await message.reply(part, files=attachments if attachments else None)
                 first_message = sent
             else:
                 sent = await message.channel.send(part)

@@ -104,6 +104,7 @@ class ContextCollector:
             author=message.author.display_name,
             timestamp=message.created_at,
             message_id=message.id,
+            channel_id=message.channel.id,
             is_reply=message.reference is not None,
             replied_to_id=message.reference.message_id if message.reference else None
         )

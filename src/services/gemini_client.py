@@ -9,6 +9,7 @@ import asyncio
 import io
 import logging
 import random
+import re
 from typing import List, Optional
 
 from google import genai
@@ -261,10 +262,8 @@ class GeminiClient:
             return self.set_model("gemini-3-flash-preview")
 
         elif complexity_level == "medium":
-            # Medium complexity implies thinking mode is beneficial
-            # But if we are already in thinking mode, stay there
-            if self._prompt_mode != "thinking":
-                self.set_prompt_mode("thinking")
+            # Keep medium on default Flash behavior; avoid auto-enabling thinking.
+            # Manual /config thinking remains respected.
             return self.set_model("gemini-3-flash-preview")
 
         elif complexity_level == "high":
@@ -376,22 +375,46 @@ class GeminiClient:
         # Check if DeepSearch is forced enabled
         if self._force_search:
             return True
-            
-        prompt_lower = prompt.lower()
-        
+
+        if not prompt:
+            return False
+
+        prompt_lower = re.sub(r"\s+", " ", prompt.lower()).strip()
+
         # Check for URLs
-        if "http://" in prompt_lower or "https://" in prompt_lower or "www." in prompt_lower:
+        if re.search(r"(https?://|www\.)", prompt_lower):
             return True
-        
-        # Check for explicit search keywords
-        search_keywords = [
-            "search", "look up", "lookup", "find online", "google", 
-            "search for", "look for", "check online", "find information",
-            "what's new", "latest", "current", "recent news", "today's",
-            "web search", "internet", "todays", "whats new"
+
+        # Check for explicit search intent
+        explicit_search_patterns = [
+            r"\bsearch\b",
+            r"\bweb search\b",
+            r"\binternet search\b",
+            r"\blook ?up\b",
+            r"\bcheck online\b",
+            r"\bfind online\b",
+            r"\bgoogle\b",
+            r"\bsearch for\b",
         ]
-        
-        return any(keyword in prompt_lower for keyword in search_keywords)
+        if any(re.search(pattern, prompt_lower) for pattern in explicit_search_patterns):
+            return True
+
+        # Check for common live/time-sensitive requests
+        live_data_patterns = [
+            r"\bnews\b",
+            r"\bweather\b",
+            r"\bforecast\b",
+            r"\bstock price\b",
+            r"\bcrypto price\b",
+            r"\bscores?\b",
+            r"\bstandings\b",
+        ]
+        if any(re.search(pattern, prompt_lower) for pattern in live_data_patterns):
+            return True
+
+        recency_signal = re.search(r"\b(latest|newest|most recent|breaking|today(?:'s)?|recent)\b", prompt_lower)
+        recency_topic = re.search(r"\b(news|updates?|events?|prices?|scores?)\b", prompt_lower)
+        return bool(recency_signal and recency_topic)
     
     async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, image_context: Optional[List[dict]] = None, audio_files: Optional[List[dict]] = None, on_chunk: Optional[callable] = None, model_override: Optional[str] = None, search_override: Optional[bool] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None) -> APIResponse:
         """

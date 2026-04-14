@@ -22,6 +22,7 @@ class MessageContext:
     author: str
     timestamp: datetime
     message_id: int
+    channel_id: Optional[int] = None
     is_reply: bool = False
     replied_to_id: Optional[int] = None
 
@@ -32,6 +33,8 @@ class MessageContext:
             raise ValueError("Message author cannot be empty")
         if self.message_id <= 0:
             raise ValueError("Message ID must be positive")
+        if self.channel_id is not None and self.channel_id <= 0:
+            raise ValueError("Channel ID must be positive when provided")
         if self.is_reply and self.replied_to_id is None:
             raise ValueError("Reply messages must have a replied_to_id")
         if not self.is_reply and self.replied_to_id is not None:

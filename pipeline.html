@@ -1,0 +1,760 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Discord AI Bot - Detailed Pipeline</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-alt: #f8fbff;
+      --ink: #142033;
+      --muted: #4b5a70;
+      --line: #d8e0ea;
+      --accent: #0f766e;
+      --accent-soft: #e6fffb;
+      --warn: #9a3412;
+      --warn-soft: #fff7ed;
+      --code: #edf2f8;
+      --shadow: 0 8px 24px rgba(20, 32, 51, 0.06);
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 10% -10%, #d9f8f2 0%, var(--bg) 45%), var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Aptos", "Calibri", "Trebuchet MS", sans-serif;
+      line-height: 1.45;
+    }
+
+    .wrap {
+      width: min(1200px, 94vw);
+      margin: 28px auto 60px;
+    }
+
+    header {
+      background: linear-gradient(130deg, #fefeff 0%, #f1fffd 45%, #ecf7ff 100%);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 26px 26px 22px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.4rem, 3vw, 2.05rem);
+      letter-spacing: 0.01em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      max-width: 92ch;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .toc a {
+      display: block;
+      text-decoration: none;
+      color: #0c4a6e;
+      border: 1px solid #c6d8ea;
+      background: #f3f9ff;
+      border-radius: 10px;
+      padding: 9px 11px;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 14px;
+      scroll-margin-top: 10px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: clamp(1.08rem, 2vw, 1.35rem);
+    }
+
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .grid.cols-2 {
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .grid.cols-3 {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 12px;
+      background: var(--surface-alt);
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 0.78rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #b9d4cc;
+      background: var(--accent-soft);
+      color: #0f5132;
+      margin-bottom: 7px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+    }
+
+    .tag.warn {
+      border-color: #f3c39c;
+      background: var(--warn-soft);
+      color: #7c2d12;
+    }
+
+    .diagram {
+      margin: 10px 0;
+      padding: 12px;
+      border-radius: 11px;
+      border: 1px solid #cfd9e7;
+      background: #f7faff;
+      color: #1d2d44;
+      font-family: "Consolas", "Cascadia Mono", "Courier New", monospace;
+      font-size: 0.9rem;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    code, pre.inline-code {
+      font-family: "Consolas", "Cascadia Mono", "Courier New", monospace;
+    }
+
+    code {
+      background: var(--code);
+      border: 1px solid #dde6f2;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-size: 0.92em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 0.93rem;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      padding: 9px 10px;
+    }
+
+    th {
+      background: #eef5fb;
+      font-size: 0.86rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: #334155;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-top: 8px;
+      background: #fbfdff;
+      padding: 0 10px 10px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 700;
+      padding: 10px 0;
+      color: #1e3a5f;
+    }
+
+    .note {
+      padding: 10px 12px;
+      border: 1px solid #f2c59f;
+      background: #fffaf5;
+      border-radius: 10px;
+      color: #7c2d12;
+      margin-top: 8px;
+      font-size: 0.92rem;
+    }
+
+    .small {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .mono-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      font-family: "Consolas", "Cascadia Mono", "Courier New", monospace;
+      font-size: 0.88rem;
+    }
+
+    footer {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+
+    @media (max-width: 820px) {
+      .wrap {
+        width: min(1200px, 96vw);
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      th, td {
+        padding: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Discord AI Bot - Detailed Runtime Pipeline</h1>
+      <p class="subtitle">
+        End-to-end pipeline documentation traced from the current codebase. This page maps startup, message ingress,
+        intent routing, multimodal extraction, Gemini calls, response rendering, slash command flows, queue workers,
+        and SQLite state.
+      </p>
+      <p class="meta">Source snapshot date: 2026-04-14</p>
+    </header>
+
+    <nav class="toc">
+      <a href="#overview">1. System Overview</a>
+      <a href="#startup">2. Startup Pipeline</a>
+      <a href="#message-flow">3. Mention Message Flow</a>
+      <a href="#router">4. Intent Router</a>
+      <a href="#multimodal">5. Multimodal Ingestion</a>
+      <a href="#prompt">6. Prompt Assembly</a>
+      <a href="#gemini">7. Gemini Execution</a>
+      <a href="#response">8. Response Delivery</a>
+      <a href="#image-jobs">9. Image Job Queue</a>
+      <a href="#commands">10. Slash Command Flows</a>
+      <a href="#state">11. Persistence Model</a>
+      <a href="#edges">12. Edge Cases + Gotchas</a>
+    </nav>
+
+    <section id="overview" class="panel">
+      <h2>1) System Overview</h2>
+      <div class="grid cols-3">
+        <article class="card">
+          <div class="tag">Ingress</div>
+          <h3>Discord Gateway</h3>
+          <p>Events enter through <code>on_ready</code>, <code>on_message</code>, and slash command handlers on the bot command tree.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Core Runtime</div>
+          <h3>DiscordBot</h3>
+          <p>Coordinates context collection, multimodal extraction, model routing, Gemini calls, rendering, and send/retry behavior.</p>
+        </article>
+        <article class="card">
+          <div class="tag">LLM Layer</div>
+          <h3>GeminiClient</h3>
+          <p>Formats prompt envelopes, toggles search, applies safety configs, streams or non-streams responses, and normalizes finish reasons.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Image Layer</div>
+          <h3>ImageProcessingService</h3>
+          <p>Queue + worker model for image edit/generate jobs backed by <code>NanoBananaClient</code> and user/global rate controls.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Post Processing</div>
+          <h3>Render + Split</h3>
+          <p>LaTeX/table rendering with attachment generation, plus intelligent splitting and embed paginator for long outputs.</p>
+        </article>
+        <article class="card">
+          <div class="tag">State</div>
+          <h3>SQLite Services</h3>
+          <p>Token usage, channel personality, user preferences, pins, and hidden-message restoration all share one DB file path.</p>
+        </article>
+      </div>
+
+      <details>
+        <summary>Files traced for this documentation</summary>
+        <ul class="mono-list">
+          <li>main.py</li>
+          <li>src/bot/discord_bot.py</li>
+          <li>src/bot/enhanced_command_handler.py</li>
+          <li>src/bot/commands.py</li>
+          <li>src/services/context_collector.py</li>
+          <li>src/services/gemini_client.py</li>
+          <li>src/services/content_renderer.py</li>
+          <li>src/services/message_splitter.py</li>
+          <li>src/services/image_processing_service.py</li>
+          <li>src/services/nano_banana_client.py</li>
+          <li>src/services/token_tracker.py</li>
+          <li>src/services/channel_settings_service.py</li>
+          <li>src/services/user_preferences_service.py</li>
+          <li>src/services/pin_service.py</li>
+          <li>src/services/message_visibility_service.py</li>
+          <li>src/config.py + config.yaml</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="startup" class="panel">
+      <h2>2) Startup Pipeline</h2>
+      <pre class="diagram">main.py
+  -> load .env
+  -> load_and_validate_config() + setup_logging()
+  -> validate_startup_connectivity()
+  -> DiscordBot(config)
+       -> ContextCollector
+       -> GeminiClient
+       -> MessageSplitter
+       -> ContentRenderer
+       -> UserExperienceService
+       -> TokenTracker (optional)
+       -> ImageProcessingService (optional, if API key)
+       -> EnhancedCommandHandler (optional, requires image service)
+  -> bot.start(discord_token)
+
+on_ready()
+  -> start image workers (if enabled)
+  -> setup slash commands
+  -> tree.sync() global commands
+  -> set bot presence</pre>
+
+      <div class="grid cols-2">
+        <article class="card">
+          <h3>Configuration Load Order</h3>
+          <p><code>.env</code> supplies secrets; <code>config.yaml</code> supplies operational settings. Validation exits hard on missing critical keys.</p>
+        </article>
+        <article class="card">
+          <h3>Conditional Services</h3>
+          <p>Image services and enhanced command router are only initialized when image config is available and starts cleanly.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="message-flow" class="panel">
+      <h2>3) Mention Message Flow (Primary Runtime Path)</h2>
+      <pre class="diagram">Discord message create
+  -> ignore if author.bot
+  -> pass if is_bot_mentioned(message) OR DM channel
+  -> per-user text rate limiter (minute/hour)
+  -> EnhancedCommandHandler.handle_message() [if enabled]
+       -> handled? yes: stop
+       -> handled? no: set model by router complexity
+  -> extract user prompt (remove bot mention, @everyone, @here)
+  -> if empty prompt: reply "no message found" and stop
+  -> collect context (reply-aware)
+  -> generate_and_send_response()
+       -> ingest images/pdf/audio/files
+       -> build enhanced prompt
+       -> personality + user preferences
+       -> GeminiClient.generate_response()
+       -> render/split/send response
+       -> send grounding sources (if present)
+       -> persist token usage</pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>What It Does</th>
+            <th>Important Branches</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Ingress Gate</td>
+            <td>Accepts DM messages automatically; in guild channels requires mention, reply-to-bot, or mentioned role on bot member.</td>
+            <td>Explicitly ignores <code>@everyone</code>/<code>@here</code> as trigger sources.</td>
+          </tr>
+          <tr>
+            <td>Text Rate Limit</td>
+            <td>Per-user limiter tracks rolling 1-minute and 1-hour windows.</td>
+            <td>Returns user-facing retry messages with computed wait time.</td>
+          </tr>
+          <tr>
+            <td>Router Pass</td>
+            <td>Classifies intent + complexity when enhanced handler is active.</td>
+            <td>If intent handled (image edit/generate), text pipeline exits early.</td>
+          </tr>
+          <tr>
+            <td>Context Build</td>
+            <td>Uses complexity tier to choose context window and merges reply-context + channel-context with dedup.</td>
+            <td>For image generation intent fallback, context is forced minimal.</td>
+          </tr>
+          <tr>
+            <td>Generation Phase</td>
+            <td>Collects multimodal payloads, builds prompt envelope, and calls Gemini with timeout wrapper.</td>
+            <td>Unsupported files are reported to channel as informational note.</td>
+          </tr>
+          <tr>
+            <td>Delivery Phase</td>
+            <td>Post-processes content, splits if needed, replies to original message, and appends sources when grounded.</td>
+            <td>Long responses become paginated embeds with sender-priority navigation.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="router" class="panel">
+      <h2>4) Enhanced Intent Router (When Image Service Is Enabled)</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="tag">Router Model</div>
+          <p><code>gemini-2.5-flash-lite</code> classifies each mentioned message into:</p>
+          <p><code>image_generate</code>, <code>image_edit</code>, or <code>text</code> plus complexity <code>low|medium|high</code>.</p>
+          <p>Decision cache key is normalized message text + <code>has_images</code>, with LRU size and TTL from config.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Routing Outcomes</div>
+          <table>
+            <thead>
+              <tr><th>Intent</th><th>Path</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>image_generate</code></td><td>Runs generation flow if enabled. If images are attached, defers to edit flow.</td></tr>
+              <tr><td><code>image_edit</code></td><td>Requires image attachment; otherwise sends upload guidance embed.</td></tr>
+              <tr><td><code>text</code></td><td>Falls through to standard mention pipeline.</td></tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+
+      <details>
+        <summary>Model complexity mapping used for text flow</summary>
+        <table>
+          <thead>
+            <tr><th>Complexity</th><th>Model</th><th>Mode</th><th>Context Window (config)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>low</td><td><code>gemini-3-flash-preview</code></td><td>short (unless manually set thinking)</td><td><code>context_messages_low</code></td></tr>
+            <tr><td>medium</td><td><code>gemini-3-flash-preview</code></td><td>short</td><td><code>context_messages_medium</code></td></tr>
+            <tr><td>high</td><td><code>gemini-3.1-pro-preview</code> (fallback flash + thinking)</td><td>extended</td><td><code>context_messages_high</code></td></tr>
+          </tbody>
+        </table>
+      </details>
+    </section>
+
+    <section id="multimodal" class="panel">
+      <h2>5) Multimodal Ingestion Pipeline</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <h3>Images + PDFs</h3>
+          <p>Image sources are gathered from:</p>
+          <p>1) current message attachments, 2) replied message attachments, 3) recent context messages (bounded).</p>
+          <p>PDF attachments are rendered page-by-page to images (PyMuPDF), capped by <code>max_pdf_pages</code>.</p>
+          <p>Every image receives metadata linking image order to source message id/time/attachment index.</p>
+        </article>
+        <article class="card">
+          <h3>Audio + Text Files</h3>
+          <p>Audio is extracted from current/replied attachments using content-type, voice-message flags, and extension fallback mapping.</p>
+          <p>Text files are loaded from current/replied attachments if extension/type is supported and size is below <code>max_text_file_size_bytes</code>.</p>
+          <p>Decode attempts: <code>utf-8</code>, <code>latin-1</code>, <code>cp1252</code>, <code>ascii</code>.</p>
+        </article>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Input Class</th><th>Accepted</th><th>Rejected / Routed Elsewhere</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Image Attachment</td><td>Loaded as PIL image and converted to RGB</td><td>-</td></tr>
+          <tr><td>PDF Attachment</td><td>Converted to image pages</td><td>Not treated as text-file content</td></tr>
+          <tr><td>Audio Attachment</td><td>Bytes + MIME packed for model</td><td>Non-audio attachments skipped</td></tr>
+          <tr><td>Text Attachment</td><td>Decoded and injected into prompt block</td><td>Oversize/unsupported/encoding-failed files listed to user</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="prompt" class="panel">
+      <h2>6) Prompt Assembly and Context Envelope</h2>
+      <pre class="diagram">Final prompt assembly order (GeminiClient.format_prompt):
+  1) System instruction (low/medium/high + optional thinking addon)
+  2) [TONE INSTRUCTION] from channel personality (if set)
+  3) [LANGUAGE INSTRUCTION] from user preference (if not auto)
+  4) Chronological context block with stable labels: CTX_MSG_###
+  5) Image context mapping block: IMG_# -> source message mapping
+  6) Current user message
+  7) "Grok:" response cue</pre>
+
+      <div class="grid cols-2">
+        <article class="card">
+          <h3>File Prompt Augmentation</h3>
+          <p>If text files were uploaded, file contents are prepended in a structured section with filename, size, and fenced content.</p>
+          <p>If no user text exists and files are present, an auto-generated analysis prompt is used.</p>
+        </article>
+        <article class="card">
+          <h3>Audio and Image Defaults</h3>
+          <p>Audio-only payloads get a verbatim-transcription default prompt. Image-only default prompt exists in generation stage.</p>
+          <p class="small">Note: early empty-prompt guard in <code>on_message</code> can stop some no-text mention paths before this stage.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="gemini" class="panel">
+      <h2>7) Gemini Execution Engine</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="tag">Request Build</div>
+          <p>Search usage is decided by explicit override or heuristic scan (URLs, search terms, and live-data terms).</p>
+          <p>When search is enabled and content is multimodal, implementation currently falls back to text-only content for compatibility.</p>
+          <p>Safety settings, temperature/top-p/top-k, and max output tokens are loaded from config by complexity tier.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Retry + Finish Logic</div>
+          <p>Each call supports retry loop with timeout handling and exponential backoff (plus retry-after hints from error manager).</p>
+          <p>Finish reason normalization drives response branching: <code>STOP</code>, <code>MAX_TOKENS</code>, <code>SAFETY</code>, <code>RECITATION</code>, other.</p>
+          <p>Successful responses add model header; search-enabled calls also add grounding marker and source extraction.</p>
+        </article>
+      </div>
+
+      <details>
+        <summary>Gemini call state machine</summary>
+        <pre class="diagram">for attempt in [0..max_retries]
+  call _generate_response_async() within timeout
+    if stream callback configured -> accumulate chunks
+  if response missing -> empty_response
+  if finish_reason == STOP -> success
+  if finish_reason == MAX_TOKENS + text -> success + truncated note
+  if finish_reason == SAFETY -> safety_filter error
+  if finish_reason == RECITATION -> recitation error
+  else -> unknown_finish_reason error
+
+on timeout:
+  retry until attempts exhausted, then timeout error
+on exception:
+  ErrorManager classifies + may retry (with retry_after/backoff)</pre>
+      </details>
+
+      <div class="note">
+        User model preference can override router-selected model before the final Gemini call.
+      </div>
+    </section>
+
+    <section id="response" class="panel">
+      <h2>8) Response Rendering and Delivery</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <h3>Post-processing</h3>
+          <p><code>ContentRenderer.process_response()</code> runs before sending:</p>
+          <p>- wraps raw LaTeX patterns, renders complex equations into one PNG attachment,</p>
+          <p>- converts markdown tables into fixed-width code blocks for Discord readability.</p>
+        </article>
+        <article class="card">
+          <h3>Delivery Strategy</h3>
+          <p>If output length <= 2000 chars: direct reply.</p>
+          <p>If > 2000 chars: intelligent split + paginated embed view with left/right buttons and sender-priority window.</p>
+          <p>Grounding links (up to 10) are sent as a follow-up reply message to the bot response.</p>
+        </article>
+      </div>
+
+      <pre class="diagram">_send_response_safely()
+  -> validate non-empty content
+  -> render LaTeX/tables (may produce image attachments)
+  -> split or direct reply
+  -> optional sources reply
+  -> map Discord exceptions to user-friendly fallback messages</pre>
+    </section>
+
+    <section id="image-jobs" class="panel">
+      <h2>9) Image Job Queue Pipeline</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="tag">Entry Points</div>
+          <p>1) Mention router path (<code>EnhancedCommandHandler</code>) for natural-language edit/generate.</p>
+          <p>2) Slash command path (<code>/edit-image</code>) for explicit attachment + instruction.</p>
+        </article>
+        <article class="card">
+          <div class="tag">Queue Core</div>
+          <p><code>ImageProcessingService</code> validates request, enforces per-user hourly limits, enqueues jobs, and processes via worker tasks under a semaphore.</p>
+        </article>
+      </div>
+
+      <pre class="diagram">submit image edit
+  -> validate image + instruction
+  -> user rate-limit check (per hour)
+  -> create ProcessingJob + enqueue
+  -> worker picks job (bounded concurrency)
+       -> validate image bytes
+       -> NanoBananaClient.edit_image(...)
+       -> update status/progress/result
+       -> signal completion_event
+  -> caller waits (mention path) or polls (slash path)
+  -> send edited/generated image or error message</pre>
+
+      <table>
+        <thead>
+          <tr><th>Control</th><th>Where</th><th>Behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Global image request pacing</td><td>NanoBananaClient</td><td>Tracks request timestamps per minute and delays when at cap.</td></tr>
+          <tr><td>User image rate limit</td><td>ImageProcessingService</td><td>Rejects after configured requests/hour with reset guidance.</td></tr>
+          <tr><td>Job cleanup</td><td>ImageProcessingService</td><td>Periodic cleanup task prunes old completed jobs.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="commands" class="panel">
+      <h2>10) Slash Command Flows</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Command Group</th>
+            <th>Examples</th>
+            <th>Pipeline Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Health + Discovery</td>
+            <td><code>/ping</code>, <code>/features</code></td>
+            <td>Fast status/report embeds with no LLM call.</td>
+          </tr>
+          <tr>
+            <td>Runtime Config</td>
+            <td><code>/config model</code>, <code>/config thinking</code>, <code>/config deepsearch</code>, <code>/config image-generation</code>, <code>/config debug</code>, <code>/config info</code></td>
+            <td>Mutates live bot behavior: model, prompt mode, search forcing, image generation toggle, and debug level.</td>
+          </tr>
+          <tr>
+            <td>Ops Metrics</td>
+            <td><code>/stats</code>, <code>/api-usage</code>, <code>/usage-report</code>, <code>/token-leaderboard</code></td>
+            <td>Reads performance logger + token tracker + queue status and returns formatted metrics or attached reports.</td>
+          </tr>
+          <tr>
+            <td>Research</td>
+            <td><code>/deepresearch</code></td>
+            <td>Two-stage chain: Flash+Search collection -> Pro synthesis using Jinja template -> Markdown file output.</td>
+          </tr>
+          <tr>
+            <td>Conversation Utility</td>
+            <td><code>/summarize</code></td>
+            <td>Builds channel context window (gap cutoff), calls Gemini summarize prompt, paginates if long.</td>
+          </tr>
+          <tr>
+            <td>Image Queue Commands</td>
+            <td><code>/edit-image</code>, <code>/image-queue</code></td>
+            <td>Direct queue submission/polling and queue metrics introspection.</td>
+          </tr>
+          <tr>
+            <td>Channel Persona</td>
+            <td><code>/personality</code>, <code>/personality-info</code></td>
+            <td>Persists per-channel personality prompt used on future mention responses.</td>
+          </tr>
+          <tr>
+            <td>Memory + Visibility</td>
+            <td><code>/pin</code>, <code>/pins</code>, <code>/hide</code>, <code>/unhide</code></td>
+            <td>Stores persistent notes and hidden-message originals in SQLite; hide/unhide edits bot message content in-channel.</td>
+          </tr>
+          <tr>
+            <td>User Preferences</td>
+            <td><code>/preferences model</code>, <code>/preferences language</code>, <code>/preferences show</code>, <code>/preferences clear</code></td>
+            <td>Persists per-user model/language and applies on message generation path.</td>
+          </tr>
+          <tr>
+            <td>Admin Utility</td>
+            <td><code>/clear-cache</code>, <code>/dev</code></td>
+            <td>Resets in-memory metrics cache and toggles developer-mode error verbosity flag.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="state" class="panel">
+      <h2>11) Persistence Model (SQLite)</h2>
+      <p>Default DB path: <code>data/token_usage.db</code>. Multiple services share this file with separate tables.</p>
+      <table>
+        <thead>
+          <tr><th>Table</th><th>Producer</th><th>Used By</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>token_usage</code></td><td>DiscordBot + EnhancedCommandHandler</td><td><code>/token-leaderboard</code>, metrics views</td><td>Per-request input/output/total token accounting.</td></tr>
+          <tr><td><code>channel_settings</code></td><td><code>/personality</code></td><td>Mention generation path</td><td>Per-channel personality tone prompt.</td></tr>
+          <tr><td><code>user_preferences</code></td><td><code>/preferences *</code></td><td>Mention generation path</td><td>Per-user preferred model/language.</td></tr>
+          <tr><td><code>pinned_messages</code></td><td><code>/pin</code>, <code>/pins</code></td><td>Command surfaces</td><td>Pinned channel memory records.</td></tr>
+          <tr><td><code>hidden_messages</code></td><td><code>/hide</code></td><td><code>/unhide</code></td><td>Stores original bot message content for restoration.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="edges" class="panel">
+      <h2>12) Edge Cases and Current Gotchas</h2>
+      <div class="grid cols-2">
+        <article class="card">
+          <div class="tag warn">Behavior Note</div>
+          <p>Pinned-memory service has a prompt formatter (<code>get_pins_for_prompt</code>) but mention pipeline does not currently inject it into Gemini prompts.</p>
+        </article>
+        <article class="card">
+          <div class="tag warn">Behavior Note</div>
+          <p>When online search is active with multimodal input, request payload is reduced to text-only in Gemini async call path.</p>
+        </article>
+        <article class="card">
+          <div class="tag warn">Behavior Note</div>
+          <p>Empty user prompt is rejected early in <code>on_message</code>, which can prevent no-text mention scenarios from reaching default image/audio prompt logic.</p>
+        </article>
+        <article class="card">
+          <div class="tag warn">Behavior Note</div>
+          <p>Router complexity selection can be overridden later by user preferred model, changing final model from initial complexity decision.</p>
+        </article>
+      </div>
+
+      <details>
+        <summary>Failure handling matrix</summary>
+        <table>
+          <thead>
+            <tr><th>Failure Point</th><th>Handling</th><th>User Impact</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Discord permission/API errors</td><td>ErrorManager + contextual fallback responses</td><td>Readable failure message, no crash.</td></tr>
+            <tr><td>Gemini timeout or retryable API failure</td><td>Retry loop + backoff/retry-after logic</td><td>May recover automatically, else timeout error.</td></tr>
+            <tr><td>Image worker/job failure</td><td>Job marked failed with error_message and completion event set</td><td>Caller receives explicit failure result.</td></tr>
+            <tr><td>Content rendering failure (LaTeX image)</td><td>Falls back to inline/code representation</td><td>Response still sent without hard failure.</td></tr>
+            <tr><td>Intelligent split validation failure</td><td>Fallback to simple splitter</td><td>Message still delivered in multiple parts.</td></tr>
+          </tbody>
+        </table>
+      </details>
+    </section>
+
+    <footer>
+      Detailed pipeline document generated from current code paths.
+    </footer>
+  </div>
+</body>
+</html>

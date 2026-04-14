@@ -9,8 +9,9 @@ import asyncio
 import io
 import logging
 import re
+from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable
+from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable, Deque
 
 import discord
 from PIL import Image
@@ -262,6 +263,15 @@ class DiscordBot(discord.Client):
         
         # Set up command tree for slash commands
         self.tree = discord.app_commands.CommandTree(self)
+
+        # Live mode (channel-isolated, mention-free) runtime state
+        self._live_model_name = "gemini-2.5-flash-lite"
+        self._live_cooldown_seconds = 2.0
+        self._live_turn_window = 6  # 6 turns => up to 12 rolling messages (user+assistant)
+        self._live_channel_tasks: Dict[int, asyncio.Task] = {}
+        self._live_latest_pending_message: Dict[int, discord.Message] = {}
+        self._live_channel_locks: Dict[int, asyncio.Lock] = {}
+        self._live_channel_context: Dict[int, Deque[MessageContext]] = {}
         
         logger.info("DiscordBot initialized with configuration")
     
@@ -431,9 +441,200 @@ class DiscordBot(discord.Client):
                 logger.error(f"Error cleaning up user experience service: {e}")
         
         # Call parent close method
+        live_tasks = [task for task in self._live_channel_tasks.values() if not task.done()]
+        if live_tasks:
+            for task in live_tasks:
+                task.cancel()
+            await asyncio.gather(*live_tasks, return_exceptions=True)
+            logger.info("Live channel workers stopped")
+
         await super().close()
         logger.info("✅ Bot shutdown complete")
     
+    def _get_live_channel_lock(self, channel_id: int) -> asyncio.Lock:
+        """Get or create a per-channel lock for live-mode state changes."""
+        lock = self._live_channel_locks.get(channel_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._live_channel_locks[channel_id] = lock
+        return lock
+
+    def _get_live_context_buffer(self, channel_id: int) -> Deque[MessageContext]:
+        """Get or create the rolling in-memory context buffer for a live channel."""
+        buffer = self._live_channel_context.get(channel_id)
+        if buffer is None:
+            buffer = deque(maxlen=self._live_turn_window * 2)
+            self._live_channel_context[channel_id] = buffer
+        return buffer
+
+    def _is_live_mode_enabled(self, channel_id: int) -> bool:
+        """Return whether mention-free live mode is enabled for this channel."""
+        if not hasattr(self, "_channel_settings_service") or not self._channel_settings_service:
+            return False
+        try:
+            return self._channel_settings_service.get_live_enabled(channel_id)
+        except Exception as exc:
+            logger.error(f"Failed to resolve live mode for channel {channel_id}: {exc}")
+            return False
+
+    async def _enqueue_live_message(self, message: discord.Message):
+        """Enqueue a live-mode message, coalescing to newest-only while busy."""
+        channel_id = message.channel.id
+        lock = self._get_live_channel_lock(channel_id)
+        async with lock:
+            self._live_latest_pending_message[channel_id] = message
+            task = self._live_channel_tasks.get(channel_id)
+            if task and not task.done():
+                return
+
+            self._live_channel_tasks[channel_id] = asyncio.create_task(
+                self._run_live_channel_worker(channel_id),
+                name=f"live-worker-{channel_id}",
+            )
+
+    async def _run_live_channel_worker(self, channel_id: int):
+        """Process live-mode messages serially with post-response cooldown."""
+        lock = self._get_live_channel_lock(channel_id)
+        try:
+            while True:
+                if not self._is_live_mode_enabled(channel_id):
+                    async with lock:
+                        self._live_latest_pending_message.pop(channel_id, None)
+                    break
+
+                async with lock:
+                    message = self._live_latest_pending_message.pop(channel_id, None)
+
+                if message is None:
+                    break
+
+                try:
+                    await self._process_live_message(message)
+                except Exception as exc:
+                    logger.error(
+                        f"Live worker error in channel {channel_id} for message {message.id}: {exc}",
+                        exc_info=True,
+                    )
+
+                if not self._is_live_mode_enabled(channel_id):
+                    async with lock:
+                        self._live_latest_pending_message.pop(channel_id, None)
+                    break
+
+                await asyncio.sleep(self._live_cooldown_seconds)
+        finally:
+            async with lock:
+                self._live_channel_tasks.pop(channel_id, None)
+                has_pending = channel_id in self._live_latest_pending_message
+                if has_pending and self._is_live_mode_enabled(channel_id):
+                    self._live_channel_tasks[channel_id] = asyncio.create_task(
+                        self._run_live_channel_worker(channel_id),
+                        name=f"live-worker-{channel_id}",
+                    )
+
+    def _append_live_context_entry(
+        self,
+        channel_id: int,
+        content: str,
+        author: str,
+        message_id: int,
+        timestamp: datetime,
+        is_reply: bool = False,
+        replied_to_id: Optional[int] = None,
+    ):
+        """Append a single message entry to the in-memory live rolling context."""
+        cleaned = (content or "").strip()
+        if not cleaned:
+            return
+        if len(cleaned) > 1200:
+            cleaned = cleaned[:1200] + "..."
+
+        self._get_live_context_buffer(channel_id).append(
+            MessageContext(
+                content=cleaned,
+                author=author,
+                timestamp=timestamp,
+                message_id=message_id,
+                channel_id=channel_id,
+                is_reply=is_reply,
+                replied_to_id=replied_to_id,
+            )
+        )
+
+    async def _process_live_message(self, message: discord.Message):
+        """Fast-path processing for mention-free live mode in a single channel."""
+        channel_id = message.channel.id
+
+        is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(message.author.id)
+        if not is_allowed:
+            await message.reply(rate_limit_message)
+            return
+
+        has_attachments = bool(message.attachments)
+        user_prompt = self._extract_user_prompt(message)
+
+        # Attachment-heavy requests fall back to the full pipeline, still with live model overrides.
+        if has_attachments:
+            await self._process_message_with_context(
+                message,
+                user_prompt,
+                complexity_level="low",
+                routed_intent="live_mode",
+                model_override=self._live_model_name,
+                prompt_mode_override="short",
+                search_override=False,
+                show_status_message=False,
+                skip_context_media=False,
+                apply_user_preferences=False,
+            )
+            return
+
+        if not user_prompt:
+            return
+
+        rolling_context = list(self._get_live_context_buffer(channel_id))
+        personality_prompt = None
+        if hasattr(self, "_channel_settings_service") and self._channel_settings_service:
+            personality_prompt = self._channel_settings_service.get_personality_prompt(channel_id)
+
+        api_response = await self.gemini_client.generate_response(
+            user_prompt,
+            rolling_context,
+            model_override=self._live_model_name,
+            prompt_mode_override="short",
+            search_override=False,
+            personality_prompt=personality_prompt,
+            language=None,
+        )
+
+        if not api_response.success:
+            await self._handle_response_error(message, api_response)
+            return
+
+        await self._record_token_usage(message, api_response.token_usage)
+        sent_message = await self._send_response_safely(message, api_response.content, api_response.grounding_sources)
+
+        self._append_live_context_entry(
+            channel_id=channel_id,
+            content=user_prompt,
+            author=message.author.display_name,
+            message_id=message.id,
+            timestamp=message.created_at,
+            is_reply=message.reference is not None,
+            replied_to_id=message.reference.message_id if message.reference else None,
+        )
+
+        if sent_message:
+            self._append_live_context_entry(
+                channel_id=channel_id,
+                content=api_response.content,
+                author=self.user.display_name if self.user else "Grok",
+                message_id=sent_message.id,
+                timestamp=datetime.now(timezone.utc),
+                is_reply=True,
+                replied_to_id=message.id,
+            )
+
     async def on_message(self, message: discord.Message):
         """
         Event handler for processing Discord messages.
@@ -446,6 +647,11 @@ class DiscordBot(discord.Client):
         """
         # Ignore messages from bots (including ourselves)
         if message.author.bot:
+            return
+
+        # Live mode bypasses mention requirements in opted-in channels.
+        if message.guild and self._is_live_mode_enabled(message.channel.id):
+            await self._enqueue_live_message(message)
             return
 
         # Check if the bot is mentioned in the message
@@ -547,6 +753,13 @@ class DiscordBot(discord.Client):
         user_prompt: str,
         complexity_level: str = "low",
         routed_intent: str = "unknown",
+        *,
+        model_override: Optional[str] = None,
+        prompt_mode_override: Optional[str] = None,
+        search_override: Optional[bool] = None,
+        show_status_message: bool = True,
+        skip_context_media: bool = False,
+        apply_user_preferences: bool = True,
     ):
         """
         Process a message with full context collection and response generation.
@@ -626,7 +839,17 @@ class DiscordBot(discord.Client):
                 combined_context = []
 
             # Generate AI response using Gemini API with collected or filtered context
-            await self._generate_and_send_response(message, user_prompt, combined_context)
+            await self._generate_and_send_response(
+                message,
+                user_prompt,
+                combined_context,
+                model_override=model_override,
+                prompt_mode_override=prompt_mode_override,
+                search_override=search_override,
+                show_status_message=show_status_message,
+                skip_context_media=skip_context_media,
+                apply_user_preferences=apply_user_preferences,
+            )
             
         except discord.Forbidden as e:
             error_context = self.error_manager.create_error_context(
@@ -1360,7 +1583,19 @@ class DiscordBot(discord.Client):
         # Send error response
         await self.error_manager.send_error_response(message, error_context)
     
-    async def _generate_and_send_response(self, message: discord.Message, user_prompt: str, context: List):
+    async def _generate_and_send_response(
+        self,
+        message: discord.Message,
+        user_prompt: str,
+        context: List,
+        *,
+        model_override: Optional[str] = None,
+        prompt_mode_override: Optional[str] = None,
+        search_override: Optional[bool] = None,
+        show_status_message: bool = True,
+        skip_context_media: bool = False,
+        apply_user_preferences: bool = True,
+    ):
         """
         Generate AI response and send it to Discord with comprehensive error handling.
         
@@ -1384,13 +1619,23 @@ class DiscordBot(discord.Client):
                     start_time = time.time()
                     
                     # Extract images from the message
-                    images, image_context = await self._extract_images_from_message(message)
+                    if skip_context_media:
+                        images, image_context = [], []
+                    else:
+                        images, image_context = await self._extract_images_from_message(message)
 
                     # Also include recent channel images from the collected context
                     exclude_context_ids = {message.id}
                     if message.reference and message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
                         exclude_context_ids.add(message.reference.resolved.id)
-                    context_images, context_image_context = await self._extract_context_images(message, context, exclude_context_ids)
+                    if skip_context_media:
+                        context_images, context_image_context = [], []
+                    else:
+                        context_images, context_image_context = await self._extract_context_images(
+                            message,
+                            context,
+                            exclude_context_ids,
+                        )
                     if context_images:
                         images.extend(context_images)
                         image_context.extend(context_image_context)
@@ -1516,28 +1761,32 @@ class DiscordBot(discord.Client):
                     user_language = None
                     if hasattr(self, '_channel_settings_service') and self._channel_settings_service:
                         personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
-                    if hasattr(self, '_user_prefs_service') and self._user_prefs_service:
+                    if apply_user_preferences and hasattr(self, '_user_prefs_service') and self._user_prefs_service:
                         prefs = self._user_prefs_service.get_preferences(message.author.id)
-                        if prefs.preferred_model:
+                        if prefs.preferred_model and model_override is None:
                             self.gemini_client.set_model(prefs.preferred_model)
                         user_language = prefs.preferred_language
 
                     # Get estimated response time and show it to user
                     estimated_time = self.gemini_client.get_estimated_response_time()
-                    model_name = self.gemini_client.get_current_model()
+                    model_name = model_override or self.gemini_client.get_current_model()
                     
                     # Send status message by default so users get immediate feedback
                     status_message = None
-                    try:
-                        status_message = await message.reply(
+                    if show_status_message:
+                        try:
+                            status_message = await message.reply(
                             f"⏳ Processing your request with {model_name}...\n"
                             f"*Estimated time: {estimated_time}*"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to send status message: {e}")
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send status message: {e}")
                     
                     # Use dynamic timeout based on model complexity
-                    api_timeout = self.gemini_client.get_timeout_for_current_model() + 10  # Add buffer
+                    api_timeout = self.gemini_client.get_timeout_for_model(
+                        model_override or self.gemini_client.get_current_model(),
+                        prompt_mode_override,
+                    ) + 10  # Add buffer
                     
                     # Setup streaming callback for thinking mode
                     accumulated_text = ""
@@ -1590,6 +1839,9 @@ class DiscordBot(discord.Client):
                             image_context=image_context if image_context else None,
                             audio_files=audio_files if audio_files else None,
                             on_chunk=on_chunk,
+                            model_override=model_override,
+                            prompt_mode_override=prompt_mode_override,
+                            search_override=search_override,
                             personality_prompt=personality_prompt,
                             language=user_language,
                         ),
@@ -1641,7 +1893,10 @@ class DiscordBot(discord.Client):
                         except Exception as e:
                             logger.debug(f"Failed to delete status message after timeout: {e}")
                     
-                    timeout_used = self.gemini_client.get_timeout_for_current_model()
+                    timeout_used = self.gemini_client.get_timeout_for_model(
+                        model_override or self.gemini_client.get_current_model(),
+                        prompt_mode_override,
+                    )
                     logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
                     timeout_response = APIResponse(
                         success=False,

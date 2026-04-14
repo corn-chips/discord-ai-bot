@@ -1367,6 +1367,43 @@ async def setup_commands(
         embed.add_field(name="Available Styles", value=all_styles, inline=False)
         await interaction.response.send_message(embed=embed)
 
+    @bot.tree.command(name="live", description="Toggle mention-free live mode for this channel")
+    @app_commands.describe(enabled="Optional explicit setting (on/off). Leave empty to toggle.")
+    async def live(interaction: discord.Interaction, enabled: Optional[bool] = None):
+        """Enable/disable channel-isolated mention-free live mode."""
+        channel_id = interaction.channel_id
+        if channel_id is None:
+            await interaction.response.send_message(
+                "This command must be used inside a channel.",
+                ephemeral=True,
+            )
+            return
+
+        current_state = channel_settings_service.get_live_enabled(channel_id)
+        new_state = (not current_state) if enabled is None else enabled
+
+        success = channel_settings_service.set_live_enabled(channel_id, new_state)
+        if not success:
+            await interaction.response.send_message(
+                "Failed to update live mode for this channel.",
+                ephemeral=True,
+            )
+            return
+
+        state_label = "ON" if new_state else "OFF"
+        mode_desc = (
+            "Mention-free responses are enabled in this channel."
+            if new_state
+            else "Mention-free responses are disabled. Bot now requires mention/reply behavior."
+        )
+        embed = discord.Embed(
+            title=f"Live Mode: {state_label}",
+            description=mode_desc,
+            color=discord.Color.green() if new_state else discord.Color.light_grey(),
+        )
+        embed.set_footer(text="Live mode is isolated to this channel only.")
+        await interaction.response.send_message(embed=embed)
+
     # ── Pin / Memory Commands ─────────────────────────────────────────
 
     pin_service = PinService(db_path=config.token_db_path)

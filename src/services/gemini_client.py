@@ -221,11 +221,14 @@ class GeminiClient:
         Returns:
             Timeout in seconds
         """
-        # Pro model or thinking mode requires much longer timeout
-        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
+        return self.get_timeout_for_model(self._current_model_name, self._prompt_mode)
+
+    def get_timeout_for_model(self, model_name: str, prompt_mode: Optional[str] = None) -> int:
+        """Get timeout for an explicit model/prompt mode without mutating runtime state."""
+        mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
+        if model_name == "gemini-3.1-pro-preview" or mode == "thinking":
             return self.config.extended_timeout
-        else:
-            return self.config.response_timeout
+        return self.config.response_timeout
     
     def get_estimated_response_time(self) -> str:
         """
@@ -294,17 +297,23 @@ class GeminiClient:
             return self.config.max_output_tokens_medium
         return self.config.max_output_tokens_low
     
-    def _get_model_display_name(self) -> str:
+    def _get_model_display_name(
+        self,
+        model_name: Optional[str] = None,
+        prompt_mode: Optional[str] = None,
+    ) -> str:
         """
         Get a user-friendly display name for the current model and mode.
         
         Returns:
             Display name string (e.g., "Gemini 2.5 Flash", "Gemini 2.5 Flash + Thinking")
         """
-        display_name = self.config.model_display_names.get(self._current_model_name, self._current_model_name)
+        effective_model_name = model_name or self._current_model_name
+        effective_prompt_mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
+        display_name = self.config.model_display_names.get(effective_model_name, effective_model_name)
         
         # Add thinking mode indicator if enabled
-        if self._prompt_mode == "thinking":
+        if effective_prompt_mode == "thinking":
             display_name += " + Extended Thinking"
         
         return display_name
@@ -416,7 +425,20 @@ class GeminiClient:
         recency_topic = re.search(r"\b(news|updates?|events?|prices?|scores?)\b", prompt_lower)
         return bool(recency_signal and recency_topic)
     
-    async def generate_response(self, prompt: str, context: Optional[List[MessageContext]] = None, images: Optional[List] = None, image_context: Optional[List[dict]] = None, audio_files: Optional[List[dict]] = None, on_chunk: Optional[callable] = None, model_override: Optional[str] = None, search_override: Optional[bool] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None) -> APIResponse:
+    async def generate_response(
+        self,
+        prompt: str,
+        context: Optional[List[MessageContext]] = None,
+        images: Optional[List] = None,
+        image_context: Optional[List[dict]] = None,
+        audio_files: Optional[List[dict]] = None,
+        on_chunk: Optional[callable] = None,
+        model_override: Optional[str] = None,
+        prompt_mode_override: Optional[str] = None,
+        search_override: Optional[bool] = None,
+        personality_prompt: Optional[str] = None,
+        language: Optional[str] = None,
+    ) -> APIResponse:
         """
         Generate a response using the Gemini API with retry logic.
         
@@ -428,6 +450,7 @@ class GeminiClient:
             audio_files: Optional list of audio file dicts {'data': bytes, 'mime_type': str}
             on_chunk: Optional async callback for streaming response chunks
             model_override: Optional model name to use for this specific request
+            prompt_mode_override: Optional prompt mode ("short" or "thinking") for this request
             search_override: Optional boolean to force enable/disable search for this request
             
         Returns:
@@ -441,13 +464,19 @@ class GeminiClient:
                 content="Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable."
             )
         
-        # Use override model or current model
+        # Use request overrides without mutating global runtime state
         target_model = model_override if model_override else self._current_model_name
+        target_prompt_mode = (
+            prompt_mode_override
+            if prompt_mode_override in {"short", "thinking"}
+            else self._prompt_mode
+        )
         
         # Log API call initiation
         logger.info("=" * 80)
         logger.info("API CALL INITIATED")
         logger.info(f"Model: {target_model}")
+        logger.info(f"Prompt mode: {target_prompt_mode}")
         logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
         
         # Determine if Google Search should be used
@@ -471,7 +500,9 @@ class GeminiClient:
             context,
             personality_prompt=personality_prompt,
             language=language,
-            image_context=normalized_image_context
+            image_context=normalized_image_context,
+            model_override=target_model,
+            prompt_mode_override=target_prompt_mode,
         )
         content_parts.append(formatted_prompt)
         
@@ -514,13 +545,13 @@ class GeminiClient:
                     item.get("attachment_name"),
                 )
         
-        # Get dynamic timeout based on current model
-        timeout_duration = self.get_timeout_for_current_model()
+        # Get dynamic timeout based on effective request model/mode
+        timeout_duration = self.get_timeout_for_model(target_model, target_prompt_mode)
         # Adjust timeout if using Pro model via override
         if target_model == "gemini-3.1-pro-preview":
             timeout_duration = max(timeout_duration, 120)
             
-        logger.info(f"Using timeout: {timeout_duration}s for model {target_model} (mode: {self._prompt_mode})")
+        logger.info(f"Using timeout: {timeout_duration}s for model {target_model} (mode: {target_prompt_mode})")
         
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -598,7 +629,10 @@ class GeminiClient:
                             response_text = response_text_content.strip()
                             
                             # Add model information header
-                            model_info = self._get_model_display_name()
+                            model_info = self._get_model_display_name(
+                                model_name=target_model,
+                                prompt_mode=target_prompt_mode,
+                            )
                             model_header = f"🤖 *[Model: {model_info}]*"
                             
                             if use_search:
@@ -607,7 +641,11 @@ class GeminiClient:
                                 response_text = f"{model_header}\n\n{response_text}"
                             
                             # Auto-revert thinking mode to short after single use
-                            if self._prompt_mode == "thinking" and self._thinking_single_use:
+                            if (
+                                prompt_mode_override is None
+                                and self._prompt_mode == "thinking"
+                                and self._thinking_single_use
+                            ):
                                 logger.info("Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)")
                                 self._prompt_mode = "short"
                             
@@ -641,7 +679,10 @@ class GeminiClient:
                             response_text = response_text_content.strip()
                             
                             # Add model information header
-                            model_info = self._get_model_display_name()
+                            model_info = self._get_model_display_name(
+                                model_name=target_model,
+                                prompt_mode=target_prompt_mode,
+                            )
                             model_header = f"🤖 *[Model: {model_info}]*"
                             
                             if use_search:
@@ -653,7 +694,11 @@ class GeminiClient:
                             response_text += "\n\n*[Note: Response was very long and may have been truncated. You can ask for specific parts or a summary.]*"
                             
                             # Auto-revert thinking mode to short after single use
-                            if self._prompt_mode == "thinking" and self._thinking_single_use:
+                            if (
+                                prompt_mode_override is None
+                                and self._prompt_mode == "thinking"
+                                and self._thinking_single_use
+                            ):
                                 logger.info("Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)")
                                 self._prompt_mode = "short"
                             
@@ -1015,24 +1060,31 @@ class GeminiClient:
         }
         return finish_reasons.get(normalized, f"UNKNOWN({finish_reason})")
     
-    def _get_system_instruction(self) -> str:
+    def _get_system_instruction(
+        self,
+        model_name: Optional[str] = None,
+        prompt_mode: Optional[str] = None,
+    ) -> str:
         """
         Get the appropriate system instruction based on current model and mode.
         
         Returns:
             System instruction string tailored to the model complexity
         """
+        effective_model_name = model_name or self._current_model_name
+        effective_prompt_mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
+
         # Determine which system prompt to use based on model and thinking mode
-        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
+        if effective_model_name == "gemini-3.1-pro-preview" or effective_prompt_mode == "thinking":
             logger.info("Using HIGH COMPLEXITY system prompt")
 
             thinking_instruction = ""
-            if self._prompt_mode == "thinking":
+            if effective_prompt_mode == "thinking":
                 thinking_instruction = "\n" + self.config.system_prompt_thinking_addon
 
             return self.config.system_prompt_high_complexity.rstrip() + thinking_instruction
 
-        elif self._current_model_name in ["gemini-3-flash-preview"]:
+        elif effective_model_name in ["gemini-3-flash-preview"]:
             logger.info("Using LOW COMPLEXITY system prompt")
             return self.config.system_prompt_low_complexity.rstrip()
 
@@ -1069,7 +1121,16 @@ class GeminiClient:
 
         return normalized
 
-    def format_prompt(self, user_message: str, context: Optional[List[MessageContext]] = None, personality_prompt: Optional[str] = None, language: Optional[str] = None, image_context: Optional[List[dict]] = None) -> str:
+    def format_prompt(
+        self,
+        user_message: str,
+        context: Optional[List[MessageContext]] = None,
+        personality_prompt: Optional[str] = None,
+        language: Optional[str] = None,
+        image_context: Optional[List[dict]] = None,
+        model_override: Optional[str] = None,
+        prompt_mode_override: Optional[str] = None,
+    ) -> str:
         """
         Format the user message and context into an optimal prompt for Gemini API.
 
@@ -1079,6 +1140,8 @@ class GeminiClient:
             personality_prompt: Optional personality/tone instruction to prepend
             language: Optional language preference for the response
             image_context: Optional image metadata aligned to attached image parts
+            model_override: Optional model name for request-scoped formatting
+            prompt_mode_override: Optional prompt mode for request-scoped formatting
 
         Returns:
             Formatted prompt string for the Gemini API
@@ -1087,11 +1150,23 @@ class GeminiClient:
         logger.debug(f"User message length: {len(user_message)} characters")
         logger.debug(f"Context messages: {len(context) if context else 0}")
 
+        effective_model_name = model_override or self._current_model_name
+        effective_prompt_mode = (
+            prompt_mode_override if prompt_mode_override in {"short", "thinking"} else self._prompt_mode
+        )
+
         prompt_parts = []
 
         # Add system instruction based on the current model and mode
-        system_instruction = self._get_system_instruction()
-        logger.debug(f"Using system instruction for model: {self._current_model_name}, mode: {self._prompt_mode}")
+        system_instruction = self._get_system_instruction(
+            model_name=effective_model_name,
+            prompt_mode=effective_prompt_mode,
+        )
+        logger.debug(
+            "Using system instruction for model: %s, mode: %s",
+            effective_model_name,
+            effective_prompt_mode,
+        )
         prompt_parts.append(system_instruction)
 
         # Add personality/tone instruction if set
@@ -1154,7 +1229,7 @@ class GeminiClient:
         prompt_parts.append(f"User: {user_message}")
         
         # Reinforce thinking mode if enabled
-        if self._prompt_mode == "thinking":
+        if effective_prompt_mode == "thinking":
             prompt_parts.append("\nIMPORTANT: You are in THINKING MODE. You MUST start your response with a <thinking> block containing your step-by-step reasoning, followed by </thinking>, and then your final answer.")
             
         prompt_parts.append("\nGrok:")

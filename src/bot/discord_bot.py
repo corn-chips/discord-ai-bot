@@ -1526,16 +1526,15 @@ class DiscordBot(discord.Client):
                     estimated_time = self.gemini_client.get_estimated_response_time()
                     model_name = self.gemini_client.get_current_model()
                     
-                    # Send status message for longer processing times
+                    # Send status message by default so users get immediate feedback
                     status_message = None
-                    if self.gemini_client.get_timeout_for_current_model() > 30:
-                        try:
-                            status_message = await message.reply(
-                                f"⏳ Processing your request with {model_name}...\n"
-                                f"*Estimated time: {estimated_time}*"
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to send status message: {e}")
+                    try:
+                        status_message = await message.reply(
+                            f"⏳ Processing your request with {model_name}...\n"
+                            f"*Estimated time: {estimated_time}*"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send status message: {e}")
                     
                     # Use dynamic timeout based on model complexity
                     api_timeout = self.gemini_client.get_timeout_for_current_model() + 10  # Add buffer

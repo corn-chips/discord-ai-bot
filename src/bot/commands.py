@@ -89,7 +89,7 @@ async def setup_commands(
                 embed.add_field(name="New Model", value=model_name.value, inline=True)
                 embed.add_field(
                     name="Model Info", 
-                    value=_get_model_description(model_name.value), 
+                    value=_get_model_description(model_name.value, config), 
                     inline=False
                 )
                 
@@ -105,25 +105,33 @@ async def setup_commands(
                 f"❌ Error: {str(e)}"
             )
 
-    @config_group.command(name="thinking", description="Toggle Thinking Mode (Chain of Thought)")
-    @app_commands.describe(enabled="Enable or disable Thinking Mode")
-    async def thinking(interaction: discord.Interaction, enabled: bool):
-        """Toggle Thinking Mode for deeper reasoning."""
-        mode = "thinking" if enabled else "short"
-        success = gemini_client.set_prompt_mode(mode)
-        
+    @config_group.command(name="thinking", description="Set API thinking level for responses")
+    @app_commands.describe(level="Thinking level to use (default follows model_complexity in config.yaml)")
+    @app_commands.choices(level=[
+        app_commands.Choice(name="Default (Use config.yaml)", value="default"),
+        app_commands.Choice(name="Minimal", value="minimal"),
+        app_commands.Choice(name="Low", value="low"),
+        app_commands.Choice(name="Medium", value="medium"),
+        app_commands.Choice(name="High", value="high"),
+    ])
+    async def thinking(interaction: discord.Interaction, level: app_commands.Choice[str]):
+        """Set runtime thinking level using Gemini API native thinking config."""
+        success = gemini_client.set_thinking_level(level.value)
+
         if success:
-            status = "✅ Enabled" if enabled else "❌ Disabled"
-            description = "Bot will now show its thought process before answering." if enabled else "Bot will respond directly without showing thoughts."
-            
+            display_level = level.value.capitalize()
+            description = (
+                "Runtime thinking level override updated. "
+                "Use `Default` to return to complexity-configured levels from config.yaml."
+            )
             embed = discord.Embed(
-                title=f"🧠 Thinking Mode {status}",
+                title=f"🧠 Thinking Level: {display_level}",
                 description=description,
-                color=discord.Color.purple() if enabled else discord.Color.light_grey()
+                color=discord.Color.purple() if level.value in {"medium", "high"} else discord.Color.blue()
             )
             await interaction.response.send_message(embed=embed)
         else:
-            await interaction.response.send_message("Failed to set thinking mode.", ephemeral=True)
+            await interaction.response.send_message("Failed to set thinking level.", ephemeral=True)
 
     @config_group.command(name="deepsearch", description="Toggle DeepSearch (Force Google Search)")
     @app_commands.describe(enabled="Enable or disable DeepSearch")
@@ -248,11 +256,11 @@ async def setup_commands(
             
             # Current model
             current_model = gemini_client.get_current_model()
-            current_prompt_mode = gemini_client.get_prompt_mode()
+            current_thinking_level = gemini_client.get_thinking_level()
             embed.add_field(
                 name="⚙️ Configuration",
                 value=f"**Model:** {current_model}\n"
-                      f"**Prompt Mode:** {current_prompt_mode.capitalize()}\n"
+                      f"**Thinking Level:** {current_thinking_level.capitalize()}\n"
                       f"**Max Context:** {config.max_context_messages} messages\n"
                       f"**Timeout:** {config.response_timeout}s",
                 inline=False
@@ -354,20 +362,20 @@ async def setup_commands(
         
         # Model settings
         current_model = gemini_client.get_current_model()
-        current_prompt_mode = gemini_client.get_prompt_mode()
+        current_thinking_level = gemini_client.get_thinking_level()
         embed.add_field(
             name="🤖 AI Model",
             value=f"**Current Model:** {current_model}\n"
-                  f"**Description:** {_get_model_description(current_model)}",
+                  f"**Description:** {_get_model_description(current_model, config)}",
             inline=False
         )
         
-        # Prompt mode settings
-        mode_emoji = "🧠" if current_prompt_mode == "thinking" else "✨"
-        mode_desc = "Detailed analysis" if current_prompt_mode == "thinking" else "Concise responses"
+        # Thinking level settings
+        mode_emoji = "🧠" if current_thinking_level in {"medium", "high"} else "✨"
+        mode_desc = ("Deeper reasoning via Gemini API thinking config" if current_thinking_level in {"medium", "high"} else "Faster responses with lower thinking depth")
         embed.add_field(
-            name="💭 Response Mode",
-            value=f"{mode_emoji} **{current_prompt_mode.capitalize()} Mode**\n{mode_desc}",
+            name="💭 Thinking Level",
+            value=f"{mode_emoji} **{current_thinking_level.capitalize()}**\n{mode_desc}",
             inline=False
         )
         
@@ -847,12 +855,15 @@ async def setup_commands(
             
             # Current Model Configuration
             current_model = gemini_client.get_current_model()
-            current_prompt_mode = gemini_client.get_prompt_mode()
+            current_thinking_level = gemini_client.get_thinking_level()
+            configured_image_model = config.nano_banana_model
+            if getattr(bot, "image_processing_service", None) and getattr(bot.image_processing_service, "client", None):
+                configured_image_model = bot.image_processing_service.client.model_name
             embed.add_field(
                 name="⚙️ Current Configuration",
                 value=f"**Text Model:** `{current_model}`\n"
-                      f"**Prompt Mode:** {current_prompt_mode.capitalize()}\n"
-                      f"**Image Model:** `gemini-2.0-flash-exp-image-generation`",
+                      f"**Thinking Level:** {current_thinking_level.capitalize()}\n"
+                      f"**Image Model:** `{configured_image_model}`",
                 inline=False
             )
             
@@ -998,7 +1009,7 @@ async def setup_commands(
             md_lines.append(f"- Guilds: {len(bot.guilds)}")
             md_lines.append(f"- Latency: {round(bot.latency * 1000)}ms")
             md_lines.append(f"- Text Model: `{gemini_client.get_current_model()}`")
-            md_lines.append(f"- Prompt Mode: {gemini_client.get_prompt_mode().capitalize()}")
+            md_lines.append(f"- Thinking Level: {gemini_client.get_thinking_level().capitalize()}")
             md_lines.append("")
             md_lines.append("## API Usage")
             md_lines.append(f"- API Calls: {metrics.get('api_calls', 0)}")
@@ -1136,6 +1147,15 @@ async def setup_commands(
         await interaction.response.defer(thinking=True)
         
         try:
+            research_complexity = "medium"
+            synthesis_complexity = "high"
+            research_cfg = config.model_complexity.get(research_complexity, {})
+            synthesis_cfg = config.model_complexity.get(synthesis_complexity, {})
+            research_model = str(research_cfg.get("model", gemini_client.get_current_model()))
+            research_thinking = str(research_cfg.get("thinking_level", "default"))
+            synthesis_model = str(synthesis_cfg.get("model", gemini_client.get_current_model()))
+            synthesis_thinking = str(synthesis_cfg.get("thinking_level", "default"))
+
             # Step 1: Research Phase (Flash + Search)
             await interaction.followup.send(f"🔍 **Starting Deep Research on:** *{topic}*\nStep 1/2: Gathering information...")
             
@@ -1143,7 +1163,9 @@ async def setup_commands(
             
             research_response = await gemini_client.generate_response(
                 prompt=research_prompt,
-                model_override="gemini-3-flash-preview",
+                model_override=research_model,
+                complexity_override=research_complexity,
+                thinking_level_override=research_thinking,
                 search_override=True
             )
             
@@ -1186,7 +1208,9 @@ async def setup_commands(
             # Generate final report using Pro model
             report_response = await gemini_client.generate_response(
                 prompt=final_prompt,
-                model_override="gemini-3.1-pro-preview",
+                model_override=synthesis_model,
+                complexity_override=synthesis_complexity,
+                thinking_level_override=synthesis_thinking,
                 search_override=False # We already searched
             )
             
@@ -1715,14 +1739,14 @@ async def setup_commands(
     bot.tree.add_command(prefs_group)
 
 
-def _get_model_description(model_name: str) -> str:
+def _get_model_description(model_name: str, config: BotConfig) -> str:
     """Get description for a specific model."""
-    descriptions = {
-        "gemini-3-flash-preview": "🌟 Latest Flash 3 model. Best overall performance with advanced features and optimal speed.",
-        "gemini-2.5-flash-lite": "⚡ Ultra-fast lightweight variant. Optimized for routing and maximum speed with minimal latency.",
-        "gemini-3.1-pro-preview": "🧠 Advanced Pro model. Deep reasoning and analysis for complex tasks.",
-    }
-    return descriptions.get(model_name, "Standard Gemini Flash model")
+    configured_description = config.model_descriptions.get(model_name)
+    if configured_description:
+        return configured_description
+
+    display_name = config.model_display_names.get(model_name, model_name)
+    return f"Configured model: {display_name}"
 
 
 def _format_timedelta(td: timedelta) -> str:
@@ -1742,3 +1766,4 @@ def _format_timedelta(td: timedelta) -> str:
         parts.append(f"{seconds}s")
     
     return " ".join(parts)
+

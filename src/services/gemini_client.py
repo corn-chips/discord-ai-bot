@@ -46,8 +46,7 @@ class GeminiClient:
         self.client = None
         self._current_model_name = config.default_model
         self._current_complexity_level = "low"
-        self._prompt_mode = "short"  # Default to short mode, can be "short" or "thinking"
-        self._thinking_single_use = False  # Changed to False for persistent mode via command
+        self._thinking_level_override: Optional[str] = None
         self._force_search = False  # Force search on/off
         self._configure_api()
         
@@ -86,28 +85,86 @@ class GeminiClient:
         """Get the name of the currently active model."""
         return self._current_model_name
     
-    def get_prompt_mode(self) -> str:
-        """Get the current prompt mode (short or thinking)."""
-        return self._prompt_mode
-    
-    def set_prompt_mode(self, mode: str) -> bool:
+    @staticmethod
+    def _normalize_thinking_level(level: Optional[str]) -> str:
+        """Normalize configured/runtime thinking level labels."""
+        normalized = (level or "default").strip().lower()
+        alias_map = {
+            "none": "default",
+            "inherit": "default",
+            "disabled": "off",
+        }
+        return alias_map.get(normalized, normalized)
+
+    def _get_model_complexity_entry(self, complexity_level: Optional[str] = None) -> dict:
+        """Return normalized model/thinking mapping for a complexity tier."""
+        level = complexity_level or self._current_complexity_level
+        if level not in {"low", "medium", "high"}:
+            level = "low"
+
+        raw_entry = self.config.model_complexity.get(level, {})
+        if not isinstance(raw_entry, dict):
+            raw_entry = {}
+
+        model_name = str(raw_entry.get("model", self.config.default_model))
+        thinking_level = self._normalize_thinking_level(str(raw_entry.get("thinking_level", "default")))
+
+        return {
+            "model": model_name,
+            "thinking_level": thinking_level,
+        }
+
+    def get_thinking_level(self, model_name: Optional[str] = None) -> str:
         """
-        Set the prompt mode for system instructions.
-        
-        Args:
-            mode: Either "short" for concise responses or "thinking" for detailed analysis
-            
-        Returns:
-            True if successful, False otherwise
+        Get effective thinking level for current complexity.
+
+        Runtime override takes precedence over config mapping.
         """
-        if mode not in ["short", "thinking"]:
-            logger.error(f"Invalid prompt mode: {mode}. Must be 'short' or 'thinking'")
+        _ = model_name  # Backward-compatible, no longer used for resolution.
+        if self._thinking_level_override is not None:
+            return self._thinking_level_override
+        return self._get_model_complexity_entry()["thinking_level"]
+
+    def set_thinking_level(self, level: str) -> bool:
+        """
+        Set runtime thinking level override.
+
+        Use `default` to clear the override and fall back to config.yaml routing.
+        """
+        normalized = self._normalize_thinking_level(level)
+        valid_levels = {"default", "off", "minimal", "low", "medium", "high"}
+        if normalized not in valid_levels:
+            logger.error(
+                "Invalid thinking level: %s. Must be one of: %s",
+                level,
+                ", ".join(sorted(valid_levels)),
+            )
             return False
-        
-        old_mode = self._prompt_mode
-        self._prompt_mode = mode
-        logger.info(f"Prompt mode changed from '{old_mode}' to '{mode}'")
+
+        old_level = self._thinking_level_override or "default"
+        self._thinking_level_override = None if normalized == "default" else normalized
+        logger.info(
+            "Thinking level override changed from '%s' to '%s'",
+            old_level,
+            self._thinking_level_override or "default",
+        )
         return True
+
+    # Backward-compatible wrapper for legacy prompt-mode callers.
+    def get_prompt_mode(self) -> str:
+        """Return legacy prompt mode derived from effective thinking level."""
+        level = self.get_thinking_level(self._current_model_name)
+        return "thinking" if level in {"low", "medium", "high"} else "short"
+
+    # Backward-compatible wrapper for legacy prompt-mode callers.
+    def set_prompt_mode(self, mode: str) -> bool:
+        """Map legacy prompt mode to native thinking levels."""
+        if mode == "thinking":
+            return self.set_thinking_level("high")
+        if mode == "short":
+            return self.set_thinking_level("minimal")
+        logger.error(f"Invalid prompt mode: {mode}. Must be 'short' or 'thinking'")
+        return False
 
     def set_force_search(self, enabled: bool) -> None:
         """
@@ -216,29 +273,57 @@ class GeminiClient:
     
     def get_timeout_for_current_model(self) -> int:
         """
-        Get the appropriate timeout duration based on current model and mode.
+        Get the appropriate timeout duration based on current model and thinking level.
         
         Returns:
             Timeout in seconds
         """
-        return self.get_timeout_for_model(self._current_model_name, self._prompt_mode)
+        return self.get_timeout_for_model(self._current_model_name, None)
 
-    def get_timeout_for_model(self, model_name: str, prompt_mode: Optional[str] = None) -> int:
-        """Get timeout for an explicit model/prompt mode without mutating runtime state."""
-        mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
-        if model_name == "gemini-3.1-pro-preview" or mode == "thinking":
+    def get_timeout_for_model(
+        self,
+        model_name: str,
+        prompt_mode: Optional[str] = None,
+        thinking_level: Optional[str] = None,
+    ) -> int:
+        """Get timeout for an explicit model/request override without mutating runtime state."""
+        _ = model_name  # Kept for compatibility; timeout now follows effective thinking level.
+        if thinking_level is not None:
+            level = self._normalize_thinking_level(thinking_level)
+        else:
+            level = self._normalize_thinking_level(
+                "high"
+                if prompt_mode == "thinking"
+                else ("minimal" if prompt_mode == "short" else self.get_thinking_level(model_name))
+            )
+        if level in {"low", "medium", "high"}:
             return self.config.extended_timeout
         return self.config.response_timeout
     
-    def get_estimated_response_time(self) -> str:
+    def get_estimated_response_time(
+        self,
+        model_name: Optional[str] = None,
+        prompt_mode: Optional[str] = None,
+        thinking_level: Optional[str] = None,
+    ) -> str:
         """
         Get a user-friendly estimated response time for the current model.
         
         Returns:
             Human-readable time estimate
         """
-        if self._current_model_name == "gemini-3.1-pro-preview" or self._prompt_mode == "thinking":
-            return "30-60 seconds (using advanced model with extended thinking)"
+        effective_model_name = model_name or self._current_model_name
+        if thinking_level is not None:
+            effective_thinking_level = self._normalize_thinking_level(thinking_level)
+        else:
+            effective_thinking_level = self._normalize_thinking_level(
+                "high"
+                if prompt_mode == "thinking"
+                else ("minimal" if prompt_mode == "short" else self.get_thinking_level(effective_model_name))
+            )
+
+        if effective_thinking_level in {"low", "medium", "high"}:
+            return "30-60 seconds (using advanced model with API thinking)"
         else:
             return "5-15 seconds"
     
@@ -252,48 +337,48 @@ class GeminiClient:
         Returns:
             True if successful, False otherwise
         """
-        # If thinking mode is manually enabled (persistent), don't downgrade it
-        # But we can still upgrade the model if needed
-        
         logger.info(f"Setting model based on complexity level: {complexity_level}")
-        self._current_complexity_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"
-        
-        if complexity_level == "low":
-            # Only downgrade to short mode if not manually set to thinking
-            if self._prompt_mode != "thinking":
-                self.set_prompt_mode("short")
-            return self.set_model("gemini-3-flash-preview")
+        normalized_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"
+        if complexity_level not in ["low", "medium", "high"]:
+            logger.warning(
+                "Invalid complexity level '%s', defaulting to 'low'",
+                complexity_level,
+            )
+        self._current_complexity_level = normalized_level
 
-        elif complexity_level == "medium":
-            # Keep medium on default Flash behavior; avoid auto-enabling thinking.
-            # Manual /config thinking remains respected.
-            return self.set_model("gemini-3-flash-preview")
+        target_model = self._get_model_complexity_entry(normalized_level)["model"]
+        if target_model not in self.config.valid_models:
+            logger.warning(
+                "Configured model '%s' for complexity '%s' is invalid; falling back to default model '%s'",
+                target_model,
+                normalized_level,
+                self.config.default_model,
+            )
+            target_model = self.config.default_model
 
-        elif complexity_level == "high":
-            # High complexity uses Pro model
-            # Pro model is smart enough without explicit thinking prompt, but we can keep it if set
-            success = self.set_model("gemini-3.1-pro-preview")
-            if not success:
-                logger.warning("gemini-3.1-pro-preview not available, falling back to gemini-3-flash-preview with thinking")
-                self.set_prompt_mode("thinking")
-                return self.set_model("gemini-3-flash-preview")
-            return success
-        else:
-            logger.error(f"Invalid complexity level: {complexity_level}. Must be 'low', 'medium', or 'high'")
-            return False
+        return self.set_model(target_model)
 
-    def _get_max_output_tokens_for_complexity(self, target_model: Optional[str] = None) -> int:
+    def _get_max_output_tokens_for_complexity(
+        self,
+        complexity_level: Optional[str] = None,
+        thinking_level: Optional[str] = None,
+    ) -> int:
         """
         Select max output token budget from complexity tier.
 
-        Pro model overrides always use the high tier.
+        Primary routing is by complexity tier. If a request-scoped thinking level
+        is provided, it can elevate the token tier for that single request.
         """
-        if target_model == "gemini-3.1-pro-preview":
+        effective_complexity = (complexity_level or self._current_complexity_level or "low").strip().lower()
+        if effective_complexity == "high":
             return self.config.max_output_tokens_high
+        if effective_complexity == "medium":
+            return self.config.max_output_tokens_medium
 
-        if self._current_complexity_level == "high":
+        normalized_thinking = self._normalize_thinking_level(thinking_level)
+        if normalized_thinking == "high":
             return self.config.max_output_tokens_high
-        if self._current_complexity_level == "medium":
+        if normalized_thinking in {"low", "medium"}:
             return self.config.max_output_tokens_medium
         return self.config.max_output_tokens_low
     
@@ -301,20 +386,27 @@ class GeminiClient:
         self,
         model_name: Optional[str] = None,
         prompt_mode: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> str:
         """
         Get a user-friendly display name for the current model and mode.
         
         Returns:
-            Display name string (e.g., "Gemini 2.5 Flash", "Gemini 2.5 Flash + Thinking")
+            Display name string (e.g., "Configured Model", "Configured Model + Thinking")
         """
         effective_model_name = model_name or self._current_model_name
-        effective_prompt_mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
+        if thinking_level is not None:
+            effective_thinking_level = self._normalize_thinking_level(thinking_level)
+        else:
+            effective_thinking_level = self._normalize_thinking_level(
+                "high"
+                if prompt_mode == "thinking"
+                else ("minimal" if prompt_mode == "short" else self.get_thinking_level(effective_model_name))
+            )
         display_name = self.config.model_display_names.get(effective_model_name, effective_model_name)
         
-        # Add thinking mode indicator if enabled
-        if effective_prompt_mode == "thinking":
-            display_name += " + Extended Thinking"
+        if effective_thinking_level not in {"default"}:
+            display_name += f" + Thinking:{effective_thinking_level.capitalize()}"
         
         return display_name
     
@@ -424,6 +516,89 @@ class GeminiClient:
         recency_signal = re.search(r"\b(latest|newest|most recent|breaking|today(?:'s)?|recent)\b", prompt_lower)
         recency_topic = re.search(r"\b(news|updates?|events?|prices?|scores?)\b", prompt_lower)
         return bool(recency_signal and recency_topic)
+
+    def _resolve_thinking_level_for_request(
+        self,
+        model_name: str,
+        prompt_mode_override: Optional[str] = None,
+        complexity_level: Optional[str] = None,
+    ) -> str:
+        """
+        Resolve effective thinking level for a request.
+
+        Legacy prompt-mode overrides still map to native API thinking levels:
+        - short -> minimal
+        - thinking -> high
+        """
+        _ = model_name  # Kept for compatibility; thinking now follows complexity/config mapping.
+        if prompt_mode_override == "short":
+            return "minimal"
+        if prompt_mode_override == "thinking":
+            return "high"
+        if self._thinking_level_override is not None:
+            return self._thinking_level_override
+        return self._get_model_complexity_entry(complexity_level)["thinking_level"]
+
+    def _build_thinking_config_for_model(
+        self,
+        model_name: str,
+        thinking_level: str,
+    ) -> Optional[types.ThinkingConfig]:
+        """
+        Build Gemini API thinking config for the target model.
+
+        Backend behavior comes from config.models.thinking_backend:
+        - thinking_level: use native thinking_level enum
+        - thinking_budget: map levels to thinking_budget values
+        - off/minimal -> 0
+        - low/medium/high -> -1 (dynamic)
+        """
+        normalized = self._normalize_thinking_level(thinking_level)
+        if normalized == "default":
+            return None
+
+        backend = str(
+            self.config.model_thinking_backend.get(model_name, "none")
+        ).strip().lower()
+
+        if backend == "thinking_level":
+            level_map = {
+                "off": types.ThinkingLevel.MINIMAL,
+                "minimal": types.ThinkingLevel.MINIMAL,
+                "low": types.ThinkingLevel.LOW,
+                "medium": types.ThinkingLevel.MEDIUM,
+                "high": types.ThinkingLevel.HIGH,
+            }
+            enum_value = level_map.get(normalized)
+            if not enum_value:
+                logger.warning(
+                    "Unsupported thinking level '%s' for model '%s'; skipping thinking config",
+                    thinking_level,
+                    model_name,
+                )
+                return None
+            return types.ThinkingConfig(thinking_level=enum_value)
+
+        if backend == "thinking_budget":
+            if normalized in {"off", "minimal"}:
+                return types.ThinkingConfig(thinking_budget=0)
+            if normalized in {"low", "medium", "high"}:
+                return types.ThinkingConfig(thinking_budget=-1)
+            return None
+
+        if backend == "none":
+            logger.debug(
+                "Thinking backend disabled for model '%s'; using model defaults",
+                model_name,
+            )
+            return None
+
+        logger.warning(
+            "Unknown thinking backend '%s' for model '%s'; using model defaults",
+            backend,
+            model_name,
+        )
+        return None
     
     async def generate_response(
         self,
@@ -435,6 +610,8 @@ class GeminiClient:
         on_chunk: Optional[callable] = None,
         model_override: Optional[str] = None,
         prompt_mode_override: Optional[str] = None,
+        thinking_level_override: Optional[str] = None,
+        complexity_override: Optional[str] = None,
         search_override: Optional[bool] = None,
         personality_prompt: Optional[str] = None,
         language: Optional[str] = None,
@@ -451,6 +628,8 @@ class GeminiClient:
             on_chunk: Optional async callback for streaming response chunks
             model_override: Optional model name to use for this specific request
             prompt_mode_override: Optional prompt mode ("short" or "thinking") for this request
+            thinking_level_override: Optional explicit thinking level for this request
+            complexity_override: Optional complexity tier ("low" | "medium" | "high") for this request
             search_override: Optional boolean to force enable/disable search for this request
             
         Returns:
@@ -466,17 +645,31 @@ class GeminiClient:
         
         # Use request overrides without mutating global runtime state
         target_model = model_override if model_override else self._current_model_name
-        target_prompt_mode = (
-            prompt_mode_override
-            if prompt_mode_override in {"short", "thinking"}
-            else self._prompt_mode
-        )
-        
+        if complexity_override in {"low", "medium", "high"}:
+            effective_complexity = complexity_override
+        else:
+            effective_complexity = self._current_complexity_level
+            if complexity_override is not None:
+                logger.warning(
+                    "Invalid complexity override '%s'; using '%s'",
+                    complexity_override,
+                    effective_complexity,
+                )
+
+        if thinking_level_override is not None:
+            target_thinking_level = self._normalize_thinking_level(thinking_level_override)
+        else:
+            target_thinking_level = self._resolve_thinking_level_for_request(
+                target_model,
+                prompt_mode_override=prompt_mode_override,
+                complexity_level=effective_complexity,
+            )
+
         # Log API call initiation
         logger.info("=" * 80)
         logger.info("API CALL INITIATED")
         logger.info(f"Model: {target_model}")
-        logger.info(f"Prompt mode: {target_prompt_mode}")
+        logger.info(f"Thinking level: {target_thinking_level}")
         logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
         
         # Determine if Google Search should be used
@@ -501,8 +694,7 @@ class GeminiClient:
             personality_prompt=personality_prompt,
             language=language,
             image_context=normalized_image_context,
-            model_override=target_model,
-            prompt_mode_override=target_prompt_mode,
+            complexity_override=effective_complexity,
         )
         content_parts.append(formatted_prompt)
         
@@ -545,13 +737,18 @@ class GeminiClient:
                     item.get("attachment_name"),
                 )
         
-        # Get dynamic timeout based on effective request model/mode
-        timeout_duration = self.get_timeout_for_model(target_model, target_prompt_mode)
-        # Adjust timeout if using Pro model via override
-        if target_model == "gemini-3.1-pro-preview":
-            timeout_duration = max(timeout_duration, 120)
+        # Get dynamic timeout based on effective request model/thinking level
+        timeout_duration = self.get_timeout_for_model(
+            target_model,
+            thinking_level=target_thinking_level,
+        )
             
-        logger.info(f"Using timeout: {timeout_duration}s for model {target_model} (mode: {target_prompt_mode})")
+        logger.info(
+            "Using timeout: %ss for model %s (thinking_level: %s)",
+            timeout_duration,
+            target_model,
+            target_thinking_level,
+        )
         
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -562,7 +759,14 @@ class GeminiClient:
                 start_time = time.time()
                 
                 response = await asyncio.wait_for(
-                    self._generate_response_async(content_parts, use_search, on_chunk, model_override=target_model),
+                    self._generate_response_async(
+                        content_parts,
+                        use_search,
+                        on_chunk,
+                        model_override=target_model,
+                        thinking_level=target_thinking_level,
+                        complexity_level=effective_complexity,
+                    ),
                     timeout=timeout_duration
                 )
                 
@@ -631,7 +835,7 @@ class GeminiClient:
                             # Add model information header
                             model_info = self._get_model_display_name(
                                 model_name=target_model,
-                                prompt_mode=target_prompt_mode,
+                                thinking_level=target_thinking_level,
                             )
                             model_header = f"🤖 *[Model: {model_info}]*"
                             
@@ -639,15 +843,6 @@ class GeminiClient:
                                 response_text = f"{model_header}\n🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
                             else:
                                 response_text = f"{model_header}\n\n{response_text}"
-                            
-                            # Auto-revert thinking mode to short after single use
-                            if (
-                                prompt_mode_override is None
-                                and self._prompt_mode == "thinking"
-                                and self._thinking_single_use
-                            ):
-                                logger.info("Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)")
-                                self._prompt_mode = "short"
                             
                             return APIResponse(
                                 success=True,
@@ -681,7 +876,7 @@ class GeminiClient:
                             # Add model information header
                             model_info = self._get_model_display_name(
                                 model_name=target_model,
-                                prompt_mode=target_prompt_mode,
+                                thinking_level=target_thinking_level,
                             )
                             model_header = f"🤖 *[Model: {model_info}]*"
                             
@@ -692,15 +887,6 @@ class GeminiClient:
                             
                             # Add note that response was truncated
                             response_text += "\n\n*[Note: Response was very long and may have been truncated. You can ask for specific parts or a summary.]*"
-                            
-                            # Auto-revert thinking mode to short after single use
-                            if (
-                                prompt_mode_override is None
-                                and self._prompt_mode == "thinking"
-                                and self._thinking_single_use
-                            ):
-                                logger.info("Auto-reverting from 'thinking' mode to 'short' mode (single-use feature)")
-                                self._prompt_mode = "short"
                             
                             return APIResponse(
                                 success=True,
@@ -848,7 +1034,15 @@ class GeminiClient:
             content="An unexpected error occurred"
         )
     
-    async def _generate_response_async(self, content, use_search: bool = False, on_chunk: Optional[callable] = None, model_override: Optional[str] = None):
+    async def _generate_response_async(
+        self,
+        content,
+        use_search: bool = False,
+        on_chunk: Optional[callable] = None,
+        model_override: Optional[str] = None,
+        thinking_level: Optional[str] = None,
+        complexity_level: Optional[str] = None,
+    ):
         """
         Async wrapper for Gemini API call.
         
@@ -857,6 +1051,8 @@ class GeminiClient:
             use_search: Whether to use the model with Google Search enabled
             on_chunk: Optional async callback for streaming chunks
             model_override: Optional model name to use
+            thinking_level: Optional resolved thinking level for this request
+            complexity_level: Optional resolved complexity tier for this request
             
         Returns:
             Generated response from Gemini API
@@ -864,6 +1060,7 @@ class GeminiClient:
         target_model = model_override if model_override else self._current_model_name
         logger.info(f"Making API call to model: {target_model}")
         logger.info(f"Using search-enabled model: {use_search}")
+        logger.info(f"Resolved thinking level: {thinking_level or 'default'}")
         
         # Configure tools
         tools = []
@@ -891,13 +1088,23 @@ class GeminiClient:
             for cat, thresh in safety_mapping.values()
         ]
 
-        max_output_tokens = self._get_max_output_tokens_for_complexity(target_model=target_model)
+        max_output_tokens = self._get_max_output_tokens_for_complexity(
+            complexity_level=complexity_level,
+            thinking_level=thinking_level,
+        )
         logger.info(
             "Using max_output_tokens=%s for complexity=%s (target_model=%s)",
             max_output_tokens,
-            self._current_complexity_level,
+            complexity_level or self._current_complexity_level,
             target_model,
         )
+
+        thinking_config = self._build_thinking_config_for_model(
+            target_model,
+            thinking_level or "default",
+        )
+        if thinking_config:
+            logger.info("Applying API thinking config: %s", thinking_config)
 
         config = types.GenerateContentConfig(
             tools=tools,
@@ -906,6 +1113,7 @@ class GeminiClient:
             top_k=self.config.top_k,
             max_output_tokens=max_output_tokens,
             safety_settings=safety_settings,
+            thinking_config=thinking_config,
         )
         
         # Convert content to string if it's a list (multimodal not supported with search yet)
@@ -1062,35 +1270,23 @@ class GeminiClient:
     
     def _get_system_instruction(
         self,
-        model_name: Optional[str] = None,
-        prompt_mode: Optional[str] = None,
+        complexity_level: Optional[str] = None,
     ) -> str:
         """
-        Get the appropriate system instruction based on current model and mode.
+        Get the appropriate system instruction based on complexity tier.
         
         Returns:
             System instruction string tailored to the model complexity
         """
-        effective_model_name = model_name or self._current_model_name
-        effective_prompt_mode = prompt_mode if prompt_mode in {"short", "thinking"} else self._prompt_mode
-
-        # Determine which system prompt to use based on model and thinking mode
-        if effective_model_name == "gemini-3.1-pro-preview" or effective_prompt_mode == "thinking":
+        effective_complexity = (complexity_level or self._current_complexity_level or "low").strip().lower()
+        if effective_complexity == "high":
             logger.info("Using HIGH COMPLEXITY system prompt")
-
-            thinking_instruction = ""
-            if effective_prompt_mode == "thinking":
-                thinking_instruction = "\n" + self.config.system_prompt_thinking_addon
-
-            return self.config.system_prompt_high_complexity.rstrip() + thinking_instruction
-
-        elif effective_model_name in ["gemini-3-flash-preview"]:
-            logger.info("Using LOW COMPLEXITY system prompt")
-            return self.config.system_prompt_low_complexity.rstrip()
-
-        else:
+            return self.config.system_prompt_high_complexity.rstrip()
+        elif effective_complexity == "medium":
             logger.info("Using MEDIUM COMPLEXITY system prompt")
             return self.config.system_prompt_medium_complexity.rstrip()
+        logger.info("Using LOW COMPLEXITY system prompt")
+        return self.config.system_prompt_low_complexity.rstrip()
     
     @staticmethod
     def _normalize_image_context(images: Optional[List], image_context: Optional[List[dict]]) -> Optional[List[dict]]:
@@ -1128,8 +1324,7 @@ class GeminiClient:
         personality_prompt: Optional[str] = None,
         language: Optional[str] = None,
         image_context: Optional[List[dict]] = None,
-        model_override: Optional[str] = None,
-        prompt_mode_override: Optional[str] = None,
+        complexity_override: Optional[str] = None,
     ) -> str:
         """
         Format the user message and context into an optimal prompt for Gemini API.
@@ -1140,8 +1335,7 @@ class GeminiClient:
             personality_prompt: Optional personality/tone instruction to prepend
             language: Optional language preference for the response
             image_context: Optional image metadata aligned to attached image parts
-            model_override: Optional model name for request-scoped formatting
-            prompt_mode_override: Optional prompt mode for request-scoped formatting
+            complexity_override: Optional complexity tier for request-scoped formatting
 
         Returns:
             Formatted prompt string for the Gemini API
@@ -1150,22 +1344,15 @@ class GeminiClient:
         logger.debug(f"User message length: {len(user_message)} characters")
         logger.debug(f"Context messages: {len(context) if context else 0}")
 
-        effective_model_name = model_override or self._current_model_name
-        effective_prompt_mode = (
-            prompt_mode_override if prompt_mode_override in {"short", "thinking"} else self._prompt_mode
-        )
-
         prompt_parts = []
 
-        # Add system instruction based on the current model and mode
+        # Add system instruction based on the current request complexity.
         system_instruction = self._get_system_instruction(
-            model_name=effective_model_name,
-            prompt_mode=effective_prompt_mode,
+            complexity_level=complexity_override,
         )
         logger.debug(
-            "Using system instruction for model: %s, mode: %s",
-            effective_model_name,
-            effective_prompt_mode,
+            "Using system instruction for complexity=%s",
+            complexity_override or self._current_complexity_level,
         )
         prompt_parts.append(system_instruction)
 
@@ -1228,10 +1415,6 @@ class GeminiClient:
         # Add the current user message
         prompt_parts.append(f"User: {user_message}")
         
-        # Reinforce thinking mode if enabled
-        if effective_prompt_mode == "thinking":
-            prompt_parts.append("\nIMPORTANT: You are in THINKING MODE. You MUST start your response with a <thinking> block containing your step-by-step reasoning, followed by </thinking>, and then your final answer.")
-            
         prompt_parts.append("\nGrok:")
         
         formatted = "\n".join(prompt_parts)

@@ -45,7 +45,7 @@ class EnhancedCommandHandler:
         """
         Initialize the enhanced command handler.
         
-        Uses AI router model (Gemini 2.0 Flash Lite) for ALL decisions.
+        Uses the configured router model for all decisions.
         NO keyword matching or regex patterns.
         
         Args:
@@ -165,8 +165,8 @@ Edit type rules:
 - For non-image intents return null.
 """
 
-            # Create router model instance for classification
-            # Use configured router model or default to gemini-2.5-flash-lite
+            # Create router model instance for classification.
+            # Router model always comes from config.
             router_model = self.bot.config.router_model_name
 
             if not self.gemini_client.client:
@@ -249,7 +249,7 @@ Edit type rules:
         """
         Handle a Discord message and determine if it contains commands.
         
-        All decisions are made by the router model (Gemini 2.0 Flash Lite).
+        All decisions are made by the configured router model.
         NO keyword matching is used.
         
         Args:
@@ -420,7 +420,7 @@ Edit type rules:
         """
         Handle an image generation command.
         
-        Generates a new image from a text description using Gemini 2.5 Flash Image.
+        Generates a new image from a text description using the configured image model.
         
         Args:
             message: Discord message containing the generation prompt
@@ -471,7 +471,7 @@ Edit type rules:
                     title="✨ Image Generated!",
                     description=f"**Prompt:** {prompt[:200]}\n"
                                f"**Processing Time:** {result.processing_time:.2f}s\n"
-                               f"**Model:** Gemini 2.5 Flash Image",
+                               f"**Model:** {self.image_processing_service.client.model_name}",
                     color=discord.Color.blue()
                 )
                 embed.set_footer(text="Generated with SynthID watermark • AI-generated content")

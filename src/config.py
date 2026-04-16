@@ -67,23 +67,18 @@ class BotConfig:
     command_suggestion_threshold: float = 0.7
 
     # === Models ===
-    default_model: str = "gemini-3-flash-preview"
-    router_model_name: str = "gemini-2.5-flash-lite"
-    available_models: List[Dict[str, str]] = field(default_factory=lambda: [
-        {"name": "Gemini 3 Flash Preview (Default)", "value": "gemini-3-flash-preview"},
-        {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
-        {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
-    ])
-    valid_models: List[str] = field(default_factory=lambda: [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash-lite",
-        "gemini-3.1-pro-preview",
-    ])
-    model_display_names: Dict[str, str] = field(default_factory=lambda: {
-        "gemini-3-flash-preview": "Gemini 3 Flash Preview",
-        "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
-        "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
+    default_model: str = ""
+    router_model_name: str = ""
+    available_models: List[Dict[str, str]] = field(default_factory=list)
+    valid_models: List[str] = field(default_factory=list)
+    model_complexity: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
+        "low": {"model": "", "thinking_level": "minimal"},
+        "medium": {"model": "", "thinking_level": "low"},
+        "high": {"model": "", "thinking_level": "high"},
     })
+    model_display_names: Dict[str, str] = field(default_factory=dict)
+    model_descriptions: Dict[str, str] = field(default_factory=dict)
+    model_thinking_backend: Dict[str, str] = field(default_factory=dict)
     router_cache_size: int = 256
     router_cache_ttl: int = 300
 
@@ -120,6 +115,7 @@ class BotConfig:
     nano_banana_timeout: int = 60
     nano_banana_max_retries: int = 3
     nano_banana_retry_delay: float = 1.0
+    nano_banana_model: str = ""
 
     # === Languages ===
     valid_languages: List[str] = field(default_factory=lambda: [
@@ -177,6 +173,95 @@ class BotConfig:
         def get(section: str, key: str, default=None):
             return cfg.get(section, {}).get(key, default)
 
+        models_cfg = cfg.get('models', {}) or {}
+        available_models_cfg_raw = models_cfg.get('available')
+        available_models_cfg = available_models_cfg_raw if isinstance(available_models_cfg_raw, list) else []
+        normalized_available_models: List[Dict[str, str]] = []
+        for item in available_models_cfg:
+            if not isinstance(item, dict):
+                continue
+            model_value = str(item.get("value", "")).strip()
+            if not model_value:
+                continue
+            model_name = str(item.get("name", model_value)).strip() or model_value
+            normalized_available_models.append({
+                "name": model_name,
+                "value": model_value,
+            })
+
+        valid_models_raw = models_cfg.get('valid')
+        if isinstance(valid_models_raw, list) and valid_models_raw:
+            valid_models_cfg = [
+                str(model_name).strip()
+                for model_name in valid_models_raw
+                if str(model_name).strip()
+            ]
+        else:
+            valid_models_cfg = [item["value"] for item in normalized_available_models]
+        valid_models_cfg = list(dict.fromkeys(valid_models_cfg))
+
+        default_model_name = str(
+            models_cfg.get('default') or (valid_models_cfg[0] if valid_models_cfg else "")
+        ).strip()
+        router_model_name = str(
+            models_cfg.get('router') or default_model_name
+        ).strip()
+
+        raw_model_display_names = models_cfg.get('display_names')
+        model_display_names_cfg: Dict[str, str] = {}
+        if isinstance(raw_model_display_names, dict):
+            model_display_names_cfg = {
+                str(model_name).strip(): str(display_name).strip()
+                for model_name, display_name in raw_model_display_names.items()
+                if str(model_name).strip() and str(display_name).strip()
+            }
+        if not model_display_names_cfg:
+            model_display_names_cfg = {
+                item["value"]: item["name"]
+                for item in normalized_available_models
+            }
+
+        raw_model_descriptions = models_cfg.get('descriptions')
+        model_descriptions_cfg: Dict[str, str] = {}
+        if isinstance(raw_model_descriptions, dict):
+            model_descriptions_cfg = {
+                str(model_name).strip(): str(description).strip()
+                for model_name, description in raw_model_descriptions.items()
+                if str(model_name).strip() and str(description).strip()
+            }
+
+        raw_model_thinking_backend = models_cfg.get('thinking_backend')
+        model_thinking_backend_cfg: Dict[str, str] = {}
+        if isinstance(raw_model_thinking_backend, dict):
+            model_thinking_backend_cfg = {
+                str(model_name).strip(): str(backend).strip().lower()
+                for model_name, backend in raw_model_thinking_backend.items()
+                if str(model_name).strip() and str(backend).strip()
+            }
+        # Final normalized complexity map used by runtime.
+        raw_model_complexity_cfg = cfg.get('model_complexity')
+        default_model_complexity_cfg = {
+            "low": {"model": default_model_name, "thinking_level": "minimal"},
+            "medium": {"model": default_model_name, "thinking_level": "low"},
+            "high": {"model": default_model_name, "thinking_level": "high"},
+        }
+        model_complexity_cfg: Dict[str, Dict[str, str]] = {}
+        for level in ("low", "medium", "high"):
+            configured_level = raw_model_complexity_cfg.get(level) if isinstance(raw_model_complexity_cfg, dict) else {}
+            if not isinstance(configured_level, dict):
+                configured_level = {}
+            model_name = str(configured_level.get("model", default_model_complexity_cfg[level]["model"]))
+            thinking_level = str(
+                configured_level.get(
+                    "thinking_level",
+                    default_model_complexity_cfg[level]["thinking_level"],
+                )
+            )
+            model_complexity_cfg[level] = {
+                "model": model_name,
+                "thinking_level": thinking_level,
+            }
+
         # Build config from YAML + env secrets
         config = cls(
             # Secrets from .env
@@ -222,21 +307,14 @@ class BotConfig:
             command_suggestion_threshold=get('ux', 'command_suggestion_threshold', 0.7),
 
             # Models
-            default_model=get('models', 'default', 'gemini-3-flash-preview'),
-            router_model_name=get('models', 'router', 'gemini-2.5-flash-lite'),
-            available_models=get('models', 'available', None) or [
-                {"name": "Gemini 3 Flash Preview (Default)", "value": "gemini-3-flash-preview"},
-                {"name": "Gemini 2.5 Flash-Lite (Router / Fast)", "value": "gemini-2.5-flash-lite"},
-                {"name": "Gemini 3.1 Pro Preview (Advanced)", "value": "gemini-3.1-pro-preview"},
-            ],
-            valid_models=get('models', 'valid', None) or [
-                "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3.1-pro-preview",
-            ],
-            model_display_names=get('models', 'display_names', None) or {
-                "gemini-3-flash-preview": "Gemini 3 Flash Preview",
-                "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
-                "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
-            },
+            default_model=default_model_name,
+            router_model_name=router_model_name,
+            available_models=normalized_available_models,
+            valid_models=valid_models_cfg,
+            model_complexity=model_complexity_cfg,
+            model_display_names=model_display_names_cfg,
+            model_descriptions=model_descriptions_cfg,
+            model_thinking_backend=model_thinking_backend_cfg,
             router_cache_size=get('models', 'router_cache_size', 256),
             router_cache_ttl=get('models', 'router_cache_ttl', 300),
 
@@ -270,6 +348,7 @@ class BotConfig:
             text_rate_limit_per_hour=get('rate_limiting', 'text_rate_limit_per_hour', 60),
 
             # Nano Banana
+            nano_banana_model=get('nano_banana', 'model', ''),
             nano_banana_timeout=get('nano_banana', 'timeout', 60),
             nano_banana_max_retries=get('nano_banana', 'max_retries', 3),
             nano_banana_retry_delay=get('nano_banana', 'retry_delay', 1.0),
@@ -376,6 +455,81 @@ class BotConfig:
             errors.append("models.router_cache_size must be positive")
         if self.router_cache_ttl <= 0:
             errors.append("models.router_cache_ttl must be positive")
+        if not self.valid_models:
+            errors.append("models.valid must contain at least one model")
+        if not self.default_model:
+            errors.append("models.default must not be empty")
+        elif self.default_model not in self.valid_models:
+            errors.append("models.default must be one of models.valid")
+        if not self.router_model_name:
+            errors.append("models.router must not be empty")
+        elif self.router_model_name not in self.valid_models:
+            errors.append("models.router must be one of models.valid")
+
+        for item in self.available_models:
+            if not isinstance(item, dict):
+                errors.append("models.available entries must be mappings with name/value")
+                continue
+            model_value = str(item.get("value", "")).strip()
+            if not model_value:
+                errors.append("models.available entries must include a non-empty value")
+                continue
+            if model_value not in self.valid_models:
+                errors.append("models.available values must all exist in models.valid")
+
+        valid_thinking_backends = {"thinking_level", "thinking_budget", "none"}
+        for model_name, backend in self.model_thinking_backend.items():
+            normalized_model = str(model_name).strip()
+            normalized_backend = str(backend).strip().lower()
+            if not normalized_model:
+                errors.append("models.thinking_backend keys must not be empty")
+                continue
+            if normalized_model not in self.valid_models:
+                errors.append("models.thinking_backend keys must be present in models.valid")
+            if normalized_backend not in valid_thinking_backends:
+                errors.append("models.thinking_backend values must be one of: thinking_level, thinking_budget, none")
+
+        missing_backend_models = set(self.valid_models) - set(self.model_thinking_backend.keys())
+        if missing_backend_models:
+            missing = ", ".join(sorted(missing_backend_models))
+            errors.append(f"models.thinking_backend is missing model entries: {missing}")
+        required_complexity_keys = {"low", "medium", "high"}
+        if not isinstance(self.model_complexity, dict):
+            errors.append("model_complexity must be a mapping with low/medium/high keys")
+        else:
+            missing_complexity_keys = required_complexity_keys - set(self.model_complexity.keys())
+            if missing_complexity_keys:
+                missing = ", ".join(sorted(missing_complexity_keys))
+                errors.append(f"model_complexity is missing required key(s): {missing}")
+
+            valid_thinking_levels = {
+                "default", "off", "minimal", "low", "medium", "high",
+                # accepted aliases
+                "none", "inherit", "disabled",
+            }
+
+            for level in sorted(required_complexity_keys):
+                entry = self.model_complexity.get(level)
+                if not isinstance(entry, dict):
+                    errors.append(f"model_complexity.{level} must be a mapping with 'model' and 'thinking_level'")
+                    continue
+
+                model_name = str(entry.get("model", "")).strip()
+                thinking_level = str(entry.get("thinking_level", "")).strip().lower()
+
+                if not model_name:
+                    errors.append(f"model_complexity.{level}.model must not be empty")
+                elif model_name not in self.valid_models:
+                    errors.append(
+                        f"model_complexity.{level}.model must be one of models.valid"
+                    )
+
+                if thinking_level not in valid_thinking_levels:
+                    errors.append(
+                        f"model_complexity.{level}.thinking_level must be one of: default, off, minimal, low, medium, high"
+                    )
+        if not self.nano_banana_model or not self.nano_banana_model.strip():
+            errors.append("nano_banana.model must not be empty")
         if self.text_rate_limit_per_minute <= 0 or self.text_rate_limit_per_hour <= 0:
             errors.append("rate_limiting.text_rate_limit_per_minute/hour must be positive")
         if self.text_rate_limit_per_minute > self.text_rate_limit_per_hour:

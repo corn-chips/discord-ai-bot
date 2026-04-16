@@ -265,11 +265,15 @@ class DiscordBot(discord.Client):
         self.tree = discord.app_commands.CommandTree(self)
 
         # Live mode (channel-isolated, mention-free) runtime state
-        self._live_model_name = "gemini-2.5-flash-lite"
+        self._live_model_name = config.router_model_name
         self._live_cooldown_seconds = 2.0
+        self._live_reply_style_instruction = (
+            "Keep replies very short and natural, like normal chatting. "
+            "Use 1-2 brief sentences unless the user explicitly asks for detail."
+        )
         self._live_turn_window = 6  # 6 turns => up to 12 rolling messages (user+assistant)
         self._live_channel_tasks: Dict[int, asyncio.Task] = {}
-        self._live_latest_pending_message: Dict[int, discord.Message] = {}
+        self._live_pending_messages: Dict[int, List[discord.Message]] = {}
         self._live_channel_locks: Dict[int, asyncio.Lock] = {}
         self._live_channel_context: Dict[int, Deque[MessageContext]] = {}
         
@@ -478,11 +482,11 @@ class DiscordBot(discord.Client):
             return False
 
     async def _enqueue_live_message(self, message: discord.Message):
-        """Enqueue a live-mode message, coalescing to newest-only while busy."""
+        """Enqueue a live-mode message for batched single-reply processing."""
         channel_id = message.channel.id
         lock = self._get_live_channel_lock(channel_id)
         async with lock:
-            self._live_latest_pending_message[channel_id] = message
+            self._live_pending_messages.setdefault(channel_id, []).append(message)
             task = self._live_channel_tasks.get(channel_id)
             if task and not task.done():
                 return
@@ -499,33 +503,40 @@ class DiscordBot(discord.Client):
             while True:
                 if not self._is_live_mode_enabled(channel_id):
                     async with lock:
-                        self._live_latest_pending_message.pop(channel_id, None)
+                        self._live_pending_messages.pop(channel_id, None)
                     break
 
                 async with lock:
-                    message = self._live_latest_pending_message.pop(channel_id, None)
+                    pending_messages = self._live_pending_messages.pop(channel_id, [])
 
-                if message is None:
+                if not pending_messages:
                     break
 
+                response_sent = False
                 try:
-                    await self._process_live_message(message)
+                    response_sent = await self._process_live_messages(pending_messages)
                 except Exception as exc:
+                    first_message = pending_messages[0]
+                    last_message = pending_messages[-1]
                     logger.error(
-                        f"Live worker error in channel {channel_id} for message {message.id}: {exc}",
+                        (
+                            "Live worker error in channel "
+                            f"{channel_id} for messages {first_message.id}-{last_message.id}: {exc}"
+                        ),
                         exc_info=True,
                     )
 
                 if not self._is_live_mode_enabled(channel_id):
                     async with lock:
-                        self._live_latest_pending_message.pop(channel_id, None)
+                        self._live_pending_messages.pop(channel_id, None)
                     break
 
-                await asyncio.sleep(self._live_cooldown_seconds)
+                if response_sent:
+                    await asyncio.sleep(self._live_cooldown_seconds)
         finally:
             async with lock:
                 self._live_channel_tasks.pop(channel_id, None)
-                has_pending = channel_id in self._live_latest_pending_message
+                has_pending = bool(self._live_pending_messages.get(channel_id))
                 if has_pending and self._is_live_mode_enabled(channel_id):
                     self._live_channel_tasks[channel_id] = asyncio.create_task(
                         self._run_live_channel_worker(channel_id),
@@ -561,23 +572,36 @@ class DiscordBot(discord.Client):
             )
         )
 
-    async def _process_live_message(self, message: discord.Message):
+    async def _process_live_messages(self, messages: List[discord.Message]) -> bool:
         """Fast-path processing for mention-free live mode in a single channel."""
-        channel_id = message.channel.id
+        if not messages:
+            return False
 
-        is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(message.author.id)
+        target_message = messages[-1]
+        channel_id = target_message.channel.id
+
+        is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(target_message.author.id)
         if not is_allowed:
-            await message.reply(rate_limit_message)
-            return
+            await target_message.reply(rate_limit_message)
+            return True
 
-        has_attachments = bool(message.attachments)
-        user_prompt = self._extract_user_prompt(message)
+        has_attachments = any(msg.attachments for msg in messages)
+        prompt_entries: List[Tuple[discord.Message, str]] = []
+        for msg in messages:
+            prompt = self._extract_user_prompt(msg)
+            if prompt:
+                prompt_entries.append((msg, prompt))
 
         # Attachment-heavy requests fall back to the full pipeline, still with live model overrides.
         if has_attachments:
+            attachment_message = next(
+                (msg for msg in reversed(messages) if msg.attachments),
+                target_message,
+            )
+            attachment_prompt = self._extract_user_prompt(attachment_message)
             await self._process_message_with_context(
-                message,
-                user_prompt,
+                attachment_message,
+                attachment_prompt,
                 complexity_level="low",
                 routed_intent="live_mode",
                 model_override=self._live_model_name,
@@ -587,15 +611,27 @@ class DiscordBot(discord.Client):
                 skip_context_media=False,
                 apply_user_preferences=False,
             )
-            return
+            return True
 
-        if not user_prompt:
-            return
+        if not prompt_entries:
+            return False
+
+        if len(prompt_entries) == 1:
+            user_prompt = prompt_entries[0][1]
+        else:
+            user_prompt_lines = [f"- {msg.author.display_name}: {prompt}" for msg, prompt in prompt_entries]
+            user_prompt = (
+                "New live chat messages (oldest to newest):\n"
+                + "\n".join(user_prompt_lines)
+                + "\nReply once to all of these in one short chat response."
+            )
 
         rolling_context = list(self._get_live_context_buffer(channel_id))
-        personality_prompt = None
+        personality_prompt = self._live_reply_style_instruction
         if hasattr(self, "_channel_settings_service") and self._channel_settings_service:
-            personality_prompt = self._channel_settings_service.get_personality_prompt(channel_id)
+            channel_personality = self._channel_settings_service.get_personality_prompt(channel_id)
+            if channel_personality:
+                personality_prompt = f"{channel_personality}\n{self._live_reply_style_instruction}"
 
         api_response = await self.gemini_client.generate_response(
             user_prompt,
@@ -608,21 +644,26 @@ class DiscordBot(discord.Client):
         )
 
         if not api_response.success:
-            await self._handle_response_error(message, api_response)
-            return
+            await self._handle_response_error(target_message, api_response)
+            return True
 
-        await self._record_token_usage(message, api_response.token_usage)
-        sent_message = await self._send_response_safely(message, api_response.content, api_response.grounding_sources)
-
-        self._append_live_context_entry(
-            channel_id=channel_id,
-            content=user_prompt,
-            author=message.author.display_name,
-            message_id=message.id,
-            timestamp=message.created_at,
-            is_reply=message.reference is not None,
-            replied_to_id=message.reference.message_id if message.reference else None,
+        await self._record_token_usage(target_message, api_response.token_usage)
+        sent_message = await self._send_response_safely(
+            target_message,
+            api_response.content,
+            api_response.grounding_sources,
         )
+
+        for source_message, source_prompt in prompt_entries:
+            self._append_live_context_entry(
+                channel_id=channel_id,
+                content=source_prompt,
+                author=source_message.author.display_name,
+                message_id=source_message.id,
+                timestamp=source_message.created_at,
+                is_reply=source_message.reference is not None,
+                replied_to_id=source_message.reference.message_id if source_message.reference else None,
+            )
 
         if sent_message:
             self._append_live_context_entry(
@@ -632,8 +673,11 @@ class DiscordBot(discord.Client):
                 message_id=sent_message.id,
                 timestamp=datetime.now(timezone.utc),
                 is_reply=True,
-                replied_to_id=message.id,
+                replied_to_id=target_message.id,
             )
+            return True
+
+        return False
 
     async def on_message(self, message: discord.Message):
         """
@@ -1768,7 +1812,10 @@ class DiscordBot(discord.Client):
                         user_language = prefs.preferred_language
 
                     # Get estimated response time and show it to user
-                    estimated_time = self.gemini_client.get_estimated_response_time()
+                    estimated_time = self.gemini_client.get_estimated_response_time(
+                        model_name=model_override or self.gemini_client.get_current_model(),
+                        prompt_mode=prompt_mode_override,
+                    )
                     model_name = model_override or self.gemini_client.get_current_model()
                     
                     # Send status message by default so users get immediate feedback
@@ -1787,50 +1834,9 @@ class DiscordBot(discord.Client):
                         model_override or self.gemini_client.get_current_model(),
                         prompt_mode_override,
                     ) + 10  # Add buffer
-                    
-                    # Setup streaming callback for thinking mode
-                    accumulated_text = ""
-                    last_edit_time = 0
-                    
-                    async def on_chunk(chunk_text):
-                        nonlocal accumulated_text, last_edit_time, status_message
-                        accumulated_text += chunk_text
-                        
-                        # Debug logging for streaming
-                        # logger.debug(f"Stream chunk received: {len(chunk_text)} chars")
-                        
-                        if not status_message:
-                            return
-                            
-                        start_tag = "<thinking>"
-                        end_tag = "</thinking>"
-                        
-                        if start_tag in accumulated_text:
-                            start_idx = accumulated_text.find(start_tag) + len(start_tag)
-                            end_idx = accumulated_text.find(end_tag)
-                            
-                            if end_idx != -1:
-                                content = accumulated_text[start_idx:end_idx].strip()
-                            else:
-                                content = accumulated_text[start_idx:].strip()
-                                
-                            import time
-                            current_time = time.time()
-                            if current_time - last_edit_time > 3.0 and content:
-                                try:
-                                    # Show last 1500 chars to keep it dynamic
-                                    display_content = content
-                                    if len(display_content) > 1500:
-                                        display_content = "..." + display_content[-1500:]
-                                    
-                                    await status_message.edit(content=f"🧠 **Thinking Process:**\n{display_content}")
-                                    last_edit_time = current_time
-                                except Exception as e:
-                                    logger.debug(f"Failed to update streaming thinking status message: {e}")
-                        else:
-                            # If we are in thinking mode but no tag yet, maybe show the raw text if it looks like thinking?
-                            # But safer to wait for tag.
-                            pass
+
+                    # Thinking now uses Gemini API native thinking_config; no custom <thinking> parsing.
+                    on_chunk = None
 
                     api_response = await asyncio.wait_for(
                         self.gemini_client.generate_response(
@@ -2266,3 +2272,4 @@ class DiscordBot(discord.Client):
         except Exception as e:
             logger.error(f"Unexpected error sending grounding sources: {e}", exc_info=True)
     
+

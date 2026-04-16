@@ -64,9 +64,10 @@ class ImageProcessingService:
         """
         self.config = config
         
-        # Initialize Gemini 2.5 Flash Image client (nano-banana)
+        # Initialize configured Gemini image client (nano-banana)
         self.client = NanoBananaClient(
             api_key=config.nano_banana_api_key,
+            model_name=config.nano_banana_model,
             timeout=config.nano_banana_timeout,
             max_retries=config.nano_banana_max_retries,
             retry_delay=config.nano_banana_retry_delay,
@@ -366,7 +367,7 @@ class ImageProcessingService:
                 
                 await self._update_progress(job_id, 0.4, "Sending to AI service...")
                 
-                # Process with Gemini 2.5 Flash Image (nano-banana)
+                # Process with configured Gemini image model (nano-banana)
                 edit_response = await self.client.edit_image(
                     job.request.image_data,  # Send raw image data to Gemini
                     job.request.instruction,

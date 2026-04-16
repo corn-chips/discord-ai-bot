@@ -1,7 +1,7 @@
 """
-Gemini 2.5 Flash Image (Nano-Banana) client for image generation and editing operations.
+Configured Gemini image (Nano-Banana) client for generation and editing operations.
 
-This module provides a client interface for Google's Gemini 2.5 Flash Image model,
+This module provides a client interface for the configured Gemini image model,
 which supports image generation and prompt-based editing. The model is accessed through
 the Google GenAI SDK.
 """
@@ -75,17 +75,17 @@ class NanoBananaClientError(Exception):
 
 class NanoBananaClient:
     """
-    Client for interacting with Google's Gemini 2.5 Flash Image model (codename: nano-banana).
+    Client for interacting with a configured Gemini image model (codename: nano-banana).
     
     Provides methods for image generation and editing using Google's GenAI SDK,
     with instruction parsing, service monitoring, and robust error handling.
     """
     
-    def __init__(self, api_key: str, base_url: str = None, timeout: int = 60,
+    def __init__(self, api_key: str, model_name: str, base_url: str = None, timeout: int = 60,
                  max_retries: int = 3, retry_delay: float = 1.0,
                  max_requests_per_minute: int = 30):
         """
-        Initialize the Gemini 2.5 Flash Image client.
+        Initialize the configured Gemini image client.
         
         Args:
             api_key: Google API key for authentication
@@ -95,6 +95,7 @@ class NanoBananaClient:
             retry_delay: Base delay between retries in seconds
         """
         self.api_key = api_key
+        self.model_name = model_name
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -105,14 +106,12 @@ class NanoBananaClient:
                 logger.warning("Google GenAI SDK is not available. Image generation will be disabled.")
                 logger.warning("Please install: pip install google-generativeai")
                 self.client = None
-                self.model_name = "gemini-2.5-flash-image"
                 return
             
             # Initialize the new google.genai client
             self.client = genai.Client(api_key=api_key)
-            self.model_name = "gemini-2.5-flash-image"  # Official image generation model
             
-            logger.info(f"✅ Gemini 2.5 Flash Image client initialized (model: {self.model_name})")
+            logger.info(f"✅ Gemini image client initialized (model: {self.model_name})")
         except Exception as e:
             logger.error(f"Failed to initialize Gemini image client: {e}")
             self.client = None
@@ -161,7 +160,7 @@ class NanoBananaClient:
     async def edit_image(self, image_data: bytes, instruction: str, 
                         edit_type: Optional[EditType] = None) -> EditResponse:
         """
-        Edit or generate an image using Gemini 2.5 Flash Image model.
+        Edit or generate an image using the configured Gemini image model.
         
         For editing: Provide the original image with editing instructions.
         For generation: Provide None as image_data with generation instructions.
@@ -246,7 +245,7 @@ class NanoBananaClient:
     
     async def _make_gemini_request(self, prompt: str, image_data: Optional[bytes] = None) -> tuple[Optional[bytes], Optional[TokenUsage]]:
         """
-        Make a request to Gemini 2.5 Flash Image model.
+        Make a request to the configured Gemini image model.
         
         Args:
             prompt: The text prompt for image generation/editing

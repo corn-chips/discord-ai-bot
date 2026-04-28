@@ -819,15 +819,20 @@ class DiscordBot(discord.Client):
         """
         try:
             context_limit = self._get_context_limit_for_complexity(complexity_level)
+            candidate_limit = max(self.config.max_context_messages, context_limit)
             logger.debug(
-                "Collecting context (limit=%s) for complexity=%s, intent=%s",
+                "Collecting context candidates (limit=%s, selected_max=%s) for complexity=%s, intent=%s",
+                candidate_limit,
                 context_limit,
                 complexity_level,
                 routed_intent,
             )
 
             # Check if this is a reply and collect appropriate context
+            anchor_message_ids = set()
             if message.reference:
+                if message.reference.message_id:
+                    anchor_message_ids.add(message.reference.message_id)
                 logger.debug("Message is a reply, collecting enhanced context")
                 try:
                     # Get enhanced reply context
@@ -846,7 +851,7 @@ class DiscordBot(discord.Client):
                 try:
                     standard_context = await self.context_collector.get_channel_context(
                         message.channel,
-                        limit=context_limit,
+                        limit=candidate_limit,
                         bot_user=self.user,
                     )
                 except discord.Forbidden:
@@ -866,7 +871,7 @@ class DiscordBot(discord.Client):
                 try:
                     combined_context = await self.context_collector.get_channel_context(
                         message.channel,
-                        limit=context_limit,
+                        limit=candidate_limit,
                         bot_user=self.user,
                     )
                 except discord.Forbidden:
@@ -876,11 +881,28 @@ class DiscordBot(discord.Client):
                     logger.error(f"Failed to fetch channel context: {e}")
                     combined_context = []
             
-            logger.info(f"Collected {len(combined_context)} messages for context")
+            combined_context = [
+                ctx_msg for ctx_msg in combined_context
+                if ctx_msg.message_id != message.id
+            ]
+            logger.info(f"Collected {len(combined_context)} candidate messages for context")
 
             if routed_intent == "image_generate":
                 logger.debug("Image generation intent reached context handler; using minimal context fallback")
                 combined_context = []
+            elif combined_context:
+                original_context_count = len(combined_context)
+                combined_context = await self.gemini_client.select_relevant_context(
+                    user_prompt,
+                    combined_context,
+                    max_messages=context_limit,
+                    anchor_message_ids=anchor_message_ids,
+                )
+                logger.info(
+                    "Selected %s/%s context messages for final response model",
+                    len(combined_context),
+                    original_context_count,
+                )
 
             # Generate AI response using Gemini API with collected or filtered context
             await self._generate_and_send_response(
@@ -1261,6 +1283,19 @@ class DiscordBot(discord.Client):
             logger.warning(f"No permission to read channel history for context images in channel {message.channel.id}")
         except discord.HTTPException as e:
             logger.error(f"Discord API error retrieving context images: {e}")
+
+        if len(images) > 1:
+            ordered_pairs = sorted(
+                zip(images, image_context),
+                key=lambda pair: (
+                    pair[1].get("source_timestamp", ""),
+                    int(pair[1].get("source_message_id", 0) or 0),
+                    int(pair[1].get("attachment_index", 0) or 0),
+                    int(pair[1].get("pdf_page_number", 0) or 0),
+                ),
+            )
+            images = [pair[0] for pair in ordered_pairs]
+            image_context = [pair[1] for pair in ordered_pairs]
 
         return images, image_context
     

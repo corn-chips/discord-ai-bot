@@ -18,10 +18,10 @@ logging:
 
 # --- Context Collection ---
 context:
-  max_messages: 100                    # Max messages to retrieve for conversation context
-  context_messages_low: 10             # Context window for low-complexity prompts
-  context_messages_medium: 30          # Context window for medium-complexity prompts
-  context_messages_high: 50            # Context window for high-complexity prompts
+  max_messages: 100                    # Max messages to retrieve as context candidates
+  context_messages_low: 10             # Max selected context messages for low-complexity prompts
+  context_messages_medium: 30          # Max selected context messages for medium-complexity prompts
+  context_messages_high: 50            # Max selected context messages for high-complexity prompts
   reply_range: 10                      # Messages before/after a replied-to message
   cutoff_hours: 24                     # Exclude messages older than this
   max_images: 6                        # Max recent channel images to include as model context

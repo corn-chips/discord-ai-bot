@@ -7,6 +7,7 @@ to generate AI-powered responses based on user prompts and conversation context.
 
 import asyncio
 import io
+import json
 import logging
 import random
 import re
@@ -599,6 +600,151 @@ class GeminiClient:
             model_name,
         )
         return None
+
+    @staticmethod
+    def _sorted_context(messages: Optional[List[MessageContext]]) -> List[MessageContext]:
+        """Return context messages in deterministic Discord conversation order."""
+        if not messages:
+            return []
+        return sorted(messages, key=lambda msg: (msg.timestamp, msg.message_id))
+
+    def _finalize_context_selection(
+        self,
+        context: List[MessageContext],
+        selected_message_ids: List[int],
+        max_messages: int,
+        anchor_message_ids: Optional[set[int]] = None,
+    ) -> List[MessageContext]:
+        """Validate model-selected ids and return an ordered bounded context slice."""
+        sorted_context = self._sorted_context(context)
+        if not sorted_context:
+            return []
+
+        id_to_msg = {msg.message_id: msg for msg in sorted_context}
+        ordered_unique_ids = []
+        seen_ids = set()
+
+        for message_id in selected_message_ids:
+            if message_id not in id_to_msg or message_id in seen_ids:
+                continue
+            ordered_unique_ids.append(message_id)
+            seen_ids.add(message_id)
+
+        for anchor_id in anchor_message_ids or set():
+            if anchor_id in id_to_msg and anchor_id not in seen_ids:
+                ordered_unique_ids.append(anchor_id)
+                seen_ids.add(anchor_id)
+
+        if not ordered_unique_ids:
+            anchor_ids = set(anchor_message_ids or set())
+            if not anchor_ids:
+                return []
+            return [msg for msg in sorted_context if msg.message_id in anchor_ids][:max_messages]
+
+        ordered_unique_ids = ordered_unique_ids[-max_messages:]
+
+        selected_ids = set(ordered_unique_ids)
+        return [msg for msg in sorted_context if msg.message_id in selected_ids]
+
+    async def select_relevant_context(
+        self,
+        user_message: str,
+        context: Optional[List[MessageContext]],
+        max_messages: int,
+        anchor_message_ids: Optional[set[int]] = None,
+    ) -> List[MessageContext]:
+        """
+        Use the fast router model to reduce a large Discord history to relevant context.
+
+        The final response model should see only the selected ordered slice, not the
+        whole fetched channel history. On selector failure, fall back to the
+        newest bounded context window.
+        """
+        sorted_context = self._sorted_context(context)
+        max_messages = max(1, int(max_messages or 1))
+        if not sorted_context:
+            return []
+        if len(sorted_context) <= max_messages:
+            return sorted_context
+
+        anchor_ids = set(anchor_message_ids or set())
+        if not self.client:
+            logger.warning("Gemini client unavailable; using recent context fallback")
+            return sorted_context[-max_messages:]
+
+        candidate_lines = []
+        total = len(sorted_context)
+        for idx, msg in enumerate(sorted_context, start=1):
+            content = (msg.content or "").replace("\n", " ").strip()
+            if len(content) > 420:
+                content = content[:420] + "..."
+            reply_text = f" | replied_to={msg.replied_to_id}" if msg.replied_to_id else ""
+            candidate_lines.append(
+                f"[CTX_MSG_{idx:03d}/{total} | message_id={msg.message_id} | "
+                f"time={msg.timestamp.isoformat()}{reply_text}] {msg.author}: {content}"
+            )
+
+        selector_prompt = f"""Select the Discord messages needed to answer the current user naturally.
+
+Current user message:
+{user_message}
+
+Candidate channel history is ordered oldest to newest. Higher CTX_MSG numbers are more recent.
+Return JSON only with this schema:
+{{
+  "selected_message_ids": [123, 456]
+}}
+
+Selection rules:
+- Pick at most {max_messages} messages.
+- Include messages directly referenced by the user, replied-to messages, and relevant image/file messages.
+- Include nearby messages only when they clarify what a selected message means.
+- Prefer recent messages when relevance is similar.
+- Do not include unrelated chatter just because it is available.
+- If the request is self-contained, return an empty list.
+
+Candidate messages:
+{chr(10).join(candidate_lines)}
+"""
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.config.router_model_name,
+                contents=selector_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=max(512, self.config.router_max_output_tokens * 6),
+                    response_mime_type="application/json",
+                ),
+            )
+            raw_text = getattr(response, "text", "") or ""
+            result = json.loads(raw_text)
+            if isinstance(result, list) and result:
+                result = result[0]
+            selected_ids_raw = result.get("selected_message_ids", []) if isinstance(result, dict) else []
+            selected_ids = []
+            for raw_id in selected_ids_raw:
+                try:
+                    selected_ids.append(int(raw_id))
+                except (TypeError, ValueError):
+                    continue
+
+            selected_context = self._finalize_context_selection(
+                sorted_context,
+                selected_ids,
+                max_messages,
+                anchor_ids,
+            )
+            logger.info(
+                "Context selector reduced %s candidate messages to %s selected messages",
+                len(sorted_context),
+                len(selected_context),
+            )
+            return selected_context
+
+        except Exception as exc:
+            logger.warning("Context selector failed; using recent context fallback: %s", exc)
+            return sorted_context[-max_messages:]
     
     async def generate_response(
         self,
@@ -1367,7 +1513,12 @@ class GeminiClient:
 
         # Add conversation context if provided
         if context and len(context) > 0:
-            prompt_parts.append("\n--- Recent Conversation Context (oldest to newest) ---")
+            prompt_parts.append("\n--- Selected Conversation Context (oldest to newest) ---")
+            prompt_parts.append(
+                "This is a relevance-selected slice of Discord history, not the whole channel. "
+                "Higher CTX_MSG numbers are more recent. Use it only when it helps answer the current user; "
+                "ignore unrelated chatter and prioritize the current user message, reply relationships, and the newest relevant messages."
+            )
             
             # Sort context by timestamp to ensure chronological order
             sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))

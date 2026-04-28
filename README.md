@@ -256,7 +256,8 @@ Copy `config.yaml.example` to `config.yaml` and edit as needed. Key sections:
 - `token_db_path`: SQLite database path (default: `data/token_usage.db`)
 
 **Context & Response:**
-- `context.max_messages`: Maximum messages to include in context (default: 100)
+- `context.max_messages`: Maximum messages to retrieve as context candidates before relevance selection (default: 100)
+- `context.context_messages_low/medium/high`: Maximum selected messages sent to the final model by task complexity
 - `context.reply_range`: Messages before/after replied message (default: 10)
 - `context.cutoff_hours`: Message history cutoff in hours (default: 24)
 - `response.timeout`: API response timeout in seconds (default: 30)

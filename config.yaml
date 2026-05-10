@@ -10,6 +10,12 @@ bot:
   dev_mode: false
   token_db_path: "data/token_usage.db"
 
+# --- Report Tracking ---
+reports:
+  web_enabled: true
+  web_host: "127.0.0.1"
+  web_port: 8080
+
 # --- Logging ---
 logging:
   level: "INFO"                        # DEBUG, INFO, WARNING, ERROR, CRITICAL

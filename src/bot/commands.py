@@ -61,6 +61,108 @@ async def setup_commands(
         embed.add_field(name="Status", value="✅ Operational", inline=True)
         
         await interaction.response.send_message(embed=embed)
+
+    @bot.tree.command(name="report", description="Submit a bot issue or feature request")
+    @app_commands.describe(
+        category="Choose whether this is a bug/issue or a feature request",
+        details="Describe what is broken or what should be added",
+    )
+    @app_commands.choices(category=[
+        app_commands.Choice(name="Issue", value="issue"),
+        app_commands.Choice(name="Feature", value="feature"),
+    ])
+    async def report(
+        interaction: discord.Interaction,
+        category: app_commands.Choice[str],
+        details: str,
+    ):
+        """Create a tracked bot report."""
+        report_service = getattr(bot, "report_service", None)
+        if not report_service:
+            await interaction.response.send_message(
+                "Report tracking is not available right now.",
+                ephemeral=True,
+            )
+            return
+
+        cleaned_details = details.strip()
+        if len(cleaned_details) < 5:
+            await interaction.response.send_message(
+                "Please include a little more detail so the report is actionable.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            created = report_service.create_report(
+                guild_id=interaction.guild_id,
+                channel_id=interaction.channel_id,
+                reporter_id=interaction.user.id,
+                reporter_name=interaction.user.display_name or str(interaction.user),
+                report_type=category.value,
+                description=cleaned_details,
+            )
+        except Exception as exc:
+            logger.error("Failed to create report: %s", exc, exc_info=True)
+            await interaction.response.send_message(
+                "Failed to save that report. Please try again later.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"Report #{created.id} submitted",
+            description=_truncate_text(created.description, 1000),
+            color=discord.Color.green(),
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="Type", value=created.report_type.title(), inline=True)
+        embed.add_field(name="Status", value=_format_report_status(created.status), inline=True)
+        embed.add_field(
+            name="Check Status",
+            value=f"`/report-status report_id:{created.id}`",
+            inline=False,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @bot.tree.command(name="report-status", description="Check the status of a submitted report")
+    @app_commands.describe(report_id="The report number returned by /report")
+    async def report_status(interaction: discord.Interaction, report_id: int):
+        """Show the current status for a bot report."""
+        report_service = getattr(bot, "report_service", None)
+        if not report_service:
+            await interaction.response.send_message(
+                "Report tracking is not available right now.",
+                ephemeral=True,
+            )
+            return
+
+        existing = report_service.get_report(report_id)
+        if not existing:
+            await interaction.response.send_message(
+                f"Report #{report_id} was not found.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"Report #{existing.id}",
+            description=_truncate_text(existing.description, 1000),
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="Type", value=existing.report_type.title(), inline=True)
+        embed.add_field(name="Status", value=_format_report_status(existing.status), inline=True)
+        embed.add_field(name="Submitted By", value=existing.reporter_name, inline=True)
+        embed.add_field(name="Created", value=existing.created_at, inline=True)
+        embed.add_field(name="Updated", value=existing.updated_at, inline=True)
+        if existing.admin_notes:
+            embed.add_field(
+                name="Notes",
+                value=_truncate_text(existing.admin_notes, 1000),
+                inline=False,
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
     
     # Create config group
     config_group = app_commands.Group(name="config", description="Configure bot settings")
@@ -1747,6 +1849,18 @@ def _get_model_description(model_name: str, config: BotConfig) -> str:
 
     display_name = config.model_display_names.get(model_name, model_name)
     return f"Configured model: {display_name}"
+
+
+def _format_report_status(status: str) -> str:
+    """Format report status labels for Discord."""
+    return status.replace("_", " ").title()
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    """Return text capped at Discord embed-safe lengths."""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _format_timedelta(td: timedelta) -> str:

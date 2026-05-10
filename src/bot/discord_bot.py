@@ -10,7 +10,7 @@ import io
 import logging
 import re
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable, Deque
 
 import discord
@@ -30,6 +30,9 @@ from ..services.image_processing_service import ImageProcessingService
 from ..services.user_experience_service import UserExperienceService
 from ..services.token_tracker import TokenTracker
 from ..services.content_renderer import ContentRenderer
+from ..services.rate_limiter import TextRateLimiter
+from ..services.report_service import ReportService
+from ..services.report_web_server import ReportWebServer
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
@@ -121,59 +124,6 @@ class SplitResponsePaginatorView(discord.ui.View):
             pass
 
 
-class TextRateLimiter:
-    """Per-user text request limiter with minute/hour windows."""
-
-    def __init__(self, per_minute: int, per_hour: int):
-        self.per_minute = per_minute
-        self.per_hour = per_hour
-        self._requests: Dict[int, List[datetime]] = {}
-        self._lock = asyncio.Lock()
-
-    async def check_and_record(self, user_id: int) -> tuple[bool, Optional[str]]:
-        """Validate and record a request for the given user."""
-        now = datetime.now(timezone.utc)
-        minute_cutoff = now - timedelta(minutes=1)
-        hour_cutoff = now - timedelta(hours=1)
-
-        async with self._lock:
-            # Prune expired entries for all users to prevent unbounded growth.
-            for existing_user_id, timestamps in list(self._requests.items()):
-                recent = [ts for ts in timestamps if ts >= hour_cutoff]
-                if recent:
-                    self._requests[existing_user_id] = recent
-                else:
-                    del self._requests[existing_user_id]
-
-            requests = self._requests.get(user_id, [])
-
-            minute_count = sum(1 for ts in requests if ts >= minute_cutoff)
-            hour_count = len(requests)
-
-            if minute_count >= self.per_minute:
-                oldest_minute = min(ts for ts in requests if ts >= minute_cutoff)
-                retry_after = oldest_minute + timedelta(minutes=1)
-                retry_seconds = max(1, int((retry_after - now).total_seconds()))
-                return False, (
-                    f"Text rate limit reached ({self.per_minute}/minute). "
-                    f"Please wait about {retry_seconds}s and try again."
-                )
-
-            if hour_count >= self.per_hour:
-                oldest_hour = min(requests)
-                retry_after = oldest_hour + timedelta(hours=1)
-                retry_minutes = max(1, int((retry_after - now).total_seconds() // 60) + 1)
-                return False, (
-                    f"Text rate limit reached ({self.per_hour}/hour). "
-                    f"Please try again in about {retry_minutes} minute(s)."
-                )
-
-            requests.append(now)
-            self._requests[user_id] = requests
-
-        return True, None
-
-
 class DiscordBot(discord.Client):
     """
     Main Discord bot class that handles events and coordinates services.
@@ -206,6 +156,19 @@ class DiscordBot(discord.Client):
         except Exception as exc:
             logger.error(f"Failed to initialize token tracker: {exc}", exc_info=True)
             self.token_tracker = None
+
+        self.report_service = None
+        self.report_web_server = None
+        try:
+            self.report_service = ReportService(config.token_db_path)
+            if config.report_web_enabled:
+                self.report_web_server = ReportWebServer(
+                    self.report_service,
+                    host=config.report_web_host,
+                    port=config.report_web_port,
+                )
+        except Exception as exc:
+            logger.error(f"Failed to initialize report tracking: {exc}", exc_info=True)
         
         # Initialize core services
         self.context_collector = ContextCollector(
@@ -332,6 +295,12 @@ class DiscordBot(discord.Client):
                 self.image_generation_enabled = False
                 # Disable enhanced command handler if image service fails
                 self.enhanced_command_handler = None
+
+        if self.report_web_server:
+            try:
+                await self.report_web_server.start()
+            except Exception as e:
+                logger.error(f"Failed to start report web UI: {e}", exc_info=True)
         
         # Log service initialization status
         logger.info("🔧 Service initialization status:")
@@ -341,6 +310,14 @@ class DiscordBot(discord.Client):
         logger.info(f"  • User Experience Service: ✅ Active")
         logger.info(f"  • Image Processing: {'✅ Active' if self.image_processing_service else '❌ Disabled'}")
         logger.info(f"  • Enhanced Commands: {'✅ Active' if self.enhanced_command_handler else '❌ Disabled'}")
+        logger.info(
+            "  - Report Tracking: %s",
+            "Active" if self.report_service else "Disabled",
+        )
+        logger.info(
+            "  - Report Web UI: %s",
+            "Active" if self.report_web_server and self.report_web_server.is_running else "Disabled",
+        )
         
         # Set bot status
         activity = discord.Activity(
@@ -413,6 +390,13 @@ class DiscordBot(discord.Client):
             status['enhanced_commands'] = "✅ Available"
         else:
             status['enhanced_commands'] = "❌ Unavailable"
+        status['report_tracking'] = "Available" if self.report_service else "Unavailable"
+        if self.report_web_server and self.report_web_server.is_running:
+            status['report_web_ui'] = "Available"
+        elif self.config.report_web_enabled:
+            status['report_web_ui'] = "Unavailable"
+        else:
+            status['report_web_ui'] = "Disabled"
         
         return status
     
@@ -427,6 +411,12 @@ class DiscordBot(discord.Client):
     async def close(self):
         """Clean up resources when the bot is shutting down."""
         logger.info("🛑 Bot shutting down, cleaning up resources...")
+        
+        if self.report_web_server:
+            try:
+                await self.report_web_server.stop()
+            except Exception as e:
+                logger.error(f"Error stopping report web UI: {e}")
         
         # Stop image processing service
         if self.image_processing_service:

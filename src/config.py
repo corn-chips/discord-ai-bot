@@ -33,6 +33,11 @@ class BotConfig:
     dev_mode_enabled: bool = False
     token_db_path: str = "data/token_usage.db"
 
+    # === Reports ===
+    report_web_enabled: bool = True
+    report_web_host: str = "127.0.0.1"
+    report_web_port: int = 8080
+
     # === Logging ===
     log_level: str = "INFO"
     log_file: Optional[str] = None
@@ -273,6 +278,11 @@ class BotConfig:
             dev_mode_enabled=get('bot', 'dev_mode', False),
             token_db_path=os.getenv('TOKEN_DB_PATH') or get('bot', 'token_db_path', 'data/token_usage.db'),
 
+            # Reports
+            report_web_enabled=get('reports', 'web_enabled', True),
+            report_web_host=get('reports', 'web_host', '127.0.0.1'),
+            report_web_port=int(get('reports', 'web_port', 8080)),
+
             # Logging
             log_level=get('logging', 'level', 'INFO'),
             log_file=os.getenv('LOG_FILE') or get('logging', 'file', None),
@@ -407,6 +417,10 @@ class BotConfig:
             errors.append("context.context_messages_low <= medium <= high is required")
         if not self.token_db_path or not self.token_db_path.strip():
             errors.append("bot.token_db_path must be a valid filesystem path")
+        if not self.report_web_host or not str(self.report_web_host).strip():
+            errors.append("reports.web_host must not be empty")
+        if self.report_web_port <= 0 or self.report_web_port > 65535:
+            errors.append("reports.web_port must be between 1 and 65535")
         if self.reply_context_range <= 0:
             errors.append("context.reply_range must be positive")
         if self.max_context_images < 0:
@@ -580,6 +594,7 @@ class BotConfig:
     def get_feature_availability(self) -> dict[str, bool]:
         """Get availability status of optional features."""
         return {
+            'report_tracking': True,
             'image_generation': bool(self.nano_banana_api_key),
             'enhanced_ux': self.show_typing_indicators or self.use_rich_embeds or self.enable_reaction_feedback,
             'message_splitting': self.preserve_code_blocks or self.add_continuation_indicators,

@@ -64,9 +64,7 @@ class GeminiClient:
                 logger.info("=" * 80)
                 return
             
-            logger.info(f"API Key length: {len(self.config.gemini_api_key)} characters")
-            logger.info(f"API Key (first 8 chars): {self.config.gemini_api_key[:8]}...")
-            logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
+            logger.info("Gemini API key configured (length=%s characters)", len(self.config.gemini_api_key))
             
             # Initialize the new SDK client
             self.client = genai.Client(api_key=self.config.gemini_api_key)
@@ -358,6 +356,20 @@ class GeminiClient:
             target_model = self.config.default_model
 
         return self.set_model(target_model)
+
+    def get_model_for_complexity(self, complexity_level: str) -> str:
+        """Resolve the configured model for a complexity tier without mutating shared state."""
+        normalized_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"
+        target_model = self._get_model_complexity_entry(normalized_level)["model"]
+        if target_model not in self.config.valid_models:
+            logger.warning(
+                "Configured model '%s' for complexity '%s' is invalid; falling back to default model '%s'",
+                target_model,
+                normalized_level,
+                self.config.default_model,
+            )
+            return self.config.default_model
+        return target_model
 
     def _get_max_output_tokens_for_complexity(
         self,
@@ -745,6 +757,44 @@ Candidate messages:
         except Exception as exc:
             logger.warning("Context selector failed; using recent context fallback: %s", exc)
             return sorted_context[-max_messages:]
+
+    async def embed_texts(
+        self,
+        texts: List[str],
+        *,
+        model_name: Optional[str] = None,
+        task_type: Optional[str] = None,
+    ) -> List[Optional[List[float]]]:
+        """Embed text for local RAG retrieval without mutating generation model state."""
+        if not texts:
+            return []
+        if not self.client:
+            logger.warning("Gemini client unavailable; embeddings skipped")
+            return [None for _ in texts]
+
+        target_model = model_name or getattr(self.config, "rag_embedding_model", "gemini-embedding-2")
+        sanitized_texts = [(text or "").strip() for text in texts]
+        try:
+            config_kwargs = {"auto_truncate": True}
+            if task_type:
+                config_kwargs["task_type"] = task_type
+            response = await self.client.aio.models.embed_content(
+                model=target_model,
+                contents=sanitized_texts,
+                config=types.EmbedContentConfig(**config_kwargs),
+            )
+            embeddings = getattr(response, "embeddings", None) or []
+            vectors: List[Optional[List[float]]] = []
+            for embedding in embeddings:
+                values = getattr(embedding, "values", None)
+                vectors.append([float(value) for value in values] if values else None)
+            while len(vectors) < len(sanitized_texts):
+                vectors.append(None)
+            logger.info("Generated %s/%s RAG embedding(s) with model %s", sum(1 for item in vectors if item), len(texts), target_model)
+            return vectors[: len(sanitized_texts)]
+        except Exception as exc:
+            logger.warning("Gemini embedding request failed with model %s: %s", target_model, exc)
+            return [None for _ in sanitized_texts]
     
     async def generate_response(
         self,
@@ -816,7 +866,7 @@ Candidate messages:
         logger.info("API CALL INITIATED")
         logger.info(f"Model: {target_model}")
         logger.info(f"Thinking level: {target_thinking_level}")
-        logger.info(f"API Key (last 4 chars): ...{self.config.gemini_api_key[-4:]}")
+        logger.info("Gemini API key configured for request")
         
         # Determine if Google Search should be used
         if search_override is not None:
@@ -861,7 +911,7 @@ Candidate messages:
             logger.info(f"Added {len(audio_files)} audio file(s) to request")
             
         logger.info(f"Input prompt length: {len(formatted_prompt)} characters")
-        logger.info(f"Input prompt (first 200 chars): {formatted_prompt[:200]}")
+        logger.debug("Input prompt preview redacted")
         
         # Log context details
         if context:
@@ -962,7 +1012,7 @@ Candidate messages:
                             logger.info("Successfully generated response from Gemini API")
                             logger.info(f"Output token count (estimated): {len(response_text_content.split())}")
                             logger.info(f"Output length: {len(response_text_content)} characters")
-                            logger.info(f"Output (first 200 chars): {response_text_content[:200]}")
+                            logger.debug("Output preview redacted")
                             logger.info("=" * 80)
                             
                             self.performance_logger.log_api_call(
@@ -1003,7 +1053,7 @@ Candidate messages:
                             logger.warning(f"Gemini API response hit max tokens, returning partial response ({len(response_text_content)} chars)")
                             logger.info(f"Output token count (estimated): {len(response_text_content.split())}")
                             logger.info(f"Output length: {len(response_text_content)} characters")
-                            logger.info(f"Output (first 200 chars): {response_text_content[:200]}")
+                            logger.debug("Output preview redacted")
                             logger.info("=" * 80)
                             
                             self.performance_logger.log_api_call(
@@ -1207,6 +1257,14 @@ Candidate messages:
         logger.info(f"Making API call to model: {target_model}")
         logger.info(f"Using search-enabled model: {use_search}")
         logger.info(f"Resolved thinking level: {thinking_level or 'default'}")
+
+        has_multimodal_parts = (
+            isinstance(content, list)
+            and any(not isinstance(part, str) for part in content)
+        )
+        if use_search and has_multimodal_parts:
+            logger.info("Disabling Google Search for multimodal request so media parts are preserved")
+            use_search = False
         
         # Configure tools
         tools = []
@@ -1262,13 +1320,7 @@ Candidate messages:
             thinking_config=thinking_config,
         )
         
-        # Convert content to string if it's a list (multimodal not supported with search yet)
-        # Note: The new SDK supports multimodal content differently, but for now we'll stick to text if search is on
-        if use_search and isinstance(content, list):
-            content_str = content[0] if content else ""
-            logger.warning("⚠️ Multimodal input detected with search - using text only")
-        else:
-            content_str = content
+        content_str = content
         
         model_name = target_model
         
@@ -1513,15 +1565,44 @@ Candidate messages:
 
         # Add conversation context if provided
         if context and len(context) > 0:
-            prompt_parts.append("\n--- Selected Conversation Context (oldest to newest) ---")
-            prompt_parts.append(
-                "This is a relevance-selected slice of Discord history, not the whole channel. "
-                "Higher CTX_MSG numbers are more recent. Use it only when it helps answer the current user; "
-                "ignore unrelated chatter and prioritize the current user message, reply relationships, and the newest relevant messages."
-            )
-            
-            # Sort context by timestamp to ensure chronological order
-            sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
+            has_rag_metadata = any(getattr(msg, "retrieval_source", None) for msg in context)
+            if has_rag_metadata:
+                prompt_parts.append("\n--- Retrieved Discord Context (RAG) ---")
+                prompt_parts.append(
+                    "This is a compact, relevance-ranked retrieval pack from Discord history. "
+                    "It may include pinned memories, direct reply anchors, recent continuity, lexical matches, and semantic matches. "
+                    "Use provenance labels when helpful, ignore unrelated items, and prioritize the current user message."
+                )
+                pins = [msg for msg in context if getattr(msg, "is_pinned_memory", False)]
+                anchors = [
+                    msg for msg in context
+                    if not getattr(msg, "is_pinned_memory", False)
+                    and "reply_anchor" in (getattr(msg, "retrieval_source", "") or "")
+                ]
+                others = [
+                    msg for msg in context
+                    if msg not in pins and msg not in anchors
+                ]
+                anchors = sorted(anchors, key=lambda msg: (msg.timestamp, msg.message_id))
+                # Lowest-confidence retrieved items first so the strongest item sits closest to the user prompt.
+                others = sorted(
+                    others,
+                    key=lambda msg: (
+                        getattr(msg, "retrieval_score", 0.0) or 0.0,
+                        msg.timestamp,
+                        msg.message_id,
+                    ),
+                )
+                sorted_context = pins + anchors + others
+            else:
+                prompt_parts.append("\n--- Selected Conversation Context (oldest to newest) ---")
+                prompt_parts.append(
+                    "This is a relevance-selected slice of Discord history, not the whole channel. "
+                    "Higher CTX_MSG numbers are more recent. Use it only when it helps answer the current user; "
+                    "ignore unrelated chatter and prioritize the current user message, reply relationships, and the newest relevant messages."
+                )
+                # Sort context by timestamp to ensure chronological order
+                sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
             
             for idx, msg in enumerate(sorted_context, start=1):
                 # Include explicit sequence + id for deterministic ordering references
@@ -1529,9 +1610,17 @@ Candidate messages:
                 
                 # Mark replied-to messages for clarity
                 reply_indicator = " (replying)" if msg.is_reply else ""
+                source = getattr(msg, "retrieval_source", None)
+                score = getattr(msg, "retrieval_score", None)
+                reason = getattr(msg, "retrieval_reason", None)
+                source_suffix = ""
+                if source:
+                    score_text = f", score={score:.3f}" if isinstance(score, (int, float)) else ""
+                    reason_text = f", reason={reason}" if reason else ""
+                    source_suffix = f" | source={source}{score_text}{reason_text}"
                 
                 formatted_msg = (
-                    f"[CTX_MSG_{idx:03d} | message_id={msg.message_id} | time={time_str}] "
+                    f"[CTX_MSG_{idx:03d} | message_id={msg.message_id} | time={time_str}{source_suffix}] "
                     f"{msg.author}{reply_indicator}: {msg.content}"
                 )
                 prompt_parts.append(formatted_msg)

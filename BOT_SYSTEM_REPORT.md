@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-This report summarizes a full read-only review of the Discord AI bot repository. I used four focused subagents for independent coverage, then verified and synthesized their findings locally.
+This report began as a full read-only review of the Discord AI bot repository. It has been updated with the implemented hybrid message RAG architecture added on 2026-06-17.
 
 Subagent coverage:
 
@@ -11,12 +11,10 @@ Subagent coverage:
 - Persistence, reports, settings, preferences, visibility, pins, rate limiting, token tracking, help, and tests.
 - Operations, dependencies, logging, errors, security/privacy, scripts, README, and existing diagrams.
 
-Local verification performed after review:
+Local verification performed after the RAG implementation:
 
-- `python -m pytest -q` passed: 2 tests.
+- `python -m pytest -q` passed: 9 tests.
 - `python -m compileall -q src tests scripts main.py` passed.
-
-No source behavior was changed by this review.
 
 ## Executive Summary
 
@@ -25,22 +23,20 @@ This is a Python `discord.py` bot centered on `src/bot/discord_bot.py`. It respo
 The high-level architecture is service-oriented:
 
 - `main.py` loads `.env`, validates `config.yaml`, creates `DiscordBot`, and connects to Discord.
-- `DiscordBot` owns the Discord lifecycle, message event handling, live mode, context collection, media extraction, Gemini calls, token tracking, response rendering, and safe sending.
+- `DiscordBot` owns the Discord lifecycle, message event handling, live mode, message indexing, hybrid context retrieval, media extraction, Gemini calls, token tracking, response rendering, and safe sending.
 - `commands.py` registers slash commands and creates several persistence services that are attached back to the bot instance.
-- `GeminiClient` handles text generation, routing support, context selection, search grounding, safety settings, thinking config, retry handling, and token extraction.
+- `GeminiClient` handles text generation, routing support, context reranking, Gemini embeddings, search grounding, safety settings, thinking config, retry handling, and token extraction.
+- `MessageIndexService`, `HybridContextRetriever`, and `ContextPackBuilder` implement the local SQLite hybrid RAG system.
 - `ImageProcessingService` and `NanoBananaClient` handle queued image edits and direct text-to-image generation.
 - Support services handle reports, local report web UI, user preferences, channel settings, pins, message hide/unhide, token leaderboard, rate limiting, UX helpers, and help content.
 
-Main risks found:
+Main remaining risks found:
 
 1. Several global configuration/dev commands are not permission-gated, including `/config model`, `/config deepsearch`, `/config debug`, `/config image-generation`, and `/dev`.
-2. Per-user preferred model handling mutates the shared `GeminiClient` model state, so one user's preference can affect later or concurrent users.
-3. Logs include sensitive material: API key fragments, prompts, context, model outputs, uploaded file previews, and raw exception text.
-4. The report web UI has no authentication or CSRF protection. It is safe only while bound to localhost.
-5. `/pin` stores "always remember" memories, but `PinService.get_pins_for_prompt()` is not called by the response path, so pins do not currently affect AI responses.
-6. Search plus multimodal input silently drops non-text parts in `GeminiClient`, so an online-search request with images/audio may ignore media.
-7. `scripts/health_check.py` imports the removed `google.generativeai` SDK even though `requirements.txt` now installs `google-genai`.
-8. README/deployment docs reference files not present in the repo and contain stale behavior descriptions.
+2. Some logs still include raw exception text and operational metadata; prompt text, API key fragments, model output previews, message text, and uploaded file previews have been redacted in the main message path.
+3. The report web UI has no authentication or CSRF protection. It is safe only while bound to localhost.
+4. `scripts/health_check.py` imports the removed `google.generativeai` SDK even though `requirements.txt` now installs `google-genai`.
+5. README/deployment docs reference files not present in the repo and contain stale behavior descriptions.
 
 ## Repository Map
 
@@ -56,6 +52,9 @@ Main risks found:
 | `src/bot/commands.py` | Slash command registration and command handlers. Also creates channel settings, pin, visibility, and user preference services. |
 | `src/bot/enhanced_command_handler.py` | Gemini router-based natural language intent/complexity classification and image edit/generation command handling. |
 | `src/services/context_collector.py` | Fetches and formats recent channel/reply context as `MessageContext` objects. |
+| `src/services/message_index_service.py` | SQLite message index for hybrid RAG: message metadata, FTS5 lexical index, embedding storage, retrieval metrics, backfill, and visibility state. |
+| `src/services/hybrid_context_retriever.py` | Hybrid RAG coordinator for reply anchors, pinned memories, recent messages, FTS hits, semantic hits, fusion scoring, reranking, and fallback signaling. |
+| `src/services/context_pack_builder.py` | Builds prompt-ready `MessageContext` packs with retrieval provenance and pinned-memory ordering. |
 | `src/services/gemini_client.py` | Main Gemini text/multimodal client with context selector, prompt construction, search grounding, thinking config, safety settings, retries, and response parsing. |
 | `src/services/nano_banana_client.py` | Gemini image model client for text-to-image and image editing. |
 | `src/services/image_processing_service.py` | Queue, worker pool, image validation, image edit rate limiting, progress, job state, and image service health. |
@@ -66,7 +65,7 @@ Main risks found:
 | `src/services/channel_settings_service.py` | SQLite-backed per-channel personality and live-mode settings. |
 | `src/services/user_preferences_service.py` | SQLite-backed per-user preferred model and language. |
 | `src/services/message_visibility_service.py` | Stores original bot message content for `/hide` and `/unhide`. |
-| `src/services/pin_service.py` | Stores/list/deletes per-channel pinned memories. Prompt injection helper exists but is unused. |
+| `src/services/pin_service.py` | Stores/list/deletes per-channel pinned memories. Pins are loaded by the hybrid RAG packer for prompt context. |
 | `src/services/rate_limiter.py` | In-memory per-user text rate limiter for mention/live message paths. |
 | `src/services/token_tracker.py` | SQLite-backed token usage event storage and leaderboard aggregation. |
 | `src/services/user_experience_service.py` | Typing indicators, embeds, reaction feedback, progress/completion notifications, cleanup. |
@@ -93,7 +92,7 @@ flowchart TD
   Validate --> Logging["Configure logging"]
   Logging --> BotInit["Create DiscordBot"]
 
-  BotInit --> Services["Initialize services: ErrorManager, TokenTracker, ReportService, ContextCollector, GeminiClient, MessageSplitter, ContentRenderer, UX, rate limiter"]
+  BotInit --> Services["Initialize services: ErrorManager, TokenTracker, ReportService, ContextCollector, GeminiClient, MessageIndexService, ContextPackBuilder, HybridContextRetriever, MessageSplitter, ContentRenderer, UX, rate limiter"]
   Services --> ImageConfigured{"Nano Banana / Gemini image key configured?"}
   ImageConfigured -->|Yes| ImageService["Create ImageProcessingService and EnhancedCommandHandler"]
   ImageConfigured -->|No| NoImage["Image features disabled"]
@@ -109,7 +108,8 @@ flowchart TD
   Listen --> Msg["on_message"]
   Msg --> IgnoreBots{"Author is bot?"}
   IgnoreBots -->|Yes| Drop["Ignore"]
-  IgnoreBots -->|No| LiveCheck{"Guild channel live mode enabled?"}
+  IgnoreBots -->|No| IndexIncoming["Index readable incoming message into SQLite message_index and FTS5"]
+  IndexIncoming --> LiveCheck{"Guild channel live mode enabled?"}
 
   LiveCheck -->|Yes| LiveQueue["Enqueue message in per-channel live queue"]
   LiveQueue --> LiveWorker["Live worker batches pending messages"]
@@ -142,9 +142,17 @@ flowchart TD
 
   ExtractPrompt --> EmptyPrompt{"Prompt or media present?"}
   EmptyPrompt -->|No| AskForPrompt["Ask user to include prompt/media"]
-  EmptyPrompt -->|Yes| Collect["Collect channel and reply context"]
-  Collect --> SelectContext["Gemini router selects relevant context by complexity limit"]
-  SelectContext --> Media["Extract current/replied/context images, PDFs, audio, and text files"]
+  EmptyPrompt -->|Yes| RAGEnabled{"Hybrid message RAG enabled?"}
+  RAGEnabled -->|Yes| RAGBackfill["One-time recent channel backfill into message index"]
+  RAGBackfill --> RAGRetrieve["Retrieve reply anchors, pins, recent messages, FTS5 hits, and embedding hits"]
+  RAGRetrieve --> RAGFuse["Fuse scores with recency/reply/pin boosts"]
+  RAGFuse --> RAGRerank["Optional Gemini router rerank of top fused candidates"]
+  RAGRerank --> PackContext["Pack provenance-bearing context with pins first and strongest hits near user prompt"]
+  RAGEnabled -->|No| Collect["Legacy: collect channel and reply context"]
+  RAGRetrieve -->|Failure| Collect
+  Collect --> SelectContext["Legacy: Gemini router selects relevant recent context by complexity limit"]
+  SelectContext --> PackContext
+  PackContext --> Media["Extract current/replied/context images, PDFs, audio, and text files"]
   Media --> Prefs["Apply channel personality and user language/model preferences"]
   Prefs --> Search{"Search enabled by forced DeepSearch or prompt heuristics?"}
   Search --> GeminiText["Gemini generate_response with prompt, selected context, media parts, safety settings, thinking config"]
@@ -157,8 +165,9 @@ flowchart TD
   Renderer --> Long{"Over Discord limit?"}
   Long -->|Yes| Split["MessageSplitter and paginated embed"]
   Long -->|No| Reply["Discord reply"]
-  Split --> Sources["Send grounding sources if present"]
-  Reply --> Sources
+  Split --> IndexBotReply["Index bot response text for future RAG recall"]
+  Reply --> IndexBotReply
+  IndexBotReply --> Sources["Send grounding sources if present"]
 
   Listen --> Slash["Slash command interaction"]
   Slash --> CommandGroup["setup_commands callbacks"]
@@ -199,6 +208,7 @@ Key config sections:
 - `reports`: local report web UI toggle, host, port.
 - `logging`: level, file, performance logging.
 - `context`: channel/reply context windows and max context images.
+- `rag`: local hybrid message retrieval, embedding model, scope, backfill, candidate counts, reranking, recency decay, and context caps.
 - `response`: timeouts and retries.
 - `messages`: Discord split lengths and code-block preservation.
 - `ux`: typing indicators, rich embeds, reactions, suggestions.
@@ -240,6 +250,7 @@ Live mode behavior:
 - Uses a per-channel queue and task to batch pending messages.
 - Applies the same text rate limiter to the last message author.
 - Keeps rolling in-memory live context with up to `self._live_turn_window * 2` entries.
+- Text-only live responses now merge hybrid RAG context with the rolling in-memory buffer when RAG is enabled.
 - Uses `config.router_model_name` as `_live_model_name`.
 - Forces short prompt mode and disables search for live responses.
 - If attachments are present, falls back into the full `_process_message_with_context()` media path with live-specific overrides.
@@ -285,7 +296,91 @@ The normal text path is:
 12. `ContentRenderer` post-processes LaTeX and tables.
 13. Long content is split through `MessageSplitter` and sent as a paginated embed; shorter content is sent as a direct Discord reply.
 
-Search and multimodal caveat: if search is enabled and the request content is a list, `_generate_response_async()` uses only the first text part. That means images/audio are dropped for search-enabled multimodal requests.
+Search and multimodal behavior: if search is requested for a multimodal request, `_generate_response_async()` disables search for that single request so images/audio/files are preserved instead of being silently dropped.
+
+## Message RAG / Context System
+
+The response path now uses a local hybrid message RAG system before falling back to the previous recent-history selector. The old `ContextCollector` remains available for reply-context fetches, legacy fallback, and context media extraction, but it is no longer the only source of conversation memory.
+
+### Persistent Message Index
+
+`MessageIndexService` stores readable Discord messages in the existing SQLite database path from `config.token_db_path`.
+
+- Incoming non-bot messages are indexed in `DiscordBot.on_message()` before live-mode and mention filtering, so unmentioned channel history can later be retrieved.
+- Bot responses are indexed after a successful safe send when `rag.index_bot_responses` is enabled.
+- `/hide` marks hidden bot messages as hidden in the index; `/unhide` restores them to the FTS index.
+- `/rag backfill` scans recent channel history and stores messages in the same index.
+- Embeddings are generated opportunistically for pending indexed messages during retrieval. Until embeddings exist, recent and FTS retrieval still work.
+
+### Hybrid Retrieval Flow
+
+```mermaid
+flowchart TD
+  Incoming["Discord message received"] --> Index["Index incoming non-bot message"]
+  Index --> Trigger{"Live mode or bot mention/reply?"}
+  Trigger -->|No| Idle["No response; message remains indexed"]
+  Trigger -->|Yes| Query["Extract user prompt and request complexity"]
+  Query --> Backfill["Backfill recent channel history once per channel"]
+  Backfill --> Pins["Load pinned memories"]
+  Backfill --> Reply["Fetch direct reply/thread anchors"]
+  Backfill --> Recent["Load recent indexed messages"]
+  Backfill --> FTS["Run SQLite FTS5 lexical search"]
+  Backfill --> Embeddings["Embed pending docs and current query, then run semantic search"]
+  Pins --> Fuse["Merge candidate pool"]
+  Reply --> Fuse
+  Recent --> Fuse
+  FTS --> Fuse
+  Embeddings --> Fuse
+  Fuse --> Score["Apply source weights, recency decay, reply boost, and pin priority"]
+  Score --> Rerank["Optional Gemini router rerank"]
+  Rerank --> Pack["ContextPackBuilder creates prompt pack with provenance"]
+  Pack --> Prompt["GeminiClient.format_prompt renders RAG context"]
+  Prompt --> Generate["Gemini response generation"]
+  Generate --> Send["Send response safely"]
+  Send --> IndexReply["Index bot response for future recall"]
+```
+
+### Prompt Assembly
+
+`ContextPackBuilder` and `GeminiClient.format_prompt()` now produce a provenance-bearing RAG section:
+
+- pinned memories first,
+- direct reply/thread anchors next,
+- retrieved recent/lexical/semantic hits afterward,
+- lower-confidence retrieved items before higher-confidence items so the strongest evidence is closest to the final user prompt,
+- each item includes `message_id`, timestamp, retrieval source, score, and reason where available.
+
+The response model receives compact context rather than a raw channel dump. Media extraction still uses the selected context message IDs to pull image attachments from Discord history.
+
+### Failure And Fallback Behavior
+
+Hybrid retrieval is fail-open:
+
+- If SQLite retrieval, embedding generation, or reranking raises unexpectedly, `_process_message_with_context()` logs the failure and falls through to the legacy `ContextCollector` plus `GeminiClient.select_relevant_context()` path.
+- If Gemini embeddings are unavailable, lexical/recent retrieval still runs.
+- Transient embedding failures stay retryable with bounded backoff before a row is marked failed.
+- If FTS5 is unavailable in SQLite, semantic/recent/pin/reply retrieval still runs.
+- If the router reranker returns no useful selection, fused ranking remains the retrieval source.
+
+### Privacy, Scope, And Logging
+
+- Retrieval is scoped to the current channel by default. Same-guild cross-channel retrieval is disabled unless `rag.cross_channel_enabled` is set.
+- Retrieval metrics store selected IDs, query length, fallback reason, and latency, not raw prompts or raw message text.
+- The main message path no longer logs raw mention content, raw prompt previews, model output previews, uploaded file previews, or API key fragments.
+- Pinned memories are explicit per-channel persistent context and are included only for the current channel.
+
+### Architecture Change Log
+
+- Added `MessageIndexService` with additive SQLite tables: `message_index`, `message_search_fts`, `message_embeddings`, and `message_retrieval_events`.
+- Added `HybridContextRetriever` for reply anchors, pins, recent messages, lexical search, semantic search, score fusion, optional reranking, and retrieval metrics.
+- Added `ContextPackBuilder` and extended `MessageContext` with retrieval metadata.
+- Added `rag` configuration defaults in `config.yaml` and `BotConfig`.
+- Added admin-only `/rag status` and `/rag backfill`.
+- Replaced shared per-user model mutation with request-scoped model overrides.
+- Preserved multimodal parts by disabling web search for search-triggered multimodal requests instead of dropping images/audio.
+- Wired bot response indexing and pin prompt usage into the main and live response paths.
+- Added edit/delete synchronization so deleted messages are removed from retrieval and edited messages refresh the index.
+- Added bounded embedding retry metadata and channel-scoped RAG status counts.
 
 ## Image Generation And Editing
 
@@ -339,6 +434,7 @@ Current command surface:
 - `/api-usage`: API/rate-limit/performance summary.
 - `/usage-report`: attaches CSV and Markdown usage reports since startup.
 - `/deepresearch`: search research phase plus template-based synthesis into a Markdown file.
+- `/rag status`, `/rag backfill`: admin-only local message RAG status and channel-history indexing.
 - `/summarize`: summarize recent channel conversation.
 - `/personality`, `/personality-info`: per-channel personality.
 - `/live`: per-channel mention-free mode.
@@ -360,6 +456,10 @@ Most persistent services share `data/token_usage.db` unless `TOKEN_DB_PATH` or `
 | `user_preferences` | `UserPreferencesService` | Per-user preferred model/language. |
 | `hidden_messages` | `MessageVisibilityService` | Original content for bot messages hidden by `/hide`. |
 | `pinned_messages` | `PinService` | Per-channel pinned memory text. |
+| `message_index` | `MessageIndexService` | Indexed Discord message metadata and normalized searchable text for local RAG. |
+| `message_search_fts` | `MessageIndexService` | SQLite FTS5 lexical index over message text, author names, and attachment summaries. |
+| `message_embeddings` | `MessageIndexService` | Stored Gemini embedding vectors and embedding status for semantic retrieval. |
+| `message_retrieval_events` | `MessageIndexService` | Retrieval observability: selected IDs, query length, fallback reason, and latency without raw prompt text. |
 
 In-memory state:
 
@@ -378,7 +478,7 @@ Persistence concerns:
 - Token rows, reports, pins, hidden message originals, and admin notes have no retention policy.
 - Token leaderboard groups by `user_id`, `username`, `guild_id`, and `guild_name`; renamed users/guilds can split leaderboard entries.
 - `/hide` stores only message content. Embeds, attachments, stickers, and other message fields are not restored.
-- `/pin` stores memory, but prompt injection is currently not wired into the response generation path.
+- `/pin` stores memory and the hybrid RAG path injects current-channel pins into prompt context.
 
 ## External API Use
 
@@ -524,10 +624,17 @@ Existing tests:
 - `tests/test_report_service.py`
   - create/get/update report,
   - invalid status rejection.
+- `tests/test_message_rag_services.py`
+  - FTS lexical search,
+  - semantic vector scoring,
+  - hidden/deleted message exclusion,
+  - retryable embedding failure state,
+  - channel-scoped RAG status counts,
+  - context-pack pin ordering and limits.
 
 Local result:
 
-- `2 passed in 57.41s`.
+- `9 passed in 5.37s`.
 - Compile check succeeded.
 
 Coverage gaps:
@@ -536,14 +643,14 @@ Coverage gaps:
 - Live-mode queue/rolling context behavior.
 - Context selection fallbacks.
 - Gemini response finish-reason handling.
-- Search plus multimodal behavior.
+- Hybrid retriever integration against mocked Discord/Gemini failures.
 - Media extraction for images, PDFs, audio, and text files.
 - Message splitting and renderer behavior.
 - Error redaction and dev-mode behavior.
 - Command permissions.
-- User preferences and shared model state.
+- Global runtime control permissions.
 - Channel settings and live mode persistence.
-- Pins, hide/unhide, token tracker, rate limiter.
+- Token tracker and rate limiter edge cases.
 - Report web UI routes/auth assumptions.
 - Health-check compatibility.
 - README/docs consistency.
@@ -557,14 +664,15 @@ Coverage gaps:
    - `/dev` has the admin permission decorator commented out.
    - Impact: any user can degrade privacy, change cost/performance, or expose stack traces.
 
-2. Shared mutable Gemini model state
-   - Per-user preferences call `gemini_client.set_model()` before request generation.
-   - Impact: a user's preferred model can leak into subsequent or concurrent requests.
-   - Preferred design: pass `model_override=prefs.preferred_model` request-scoped instead of mutating global client state.
+2. Shared mutable Gemini runtime controls
+   - Per-user preferences now use request-scoped model overrides, but global `/config model`, `/config thinking`, and `/config deepsearch` still mutate shared bot-wide runtime state.
+   - Impact: authorized-or-unauthorized command use can change behavior for all users until changed again.
+   - Preferred design: permission-gate global controls and consider persisting bot defaults separately from per-request overrides.
 
 3. Sensitive logging
-   - API key fragments, prompt/context/output snippets, uploaded file previews, user IDs, and raw exceptions are logged.
-   - Impact: logs become sensitive data stores and can expose private Discord content or secrets.
+   - The main message path now redacts API key fragments, prompt/output previews, raw mention content, and uploaded file previews.
+   - Raw exceptions and some operational metadata can still be logged.
+   - Impact: logs remain operationally sensitive and should be treated as restricted data.
 
 4. Unauthenticated report web UI
    - `ReportWebServer` allows status/admin-note mutation through POST.
@@ -577,36 +685,28 @@ Coverage gaps:
 
 ### Medium
 
-1. Pins do not affect prompts
-   - `PinService.get_pins_for_prompt()` is unused.
-   - Impact: `/pin` promises persistent memory but does not influence AI answers.
-
-2. Search drops multimodal parts
-   - Search-enabled requests with list content use only the text part.
-   - Impact: questions about current info plus image/audio can ignore attached media.
-
-3. Command registration is not idempotent
+1. Command registration is not idempotent
    - `setup_commands()` runs inside `on_ready()`.
    - Impact: reconnects can cause duplicate command registration or setup failures.
 
-4. Image generation bypasses image edit queue/limit path
+2. Image generation bypasses image edit queue/limit path
    - Direct `NanoBananaClient.edit_image(None, ...)` call skips queue and per-user image edit limit.
    - Impact: inconsistent rate/concurrency behavior.
 
-5. Image client timeout is not enforced
+3. Image client timeout is not enforced
    - `NanoBananaClient.timeout` is stored but not wrapped around SDK calls.
    - Impact: image calls plus retries can exceed expected Discord command/job time.
 
-6. Synchronous SQLite in async paths
-   - Several services use direct sqlite calls inside command handlers.
+4. Synchronous SQLite in async paths
+   - The new RAG service uses async wrappers around thread offloading, but several older services still use direct sqlite calls inside command handlers.
    - Impact: slow disk or lock contention can block the event loop.
 
-7. Help system is dormant
+5. Help system is dormant
    - `HelpSystem` exists and content references `/help`, but no `/help` command is registered.
    - Impact: user-facing help text is stale/inaccessible.
 
-8. Data retention is undefined
-   - Hidden message originals, pins, token usage, reports, and admin notes are retained indefinitely.
+6. Data retention is undefined
+   - Hidden message originals, pins, token usage, reports, admin notes, and indexed RAG messages are retained indefinitely.
    - Impact: privacy and storage growth risk.
 
 ### Low
@@ -631,18 +731,17 @@ Coverage gaps:
 1. Lock down command permissions.
    - Add admin/default permission checks for global configuration, debug/dev, image-generation toggle, and destructive visibility controls.
 
-2. Make model selection request-scoped.
-   - Replace per-user preference `set_model()` mutation with `model_override`.
-   - Consider making `/config model` persist a bot default separately from per-request overrides.
+2. Finish runtime-state hardening.
+   - Per-user model preferences are request-scoped now.
+   - Permission-gate or persist bot-wide `/config model`, `/config thinking`, and `/config deepsearch` changes intentionally.
 
 3. Redact sensitive logs.
    - Remove API key fragments.
    - Stop logging prompt/context/output/file previews at info level.
    - Gate detailed traces to local logs only, not Discord replies.
 
-4. Wire pins into prompts or rename the feature.
-   - If intended as memory, inject `get_pins_for_prompt(channel_id)` before the user prompt or as selected context.
-   - If not intended, adjust `/pin` copy and docs.
+4. Add retention and pruning.
+   - Define TTLs or admin cleanup commands for RAG-indexed messages, hidden message originals, pins, reports, and token usage.
 
 5. Fix health check.
    - Use `google-genai` consistently.
@@ -654,8 +753,8 @@ Coverage gaps:
 
 7. Add tests around high-risk logic.
    - Command permission checks.
-   - preference/model isolation.
-   - pin prompt injection.
+   - global runtime permission checks.
+   - RAG fallback behavior with mocked Discord/Gemini failures.
    - error redaction.
    - report web UI routes.
    - token tracker aggregation.
@@ -668,4 +767,4 @@ Coverage gaps:
 
 ## Bottom Line
 
-The bot has a coherent central pipeline and a useful service split, but several production concerns are currently mixed into normal user-accessible behavior: global mutable model state, unrestricted runtime controls, verbose sensitive logging, stale health/deployment docs, and unimplemented pinned-memory prompt injection. The core happy path compiles and the existing report-service tests pass, but current test coverage is too narrow for the size of the bot's runtime surface.
+The bot now has a persistent local hybrid RAG memory with channel-scoped retrieval, pins, bot-response recall, edit/delete synchronization, and legacy fallback. Remaining production concerns are mostly around permission-gating global runtime controls, retention policy, report-web hardening, stale health/deployment docs, and broader integration coverage.

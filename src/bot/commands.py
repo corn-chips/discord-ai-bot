@@ -1335,7 +1335,62 @@ async def setup_commands(
             logger.error(f"Deep research error: {e}", exc_info=True)
             await interaction.followup.send(f"❌ An error occurred during deep research: {str(e)}")
 
+    rag_group = app_commands.Group(name="rag", description="Manage local message retrieval memory")
+
+    @rag_group.command(name="status", description="Show local message RAG index status")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def rag_status(interaction: discord.Interaction):
+        index_service = getattr(bot, "message_index_service", None)
+        if not index_service:
+            await interaction.response.send_message("Message RAG index is not available.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        status = await index_service.get_status_async(channel_id=interaction.channel_id)
+        embed = discord.Embed(
+            title="Message RAG Status",
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="Enabled", value=str(config.rag_enabled), inline=True)
+        embed.add_field(name="FTS5", value="Enabled" if status["fts_enabled"] else "Unavailable", inline=True)
+        embed.add_field(name="Embedding Model", value=status["embedding_model"], inline=False)
+        embed.add_field(name="Indexed Messages", value=f"{status['messages']:,}", inline=True)
+        embed.add_field(name="Embedded", value=f"{status['embedded']:,}", inline=True)
+        embed.add_field(name="Pending", value=f"{status['pending_embeddings']:,}", inline=True)
+        embed.add_field(name="Failed Embeddings", value=f"{status['failed_embeddings']:,}", inline=True)
+        embed.set_footer(text="Counts are scoped to this channel where applicable.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @rag_group.command(name="backfill", description="Index recent channel history for local message RAG")
+    @app_commands.describe(limit="Number of recent messages to scan; defaults to rag.backfill_limit")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def rag_backfill(interaction: discord.Interaction, limit: Optional[int] = None):
+        index_service = getattr(bot, "message_index_service", None)
+        if not index_service:
+            await interaction.response.send_message("Message RAG index is not available.", ephemeral=True)
+            return
+        if not interaction.channel:
+            await interaction.response.send_message("This command must be run in a channel.", ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        scan_limit = max(0, min(limit or config.rag_backfill_limit, config.channel_history_limit))
+        indexed = await index_service.backfill_channel(
+            interaction.channel,
+            limit=scan_limit,
+            include_bot_user_id=bot.user.id if config.rag_index_bot_responses and bot.user else None,
+        )
+        if getattr(bot, "hybrid_context_retriever", None):
+            bot.hybrid_context_retriever._backfilled_channels.add(interaction.channel.id)
+
+        await interaction.followup.send(
+            f"Backfilled {indexed} message(s) into the local RAG index for this channel.",
+            ephemeral=True,
+        )
+
     bot.tree.add_command(config_group)
+    bot.tree.add_command(rag_group)
     
     
     @bot.tree.command(name="summarize", description="Summarize the current conversation")
@@ -1532,9 +1587,11 @@ async def setup_commands(
 
     # ── Pin / Memory Commands ─────────────────────────────────────────
 
-    pin_service = PinService(db_path=config.token_db_path)
+    pin_service = getattr(bot, "_pin_service", None) or PinService(db_path=config.token_db_path)
     bot._pin_service = pin_service
-    message_visibility_service = MessageVisibilityService(db_path=config.token_db_path)
+    if getattr(bot, "hybrid_context_retriever", None):
+        bot.hybrid_context_retriever.set_pin_service(pin_service)
+    message_visibility_service = getattr(bot, "_message_visibility_service", None) or MessageVisibilityService(db_path=config.token_db_path)
     bot._message_visibility_service = message_visibility_service
 
     class PinDeleteButton(discord.ui.Button):
@@ -1661,6 +1718,8 @@ async def setup_commands(
 
                 try:
                     await candidate.edit(content=".")
+                    if getattr(bot, "message_index_service", None):
+                        bot.message_index_service.mark_hidden(candidate.id, True)
                     hidden_count += 1
                 except (discord.Forbidden, discord.HTTPException) as exc:
                     logger.warning(f"Failed to hide message {candidate.id}: {exc}")
@@ -1733,6 +1792,8 @@ async def setup_commands(
 
                 try:
                     await target.edit(content=original_content)
+                    if getattr(bot, "message_index_service", None):
+                        bot.message_index_service.mark_hidden(target.id, False)
                     message_visibility_service.remove_hidden_message(message_id)
                     restored_count += 1
                 except (discord.Forbidden, discord.HTTPException) as exc:

@@ -33,6 +33,10 @@ from ..services.content_renderer import ContentRenderer
 from ..services.rate_limiter import TextRateLimiter
 from ..services.report_service import ReportService
 from ..services.report_web_server import ReportWebServer
+from ..services.pin_service import PinService
+from ..services.message_index_service import MessageIndexService
+from ..services.context_pack_builder import ContextPackBuilder
+from ..services.hybrid_context_retriever import HybridContextRetriever
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
@@ -177,6 +181,21 @@ class DiscordBot(discord.Client):
             cutoff_hours=config.context_cutoff_hours
         )
         self.gemini_client = GeminiClient(config)
+        self._pin_service = PinService(db_path=config.token_db_path)
+        self.message_index_service = MessageIndexService(
+            config.token_db_path,
+            embedding_model=config.rag_embedding_model,
+        )
+        self.context_pack_builder = ContextPackBuilder()
+        self.hybrid_context_retriever = HybridContextRetriever(
+            config=config,
+            message_index=self.message_index_service,
+            context_collector=self.context_collector,
+            gemini_client=self.gemini_client,
+            pack_builder=self.context_pack_builder,
+            pin_service=self._pin_service,
+        )
+        self._message_index_service = self.message_index_service
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
             preserve_formatting=config.preserve_code_blocks,
@@ -315,6 +334,10 @@ class DiscordBot(discord.Client):
             "Active" if self.report_service else "Disabled",
         )
         logger.info(
+            "  - Hybrid Message RAG: %s",
+            "Active" if self.config.rag_enabled else "Disabled",
+        )
+        logger.info(
             "  - Report Web UI: %s",
             "Active" if self.report_web_server and self.report_web_server.is_running else "Disabled",
         )
@@ -357,6 +380,46 @@ class DiscordBot(discord.Client):
             logger.error(f"Event args: {args}")
         if kwargs:
             logger.error(f"Event kwargs: {kwargs}")
+
+    async def on_raw_message_delete(self, payload):
+        """Keep the persistent RAG index aligned when Discord deletes a message."""
+        if not self.config.rag_enabled:
+            return
+        try:
+            await self.message_index_service.mark_deleted_async(payload.message_id)
+        except Exception as exc:
+            logger.debug("Failed to mark deleted message %s in RAG index: %s", payload.message_id, exc)
+
+    async def on_raw_bulk_message_delete(self, payload):
+        """Keep the persistent RAG index aligned for bulk Discord deletes."""
+        if not self.config.rag_enabled:
+            return
+        for message_id in payload.message_ids:
+            try:
+                await self.message_index_service.mark_deleted_async(message_id)
+            except Exception as exc:
+                logger.debug("Failed to mark bulk-deleted message %s in RAG index: %s", message_id, exc)
+
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        """Refresh or remove indexed content when an indexed Discord message changes."""
+        if not self.config.rag_enabled:
+            return
+        author = getattr(after, "author", None)
+        if getattr(author, "bot", False):
+            if not self.config.rag_index_bot_responses:
+                return
+            if not self.user or getattr(author, "id", None) != self.user.id:
+                return
+
+        try:
+            indexed = await self.message_index_service.index_discord_message_async(
+                after,
+                include_bot_user_id=self.user.id if self.user else None,
+            )
+            if not indexed:
+                await self.message_index_service.mark_deleted_async(after.id)
+        except Exception as exc:
+            logger.debug("Failed to refresh edited message %s in RAG index: %s", after.id, exc)
 
     async def get_service_health_status(self) -> Dict[str, str]:
         """
@@ -617,6 +680,25 @@ class DiscordBot(discord.Client):
             )
 
         rolling_context = list(self._get_live_context_buffer(channel_id))
+        live_context = rolling_context
+        if self.config.rag_enabled:
+            try:
+                rag_context = await self.hybrid_context_retriever.retrieve(
+                    message=target_message,
+                    user_prompt=user_prompt,
+                    complexity_level="low",
+                    bot_user_id=self.user.id if self.user else None,
+                )
+                seen_context_ids = set()
+                live_context = []
+                for ctx in rag_context + rolling_context:
+                    if ctx.message_id in seen_context_ids:
+                        continue
+                    seen_context_ids.add(ctx.message_id)
+                    live_context.append(ctx)
+            except Exception as exc:
+                logger.debug("Live-mode RAG retrieval failed; using rolling context: %s", exc)
+
         personality_prompt = self._live_reply_style_instruction
         if hasattr(self, "_channel_settings_service") and self._channel_settings_service:
             channel_personality = self._channel_settings_service.get_personality_prompt(channel_id)
@@ -625,9 +707,10 @@ class DiscordBot(discord.Client):
 
         api_response = await self.gemini_client.generate_response(
             user_prompt,
-            rolling_context,
+            live_context,
             model_override=self._live_model_name,
             prompt_mode_override="short",
+            complexity_override="low",
             search_override=False,
             personality_prompt=personality_prompt,
             language=None,
@@ -683,6 +766,12 @@ class DiscordBot(discord.Client):
         if message.author.bot:
             return
 
+        if self.config.rag_enabled:
+            try:
+                await self.message_index_service.index_discord_message_async(message)
+            except Exception as exc:
+                logger.debug("Failed to index incoming message %s for RAG: %s", message.id, exc)
+
         # Live mode bypasses mention requirements in opted-in channels.
         if message.guild and self._is_live_mode_enabled(message.channel.id):
             await self._enqueue_live_message(message)
@@ -702,7 +791,7 @@ class DiscordBot(discord.Client):
         )
         
         context_logger.info(f"Bot mentioned by {message.author} in #{getattr(message.channel, 'name', 'DM')}")
-        logger.debug(f"Message content: {message.content}")
+        logger.debug("Mention message content redacted")
         
         try:
             is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(message.author.id)
@@ -713,6 +802,7 @@ class DiscordBot(discord.Client):
 
             complexity_level = "low"
             routed_intent = "unknown"
+            model_override = None
 
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:
@@ -722,10 +812,13 @@ class DiscordBot(discord.Client):
                     context_logger.info("Message handled by enhanced command handler")
                     return
                 
-                # If not fully handled, use the complexity level to set the model
-                # The router model has already determined the appropriate complexity
-                context_logger.info(f"Setting model based on router complexity level: {complexity_level}")
-                self.gemini_client.set_model_by_complexity(complexity_level)
+                # The router model has already determined the appropriate complexity.
+                model_override = self.gemini_client.get_model_for_complexity(complexity_level)
+                context_logger.info(
+                    "Resolved request model %s for router complexity level %s",
+                    model_override,
+                    complexity_level,
+                )
             
             # Extract the user's prompt by removing bot mentions
             user_prompt = self._extract_user_prompt(message)
@@ -749,6 +842,7 @@ class DiscordBot(discord.Client):
                 user_prompt,
                 complexity_level=complexity_level,
                 routed_intent=routed_intent,
+                model_override=model_override,
             )
             
             # Log processing completion (will be called from _generate_and_send_response)
@@ -808,6 +902,34 @@ class DiscordBot(discord.Client):
             routed_intent: Router-detected intent from the first pass
         """
         try:
+            if self.config.rag_enabled and routed_intent != "image_generate":
+                try:
+                    rag_context = await self.hybrid_context_retriever.retrieve(
+                        message=message,
+                        user_prompt=user_prompt,
+                        complexity_level=complexity_level,
+                        bot_user_id=self.user.id if self.user else None,
+                    )
+                    await self._generate_and_send_response(
+                        message,
+                        user_prompt,
+                        rag_context,
+                        model_override=model_override,
+                        prompt_mode_override=prompt_mode_override,
+                        search_override=search_override,
+                        show_status_message=show_status_message,
+                        skip_context_media=skip_context_media,
+                        apply_user_preferences=apply_user_preferences,
+                        complexity_level=complexity_level,
+                    )
+                    return
+                except Exception as exc:
+                    logger.warning(
+                        "Hybrid RAG failed for message %s; using legacy context fallback: %s",
+                        message.id,
+                        exc,
+                    )
+
             context_limit = self._get_context_limit_for_complexity(complexity_level)
             candidate_limit = max(self.config.max_context_messages, context_limit)
             logger.debug(
@@ -905,6 +1027,7 @@ class DiscordBot(discord.Client):
                 show_status_message=show_status_message,
                 skip_context_media=skip_context_media,
                 apply_user_preferences=apply_user_preferences,
+                complexity_level=complexity_level,
             )
             
         except discord.Forbidden as e:
@@ -1664,6 +1787,7 @@ class DiscordBot(discord.Client):
         show_status_message: bool = True,
         skip_context_media: bool = False,
         apply_user_preferences: bool = True,
+        complexity_level: str = "low",
     ):
         """
         Generate AI response and send it to Discord with comprehensive error handling.
@@ -1686,6 +1810,7 @@ class DiscordBot(discord.Client):
                     # Track performance metrics
                     import time
                     start_time = time.time()
+                    effective_model_override = model_override
                     
                     # Extract images from the message
                     if skip_context_media:
@@ -1750,7 +1875,7 @@ class DiscordBot(discord.Client):
                             logger.info(f"  {idx}. {file_info['name']}")
                             logger.info(f"     - Size: {file_info['size']} bytes ({file_info['size'] / 1024:.2f} KB)")
                             logger.info(f"     - Content length: {len(file_info['content'])} characters")
-                            logger.info(f"     - First 100 chars: {file_info['content'][:100]}...")
+                            logger.debug("     - File content preview redacted")
                     else:
                         logger.info("❌ No files were successfully processed")
                     
@@ -1832,16 +1957,16 @@ class DiscordBot(discord.Client):
                         personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
                     if apply_user_preferences and hasattr(self, '_user_prefs_service') and self._user_prefs_service:
                         prefs = self._user_prefs_service.get_preferences(message.author.id)
-                        if prefs.preferred_model and model_override is None:
-                            self.gemini_client.set_model(prefs.preferred_model)
+                        if prefs.preferred_model and effective_model_override is None:
+                            effective_model_override = prefs.preferred_model
                         user_language = prefs.preferred_language
 
                     # Get estimated response time and show it to user
                     estimated_time = self.gemini_client.get_estimated_response_time(
-                        model_name=model_override or self.gemini_client.get_current_model(),
+                        model_name=effective_model_override or self.gemini_client.get_current_model(),
                         prompt_mode=prompt_mode_override,
                     )
-                    model_name = model_override or self.gemini_client.get_current_model()
+                    model_name = effective_model_override or self.gemini_client.get_current_model()
                     
                     # Send status message by default so users get immediate feedback
                     status_message = None
@@ -1856,7 +1981,7 @@ class DiscordBot(discord.Client):
                     
                     # Use dynamic timeout based on model complexity
                     api_timeout = self.gemini_client.get_timeout_for_model(
-                        model_override or self.gemini_client.get_current_model(),
+                        effective_model_override or self.gemini_client.get_current_model(),
                         prompt_mode_override,
                     ) + 10  # Add buffer
 
@@ -1870,8 +1995,9 @@ class DiscordBot(discord.Client):
                             image_context=image_context if image_context else None,
                             audio_files=audio_files if audio_files else None,
                             on_chunk=on_chunk,
-                            model_override=model_override,
+                            model_override=effective_model_override,
                             prompt_mode_override=prompt_mode_override,
+                            complexity_override=complexity_level,
                             search_override=search_override,
                             personality_prompt=personality_prompt,
                             language=user_language,
@@ -1925,7 +2051,7 @@ class DiscordBot(discord.Client):
                             logger.debug(f"Failed to delete status message after timeout: {e}")
                     
                     timeout_used = self.gemini_client.get_timeout_for_model(
-                        model_override or self.gemini_client.get_current_model(),
+                        effective_model_override or self.gemini_client.get_current_model(),
                         prompt_mode_override,
                     )
                     logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
@@ -2006,6 +2132,32 @@ class DiscordBot(discord.Client):
         except Exception as exc:
             logger.error(f"Failed to record token usage for user {message.author.id}: {exc}")
 
+    async def _index_sent_bot_response(
+        self,
+        *,
+        source_message: discord.Message,
+        sent_message: Optional[discord.Message],
+        response_content: str,
+    ) -> None:
+        """Persist this bot's response so future RAG retrieval can recall it."""
+        if not self.config.rag_enabled or not self.config.rag_index_bot_responses:
+            return
+        if not sent_message or not response_content:
+            return
+        try:
+            await self.message_index_service.index_bot_response_async(
+                message_id=sent_message.id,
+                channel_id=sent_message.channel.id,
+                guild_id=source_message.guild.id if source_message.guild else None,
+                author_id=self.user.id if self.user else None,
+                author_name=self.user.display_name if self.user else "Grok",
+                content_text=response_content,
+                reply_to_message_id=source_message.id,
+                created_at=getattr(sent_message, "created_at", datetime.now(timezone.utc)),
+            )
+        except Exception as exc:
+            logger.debug("Failed to index bot response %s for RAG: %s", getattr(sent_message, "id", None), exc)
+
     async def _send_response_safely(self, message: discord.Message, response_content: str, grounding_sources: list = None):
         """
         Safely send a response to Discord with error handling.
@@ -2043,6 +2195,12 @@ class DiscordBot(discord.Client):
             # Send grounding sources as a separate message if available
             if grounding_sources and len(grounding_sources) > 0:
                 await self._send_grounding_sources(sent_message, grounding_sources)
+
+            await self._index_sent_bot_response(
+                source_message=message,
+                sent_message=sent_message,
+                response_content=response_content,
+            )
             
             return sent_message
             

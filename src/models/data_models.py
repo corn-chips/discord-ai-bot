@@ -25,6 +25,10 @@ class MessageContext:
     channel_id: Optional[int] = None
     is_reply: bool = False
     replied_to_id: Optional[int] = None
+    retrieval_source: Optional[str] = None
+    retrieval_score: Optional[float] = None
+    retrieval_reason: Optional[str] = None
+    is_pinned_memory: bool = False
 
     def __post_init__(self):
         """Validate the message context after initialization."""

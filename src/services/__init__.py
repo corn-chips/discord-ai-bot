@@ -13,6 +13,9 @@ from .user_experience_service import UserExperienceService
 from .rate_limiter import TextRateLimiter
 from .report_service import ReportService
 from .report_web_server import ReportWebServer
+from .message_index_service import MessageIndexService
+from .context_pack_builder import ContextPackBuilder
+from .hybrid_context_retriever import HybridContextRetriever
 
 __all__ = [
     'GeminiClient',
@@ -23,4 +26,7 @@ __all__ = [
     'TextRateLimiter',
     'ReportService',
     'ReportWebServer',
+    'MessageIndexService',
+    'ContextPackBuilder',
+    'HybridContextRetriever',
 ]

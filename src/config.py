@@ -52,6 +52,20 @@ class BotConfig:
     context_cutoff_hours: int = 24
     max_context_images: int = 6
 
+    # === Hybrid Message RAG ===
+    rag_enabled: bool = True
+    rag_embedding_model: str = "gemini-embedding-2"
+    rag_cross_channel_enabled: bool = False
+    rag_index_bot_responses: bool = True
+    rag_backfill_limit: int = 500
+    rag_lexical_candidates: int = 40
+    rag_semantic_candidates: int = 40
+    rag_rerank_candidates: int = 30
+    rag_recency_half_life_hours: int = 72
+    rag_max_context_messages_low: int = 4
+    rag_max_context_messages_medium: int = 8
+    rag_max_context_messages_high: int = 12
+
     # === Response ===
     response_timeout: int = 30
     extended_timeout: int = 120
@@ -297,6 +311,20 @@ class BotConfig:
             context_cutoff_hours=get('context', 'cutoff_hours', 24),
             max_context_images=get('context', 'max_images', 6),
 
+            # Hybrid Message RAG
+            rag_enabled=get('rag', 'enabled', True),
+            rag_embedding_model=str(get('rag', 'embedding_model', 'gemini-embedding-2')).strip() or 'gemini-embedding-2',
+            rag_cross_channel_enabled=get('rag', 'cross_channel_enabled', False),
+            rag_index_bot_responses=get('rag', 'index_bot_responses', True),
+            rag_backfill_limit=int(get('rag', 'backfill_limit', 500)),
+            rag_lexical_candidates=int(get('rag', 'lexical_candidates', 40)),
+            rag_semantic_candidates=int(get('rag', 'semantic_candidates', 40)),
+            rag_rerank_candidates=int(get('rag', 'rerank_candidates', 30)),
+            rag_recency_half_life_hours=int(get('rag', 'recency_half_life_hours', 72)),
+            rag_max_context_messages_low=int(get('rag', 'max_context_messages_low', 4)),
+            rag_max_context_messages_medium=int(get('rag', 'max_context_messages_medium', 8)),
+            rag_max_context_messages_high=int(get('rag', 'max_context_messages_high', 12)),
+
             # Response
             response_timeout=get('response', 'timeout', 30),
             extended_timeout=get('response', 'extended_timeout', 120),
@@ -425,6 +453,23 @@ class BotConfig:
             errors.append("context.reply_range must be positive")
         if self.max_context_images < 0:
             errors.append("context.max_images must be zero or positive")
+        if self.rag_enabled:
+            if not self.rag_embedding_model:
+                errors.append("rag.embedding_model must not be empty when rag.enabled is true")
+            if self.rag_backfill_limit < 0:
+                errors.append("rag.backfill_limit must be zero or positive")
+            if self.rag_lexical_candidates <= 0 or self.rag_semantic_candidates <= 0:
+                errors.append("rag.lexical_candidates and rag.semantic_candidates must be positive")
+            if self.rag_rerank_candidates < 0:
+                errors.append("rag.rerank_candidates must be zero or positive")
+            if self.rag_recency_half_life_hours <= 0:
+                errors.append("rag.recency_half_life_hours must be positive")
+            if (
+                self.rag_max_context_messages_low <= 0
+                or self.rag_max_context_messages_medium <= 0
+                or self.rag_max_context_messages_high <= 0
+            ):
+                errors.append("rag.max_context_messages_low/medium/high must all be positive")
         if self.response_timeout <= 0:
             errors.append("response.timeout must be positive")
         if self.max_retries < 0:

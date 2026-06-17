@@ -32,6 +32,21 @@ context:
   cutoff_hours: 24                     # Exclude messages older than this
   max_images: 6                        # Max recent channel images to include as model context
 
+# --- Hybrid Message RAG ---
+rag:
+  enabled: true
+  embedding_model: "gemini-embedding-2"
+  cross_channel_enabled: false          # Keep retrieval scoped to current channel unless explicitly enabled
+  index_bot_responses: true             # Store this bot's own replies for future recall
+  backfill_limit: 500                   # One-time recent history backfill per channel
+  lexical_candidates: 40                # FTS5/BM25 candidate count
+  semantic_candidates: 40               # Embedding candidate count
+  rerank_candidates: 30                 # Top fused candidates offered to router-model reranker
+  recency_half_life_hours: 72           # Recency decay half-life for fusion scoring
+  max_context_messages_low: 4
+  max_context_messages_medium: 8
+  max_context_messages_high: 12
+
 # --- Response Settings ---
 response:
   timeout: 30                          # Seconds to wait for API response

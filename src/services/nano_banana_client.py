@@ -109,7 +109,12 @@ class NanoBananaClient:
                 return
             
             # Initialize the new google.genai client
-            self.client = genai.Client(api_key=api_key)
+            self.client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(
+                    timeout=max(1, int(self.timeout * 1000)),
+                ),
+            )
             
             logger.info(f"✅ Gemini image client initialized (model: {self.model_name})")
         except Exception as e:

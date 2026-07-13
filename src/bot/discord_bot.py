@@ -410,6 +410,10 @@ class DiscordBot(discord.Client):
                 return
             if not self.user or getattr(author, "id", None) != self.user.id:
                 return
+            # Paginator navigation and timeout only mutate embeds/components.
+            # Keep the canonical full generated text stored for RAG in that case.
+            if before.content == after.content:
+                return
 
         try:
             indexed = await self.message_index_service.index_discord_message_async(
@@ -630,28 +634,64 @@ class DiscordBot(discord.Client):
         if not messages:
             return False
 
+        channel_id = messages[-1].channel.id
+        attachment_index = next(
+            (index for index, msg in enumerate(messages) if msg.attachments),
+            None,
+        )
+        if attachment_index is not None:
+            remaining_messages = messages[attachment_index + 1:]
+            messages = messages[:attachment_index + 1]
+            if remaining_messages:
+                lock = self._get_live_channel_lock(channel_id)
+                async with lock:
+                    newly_queued = self._live_pending_messages.get(channel_id, [])
+                    self._live_pending_messages[channel_id] = remaining_messages + newly_queued
+
+        rate_limit_replied = False
+        allowed_user_ids = set()
+        messages_by_user: Dict[int, List[discord.Message]] = {}
+        for queued_message in messages:
+            messages_by_user.setdefault(queued_message.author.id, []).append(queued_message)
+
+        for user_id, user_messages in messages_by_user.items():
+            is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(user_id)
+            if is_allowed:
+                allowed_user_ids.add(user_id)
+            else:
+                try:
+                    await user_messages[-1].reply(rate_limit_message)
+                    rate_limit_replied = True
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning(
+                        "Could not send live-mode rate-limit reply to user %s: %s",
+                        user_id,
+                        exc,
+                    )
+
+        messages = [msg for msg in messages if msg.author.id in allowed_user_ids]
+        if not messages:
+            return rate_limit_replied
+
         target_message = messages[-1]
-        channel_id = target_message.channel.id
-
-        is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(target_message.author.id)
-        if not is_allowed:
-            await target_message.reply(rate_limit_message)
-            return True
-
-        has_attachments = any(msg.attachments for msg in messages)
         prompt_entries: List[Tuple[discord.Message, str]] = []
         for msg in messages:
             prompt = self._extract_user_prompt(msg)
             if prompt:
                 prompt_entries.append((msg, prompt))
 
-        # Attachment-heavy requests fall back to the full pipeline, still with live model overrides.
-        if has_attachments:
-            attachment_message = next(
-                (msg for msg in reversed(messages) if msg.attachments),
-                target_message,
-            )
-            attachment_prompt = self._extract_user_prompt(attachment_message)
+        # Process through the first attachment in sequence and retain the suffix
+        # for the next worker pass. This keeps every accepted message ordered and
+        # prevents an attachment from discarding adjacent queued text.
+        if messages[-1].attachments:
+            attachment_message = messages[-1]
+            attachment_entries = [
+                (msg, self._extract_user_prompt(msg))
+                for msg in messages
+            ]
+            attachment_entries = [entry for entry in attachment_entries if entry[1]]
+            attachment_prompt = self._build_live_user_prompt(attachment_entries)
+
             await self._process_message_with_context(
                 attachment_message,
                 attachment_prompt,
@@ -669,15 +709,7 @@ class DiscordBot(discord.Client):
         if not prompt_entries:
             return False
 
-        if len(prompt_entries) == 1:
-            user_prompt = prompt_entries[0][1]
-        else:
-            user_prompt_lines = [f"- {msg.author.display_name}: {prompt}" for msg, prompt in prompt_entries]
-            user_prompt = (
-                "New live chat messages (oldest to newest):\n"
-                + "\n".join(user_prompt_lines)
-                + "\nReply once to all of these in one short chat response."
-            )
+        user_prompt = self._build_live_user_prompt(prompt_entries)
 
         rolling_context = list(self._get_live_context_buffer(channel_id))
         live_context = rolling_context
@@ -750,7 +782,24 @@ class DiscordBot(discord.Client):
             )
             return True
 
-        return False
+        return rate_limit_replied
+
+    @staticmethod
+    def _build_live_user_prompt(prompt_entries: List[Tuple[discord.Message, str]]) -> str:
+        """Build one ordered prompt from a live-mode message batch."""
+        if not prompt_entries:
+            return ""
+        if len(prompt_entries) == 1:
+            return prompt_entries[0][1]
+        user_prompt_lines = [
+            f"- {msg.author.display_name}: {prompt}"
+            for msg, prompt in prompt_entries
+        ]
+        return (
+            "New live chat messages (oldest to newest):\n"
+            + "\n".join(user_prompt_lines)
+            + "\nReply once to all of these in one short chat response."
+        )
 
     async def on_message(self, message: discord.Message):
         """
@@ -813,11 +862,11 @@ class DiscordBot(discord.Client):
                     return
                 
                 # The router model has already determined the appropriate complexity.
-                model_override = self.gemini_client.get_model_for_complexity(complexity_level)
+                routed_model = self.gemini_client.get_model_for_complexity(complexity_level)
                 context_logger.info(
-                    "Resolved request model %s for router complexity level %s",
-                    model_override,
+                    "Router complexity %s recommends model %s; final model follows request/user/global precedence",
                     complexity_level,
+                    routed_model,
                 )
             
             # Extract the user's prompt by removing bot mentions
@@ -1065,6 +1114,34 @@ class DiscordBot(discord.Client):
         if complexity_level == "medium":
             return self.config.context_messages_medium
         return self.config.context_messages_low
+
+    def _resolve_request_preferences(
+        self,
+        *,
+        user_id: int,
+        request_model_override: Optional[str],
+        apply_user_preferences: bool,
+        complexity_level: str,
+    ) -> Tuple[str, Optional[str]]:
+        """Resolve request model precedence and the user's language preference."""
+        preferred_model = None
+        preferred_language = None
+        user_prefs_service = getattr(self, "_user_prefs_service", None)
+        if apply_user_preferences and user_prefs_service:
+            prefs = user_prefs_service.get_preferences(user_id)
+            preferred_model = prefs.preferred_model
+            preferred_language = prefs.preferred_language
+
+        if request_model_override:
+            model_name = request_model_override
+        elif preferred_model:
+            model_name = preferred_model
+        elif self.gemini_client.has_runtime_model_override():
+            model_name = self.gemini_client.get_current_model()
+        else:
+            model_name = self.gemini_client.get_model_for_complexity(complexity_level)
+
+        return model_name, preferred_language
     
     def _extract_user_prompt(self, message: discord.Message) -> str:
         """
@@ -1804,6 +1881,7 @@ class DiscordBot(discord.Client):
             context: The collected conversation context
         """
         # Add typing indicator to show the bot is working
+        status_message = None
         try:
             async with message.channel.typing():
                 try:
@@ -1952,14 +2030,14 @@ class DiscordBot(discord.Client):
                     
                     # Load channel personality and user preferences
                     personality_prompt = None
-                    user_language = None
                     if hasattr(self, '_channel_settings_service') and self._channel_settings_service:
                         personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
-                    if apply_user_preferences and hasattr(self, '_user_prefs_service') and self._user_prefs_service:
-                        prefs = self._user_prefs_service.get_preferences(message.author.id)
-                        if prefs.preferred_model and effective_model_override is None:
-                            effective_model_override = prefs.preferred_model
-                        user_language = prefs.preferred_language
+                    effective_model_override, user_language = self._resolve_request_preferences(
+                        user_id=message.author.id,
+                        request_model_override=effective_model_override,
+                        apply_user_preferences=apply_user_preferences,
+                        complexity_level=complexity_level,
+                    )
 
                     # Get estimated response time and show it to user
                     estimated_time = self.gemini_client.get_estimated_response_time(
@@ -1969,7 +2047,6 @@ class DiscordBot(discord.Client):
                     model_name = effective_model_override or self.gemini_client.get_current_model()
                     
                     # Send status message by default so users get immediate feedback
-                    status_message = None
                     if show_status_message:
                         try:
                             status_message = await message.reply(
@@ -1979,17 +2056,10 @@ class DiscordBot(discord.Client):
                         except Exception as e:
                             logger.warning(f"Failed to send status message: {e}")
                     
-                    # Use dynamic timeout based on model complexity
-                    api_timeout = self.gemini_client.get_timeout_for_model(
-                        effective_model_override or self.gemini_client.get_current_model(),
-                        prompt_mode_override,
-                    ) + 10  # Add buffer
-
                     # Thinking now uses Gemini API native thinking_config; no custom <thinking> parsing.
                     on_chunk = None
 
-                    api_response = await asyncio.wait_for(
-                        self.gemini_client.generate_response(
+                    api_response = await self.gemini_client.generate_response(
                             enhanced_prompt, context,
                             images=images if images else None,
                             image_context=image_context if image_context else None,
@@ -2001,9 +2071,7 @@ class DiscordBot(discord.Client):
                             search_override=search_override,
                             personality_prompt=personality_prompt,
                             language=user_language,
-                        ),
-                        timeout=api_timeout
-                    )
+                        )
                     
                     # Delete status message if it was sent
                     if status_message:
@@ -2183,8 +2251,9 @@ class DiscordBot(discord.Client):
             if attachments:
                 logger.info(f"Content renderer produced {len(attachments)} image attachment(s) (LaTeX)")
 
-            # Check if response is too long for Discord (2000 character limit)
-            if len(response_content) > 2000:
+            # Honor both the configured split threshold and Discord's hard limit.
+            direct_message_limit = min(self.config.message_split_length, 2000)
+            if len(response_content) > direct_message_limit:
                 logger.info(f"Response too long ({len(response_content)} chars), splitting into multiple messages")
                 sent_message = await self._send_split_response(message, response_content, attachments=attachments)
             else:
@@ -2357,52 +2426,16 @@ class DiscordBot(discord.Client):
         Returns:
             The first sent message (for reply threading)
         """
-        # Use safe split length from config
-        max_length = self.config.safe_split_length
-        
-        # Split by paragraphs first to avoid breaking mid-sentence
-        parts = []
-        current_part = ""
-        
-        # Split by double newlines (paragraphs) or single newlines if no paragraphs
-        paragraphs = response_content.split('\n\n')
-        if len(paragraphs) == 1:
-            paragraphs = response_content.split('\n')
-        
-        for paragraph in paragraphs:
-            # If a single paragraph is too long, split it by sentences
-            if len(paragraph) > max_length:
-                sentences = paragraph.replace('. ', '.|').replace('! ', '!|').replace('? ', '?|').split('|')
-                for sentence in sentences:
-                    if len(current_part) + len(sentence) + 2 > max_length:
-                        if current_part:
-                            parts.append(current_part.strip())
-                            current_part = sentence
-                    else:
-                        current_part += sentence + " "
-            else:
-                # Check if adding this paragraph exceeds the limit
-                if len(current_part) + len(paragraph) + 2 > max_length:
-                    if current_part:
-                        parts.append(current_part.strip())
-                        current_part = paragraph
-                else:
-                    current_part += paragraph + "\n\n"
-        
-        # Add any remaining content
-        if current_part.strip():
-            parts.append(current_part.strip())
+        max_length = min(self.config.message_split_length, 2000)
+        parts = [
+            response_content[start:start + max_length]
+            for start in range(0, len(response_content), max_length)
+        ]
         
         # Send the parts — first part replies to original, rest are regular messages
         first_message = None
 
         for idx, part in enumerate(parts):
-            # Add continuation indicator
-            if idx > 0:
-                part = f"*(continued...)*\n\n{part}"
-            if idx < len(parts) - 1:
-                part = f"{part}\n\n*(continues...)*"
-
             if idx == 0:
                 sent = await message.reply(part, files=attachments if attachments else None)
                 first_message = sent

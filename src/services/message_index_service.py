@@ -335,7 +335,7 @@ class MessageIndexService:
         created_at: datetime,
         content_text: str,
         attachment_summary: str = "",
-        hidden: bool = False,
+        hidden: Optional[bool] = None,
     ) -> bool:
         content_text = self._normalize_text(content_text)
         if not content_text:
@@ -347,10 +347,16 @@ class MessageIndexService:
         try:
             with self._connection() as conn:
                 existing = conn.execute(
-                    "SELECT content_hash FROM message_index WHERE message_id = ?",
+                    "SELECT content_hash, hidden, deleted_at FROM message_index WHERE message_id = ?",
                     (message_id,),
                 ).fetchone()
                 content_changed = existing is None or existing["content_hash"] != content_hash
+                resolved_hidden = (
+                    bool(existing["hidden"])
+                    if hidden is None and existing is not None
+                    else bool(hidden)
+                )
+                is_deleted = existing is not None and existing["deleted_at"] is not None
                 conn.execute(
                     """
                     INSERT INTO message_index (
@@ -371,8 +377,7 @@ class MessageIndexService:
                         content_text = excluded.content_text,
                         attachment_summary = excluded.attachment_summary,
                         content_hash = excluded.content_hash,
-                        hidden = excluded.hidden,
-                        deleted_at = NULL
+                        hidden = excluded.hidden
                     """,
                     (
                         message_id,
@@ -387,12 +392,12 @@ class MessageIndexService:
                         content_text,
                         attachment_summary,
                         content_hash,
-                        1 if hidden else 0,
+                        1 if resolved_hidden else 0,
                     ),
                 )
                 if self.fts_enabled:
                     conn.execute("DELETE FROM message_search_fts WHERE rowid = ?", (message_id,))
-                    if not hidden:
+                    if not resolved_hidden and not is_deleted:
                         conn.execute(
                             """
                             INSERT INTO message_search_fts(rowid, content_text, author_name, attachment_summary)
@@ -439,7 +444,7 @@ class MessageIndexService:
                     (
                         message_id,
                         self.embedding_model,
-                        "pending" if content_changed and not hidden else "done" if hidden else "pending",
+                        "pending" if content_changed and not is_deleted else "done",
                         content_hash,
                     ),
                 )

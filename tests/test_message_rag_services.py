@@ -94,6 +94,36 @@ class MessageIndexServiceTest(unittest.TestCase):
         )
         self.assertNotIn(302, [item.message_id for item in lexical])
 
+    def test_ordinary_upsert_preserves_hidden_state(self):
+        self._upsert(303, "Canonical hidden response")
+        self.service.mark_hidden(303, True)
+
+        self._upsert(303, "Edited presentation text")
+
+        recent_ids = [
+            item.message_id
+            for item in self.service.search_recent(
+                guild_id=10,
+                channel_id=20,
+                cross_channel=False,
+                limit=10,
+            )
+        ]
+        self.assertNotIn(303, recent_ids)
+
+    def test_hidden_edit_is_embedded_after_unhide(self):
+        self._upsert(304, "Original hidden response")
+        self.service.mark_hidden(304, True)
+        self._upsert(304, "Updated while hidden")
+
+        self.service.mark_hidden(304, False)
+
+        pending_ids = {
+            message_id
+            for message_id, _text, _content_hash in self.service.get_pending_embeddings()
+        }
+        self.assertIn(304, pending_ids)
+
     def test_deleted_messages_are_excluded_from_retrieval(self):
         self._upsert(351, "Keep this release note")
         self._upsert(352, "Delete this stale release note")
@@ -119,6 +149,23 @@ class MessageIndexServiceTest(unittest.TestCase):
             limit=10,
         )
         self.assertNotIn(352, [item.message_id for item in lexical])
+
+    def test_stale_upsert_does_not_resurrect_deleted_message(self):
+        self._upsert(353, "Message deleted on Discord")
+        self.service.mark_deleted(353)
+
+        self._upsert(353, "Late edit event")
+
+        recent_ids = [
+            item.message_id
+            for item in self.service.search_recent(
+                guild_id=10,
+                channel_id=20,
+                cross_channel=False,
+                limit=10,
+            )
+        ]
+        self.assertNotIn(353, recent_ids)
 
     def test_embedding_failures_retry_before_terminal_failure(self):
         self._upsert(361, "Semantic memory should retry after transient failure")

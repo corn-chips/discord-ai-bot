@@ -31,7 +31,7 @@ else:
 try:
     from src.config import BotConfig
     from src.services.nano_banana_client import NanoBananaClient, ServiceStatus
-    import google.generativeai as genai
+    from google import genai
 except ImportError as e:
     print(f"Health check failed: Missing dependencies - {e}")
     sys.exit(1)
@@ -68,14 +68,18 @@ async def check_gemini_service():
     if not config.gemini_api_key:
         return False, "GEMINI_API_KEY not configured"
 
+    client = None
     try:
-        genai.configure(api_key=config.gemini_api_key)
-        model_list = list(genai.list_models())
+        client = genai.Client(api_key=config.gemini_api_key)
+        model_list = list(client.models.list())
         if model_list:
             return True, f"Gemini API accessible ({len(model_list)} models available)"
         return False, "Gemini API accessible but no models found"
     except Exception as e:  # noqa: BLE001
         return False, f"Gemini API error: {e}"
+    finally:
+        if client is not None:
+            client.close()
 
 
 async def check_nano_banana_service():
@@ -89,7 +93,11 @@ async def check_nano_banana_service():
         return True, "Image generation not configured (optional)"
 
     try:
-        client = NanoBananaClient(api_key=api_key, timeout=10)
+        client = NanoBananaClient(
+            api_key=api_key,
+            model_name=config.nano_banana_model,
+            timeout=10,
+        )
         status = await client.check_service_status()
         if status == ServiceStatus.HEALTHY:
             return True, "Gemini image generation service healthy"

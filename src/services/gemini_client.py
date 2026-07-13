@@ -46,6 +46,7 @@ class GeminiClient:
         self.performance_logger = PerformanceLogger("gemini_client")
         self.client = None
         self._current_model_name = config.default_model
+        self._runtime_model_override = False
         self._current_complexity_level = "low"
         self._thinking_level_override: Optional[str] = None
         self._force_search = False  # Force search on/off
@@ -83,6 +84,10 @@ class GeminiClient:
     def get_current_model(self) -> str:
         """Get the name of the currently active model."""
         return self._current_model_name
+
+    def has_runtime_model_override(self) -> bool:
+        """Return whether `/config model` explicitly selected the current model."""
+        return self._runtime_model_override
     
     @staticmethod
     def _normalize_thinking_level(level: Optional[str]) -> str:
@@ -251,10 +256,12 @@ class GeminiClient:
             return False
         
         old_model = self._current_model_name
+        old_runtime_override = self._runtime_model_override
         try:
             logger.info(f"Old model: {old_model}")
             logger.info(f"New model: {model_name}")
             self._current_model_name = model_name
+            self._runtime_model_override = True
             
             logger.info(f"Model switched successfully from {old_model} to {model_name}")
             logger.info("=" * 80)
@@ -267,6 +274,7 @@ class GeminiClient:
             # Revert to old model
             logger.warning(f"Reverting to old model: {old_model}")
             self._current_model_name = old_model
+            self._runtime_model_override = old_runtime_override
             logger.info("=" * 80)
             return False
     
@@ -355,7 +363,10 @@ class GeminiClient:
             )
             target_model = self.config.default_model
 
-        return self.set_model(target_model)
+        success = self.set_model(target_model)
+        if success:
+            self._runtime_model_override = False
+        return success
 
     def get_model_for_complexity(self, complexity_level: str) -> str:
         """Resolve the configured model for a complexity tier without mutating shared state."""

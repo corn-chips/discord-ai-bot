@@ -118,9 +118,52 @@ class MessageSplitter:
         # Handle code block preservation
         if self.preserve_formatting:
             parts = self._preserve_code_blocks(parts, stripped_content)
+
+        # Formatting artifacts are added after split points are calculated. If
+        # they push a part over the transport limit (or alter source content),
+        # prefer a lossless hard split over returning an invalid Discord page.
+        if (
+            any(len(part.content) > self.max_length for part in parts)
+            or not self.validate_split_integrity(stripped_content, parts)
+        ):
+            logger.warning(
+                "Formatted split exceeded the message limit or failed integrity; "
+                "using lossless hard splitting"
+            )
+            parts = self._hard_split_parts(stripped_content)
         
         logger.info(f"Message split into {len(parts)} parts")
         return parts
+
+    def _hard_split_parts(self, content: str) -> List[MessagePart]:
+        """Split content losslessly at character boundaries within the hard limit."""
+        if self.max_length <= 0:
+            raise ValueError("max_length must be positive")
+
+        raw_parts = [
+            content[start:start + self.max_length]
+            for start in range(0, len(content), self.max_length)
+        ] or [""]
+        total_parts = len(raw_parts)
+        return [
+            MessagePart(
+                content=part_content,
+                part_number=index + 1,
+                total_parts=total_parts,
+                has_continuation=index < total_parts - 1,
+                markdown_blocks=(
+                    self.markdown_parser.parse_markdown(part_content)
+                    if self.preserve_formatting
+                    else []
+                ),
+                metadata={
+                    "original_start": index * self.max_length,
+                    "original_end": min((index + 1) * self.max_length, len(content)),
+                    "hard_split": True,
+                },
+            )
+            for index, part_content in enumerate(raw_parts)
+        ]
     
     def _find_optimal_split_points(self, content: str) -> List[int]:
         """
@@ -246,7 +289,7 @@ class MessageSplitter:
         for i in range(len(split_points) - 1):
             start = split_points[i]
             end = split_points[i + 1]
-            part_content = content[start:end].strip()
+            part_content = content[start:end]
             
             # Skip empty parts
             if not part_content:
@@ -410,12 +453,7 @@ class MessageSplitter:
                 
                 reconstructed += content
             
-            # Compare lengths (allowing for some whitespace differences)
-            original_clean = re.sub(r'\s+', ' ', original.strip())
-            reconstructed_clean = re.sub(r'\s+', ' ', reconstructed.strip())
-            
-            # Check if content is substantially the same
-            return abs(len(original_clean) - len(reconstructed_clean)) <= 10
+            return reconstructed == original.strip()
             
         except Exception as e:
             logger.error(f"Error validating split integrity: {e}")

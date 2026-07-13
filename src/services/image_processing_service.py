@@ -154,12 +154,34 @@ class ImageProcessingService:
         
         self._worker_tasks.clear()
         
-        # Cancel any remaining jobs
+        # Mark queued jobs that never reached a worker as terminal. Active jobs
+        # are marked cancelled by their worker's cancellation handler below.
         async with self._lock:
-            for job in self._active_jobs.values():
+            completed_ids = {job.job_id for job in self._completed_jobs}
+            for job in list(self._jobs.values()):
+                if job.status in {
+                    ProcessingStatus.COMPLETED,
+                    ProcessingStatus.FAILED,
+                    ProcessingStatus.CANCELLED,
+                }:
+                    continue
                 job.status = ProcessingStatus.CANCELLED
                 job.completed_at = datetime.now()
                 job.completion_event.set()
+                if job.job_id not in completed_ids:
+                    self._completed_jobs.append(job)
+            self._jobs.clear()
+            self._active_jobs.clear()
+            self._progress_callbacks.clear()
+
+            while True:
+                try:
+                    self._job_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+            if len(self._completed_jobs) > 100:
+                self._completed_jobs = self._completed_jobs[-100:]
         
         logger.info("Image processing service stopped")
     
@@ -326,6 +348,9 @@ class ImageProcessingService:
             except asyncio.TimeoutError:
                 # No job available, continue loop
                 continue
+            except asyncio.CancelledError:
+                raise
+
             except Exception as e:
                 logger.error(f"Error in worker {worker_name}: {e}")
                 await asyncio.sleep(1.0)
@@ -413,6 +438,12 @@ class ImageProcessingService:
                 
                 logger.info(f"Completed job {job_id} in {total_time:.1f}s (success: {job.result.success})")
                 
+            except asyncio.CancelledError:
+                job.status = ProcessingStatus.CANCELLED
+                job.completed_at = datetime.now()
+                job.error_message = "Image processing was cancelled"
+                raise
+
             except Exception as e:
                 # Handle job failure
                 now = datetime.now()

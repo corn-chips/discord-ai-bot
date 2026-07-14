@@ -112,9 +112,8 @@ class HybridContextRetriever:
     async def _embed_query(self, query: str) -> list[float]:
         if not getattr(self.gemini_client, "client", None):
             return []
-        query_text = f"task: question answering | query: {query}"
         vectors = await self.gemini_client.embed_texts(
-            [query_text],
+            [query],
             model_name=self.config.rag_embedding_model,
             task_type="RETRIEVAL_QUERY",
         )

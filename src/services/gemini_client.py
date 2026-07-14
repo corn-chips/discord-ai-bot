@@ -795,14 +795,37 @@ Candidate messages:
         target_model = model_name or getattr(self.config, "rag_embedding_model", "gemini-embedding-2")
         sanitized_texts = [(text or "").strip() for text in texts]
         try:
-            config_kwargs = {"auto_truncate": True}
-            if task_type:
+            model_id = target_model.rsplit("/", 1)[-1].lower()
+            is_embedding_2 = model_id.startswith("gemini-embedding-2")
+            request_texts = sanitized_texts
+            if is_embedding_2 and task_type == "RETRIEVAL_DOCUMENT":
+                request_texts = [
+                    text
+                    if text.lower().startswith("title:") and "| text:" in text.lower()
+                    else f"title: none | text: {text}"
+                    for text in sanitized_texts
+                ]
+            elif is_embedding_2 and task_type == "RETRIEVAL_QUERY":
+                request_texts = [f"task: search result | query: {text}" for text in sanitized_texts]
+
+            if is_embedding_2:
+                contents = [
+                    types.Content(parts=[types.Part.from_text(text=text)])
+                    for text in request_texts
+                ]
+            else:
+                contents = request_texts
+
+            config_kwargs = {}
+            if task_type and not is_embedding_2:
                 config_kwargs["task_type"] = task_type
-            response = await self.client.aio.models.embed_content(
-                model=target_model,
-                contents=sanitized_texts,
-                config=types.EmbedContentConfig(**config_kwargs),
-            )
+            request_kwargs = {
+                "model": target_model,
+                "contents": contents,
+            }
+            if config_kwargs:
+                request_kwargs["config"] = types.EmbedContentConfig(**config_kwargs)
+            response = await self.client.aio.models.embed_content(**request_kwargs)
             embeddings = getattr(response, "embeddings", None) or []
             vectors: List[Optional[List[float]]] = []
             for embedding in embeddings:

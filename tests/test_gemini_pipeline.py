@@ -71,6 +71,97 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         )
         return client
 
+    async def test_embedding_2_uses_developer_api_compatible_retrieval_inputs(self):
+        embed_content = AsyncMock(
+            return_value=SimpleNamespace(
+                embeddings=[
+                    SimpleNamespace(values=[1, 2]),
+                    SimpleNamespace(values=[3, 4]),
+                ]
+            )
+        )
+        client = object.__new__(GeminiClient)
+        client.config = SimpleNamespace(rag_embedding_model="gemini-embedding-2")
+        client.client = SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(embed_content=embed_content),
+            )
+        )
+
+        vectors = await client.embed_texts(
+            [
+                "title: Discord message by User at 2026-07-13 | text: first message",
+                "second message",
+            ],
+            task_type="RETRIEVAL_DOCUMENT",
+        )
+
+        self.assertEqual(vectors, [[1.0, 2.0], [3.0, 4.0]])
+        request = embed_content.await_args.kwargs
+        self.assertEqual(request["model"], "gemini-embedding-2")
+        self.assertNotIn("config", request)
+        self.assertEqual(len(request["contents"]), 2)
+        self.assertTrue(all(isinstance(item, types.Content) for item in request["contents"]))
+        self.assertEqual(
+            [item.parts[0].text for item in request["contents"]],
+            [
+                "title: Discord message by User at 2026-07-13 | text: first message",
+                "title: none | text: second message",
+            ],
+        )
+
+    async def test_embedding_2_formats_retrieval_query_without_task_type_config(self):
+        embed_content = AsyncMock(
+            return_value=SimpleNamespace(
+                embeddings=[SimpleNamespace(values=[0.5, 0.25])]
+            )
+        )
+        client = object.__new__(GeminiClient)
+        client.config = SimpleNamespace(rag_embedding_model="gemini-embedding-2")
+        client.client = SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(embed_content=embed_content),
+            )
+        )
+
+        vectors = await client.embed_texts(
+            ["where is the answer?"],
+            task_type="RETRIEVAL_QUERY",
+        )
+
+        self.assertEqual(vectors, [[0.5, 0.25]])
+        request = embed_content.await_args.kwargs
+        self.assertNotIn("config", request)
+        self.assertEqual(
+            request["contents"][0].parts[0].text,
+            "task: search result | query: where is the answer?",
+        )
+
+    async def test_embedding_1_keeps_supported_task_type_without_auto_truncate(self):
+        embed_content = AsyncMock(
+            return_value=SimpleNamespace(
+                embeddings=[SimpleNamespace(values=[1])]
+            )
+        )
+        client = object.__new__(GeminiClient)
+        client.config = SimpleNamespace(rag_embedding_model="gemini-embedding-001")
+        client.client = SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(embed_content=embed_content),
+            )
+        )
+
+        vectors = await client.embed_texts(
+            ["message"],
+            task_type="RETRIEVAL_DOCUMENT",
+        )
+
+        self.assertEqual(vectors, [[1.0]])
+        request = embed_content.await_args.kwargs
+        self.assertEqual(request["contents"], ["message"])
+        self.assertEqual(request["config"].task_type, "RETRIEVAL_DOCUMENT")
+        self.assertIsNone(request["config"].auto_truncate)
+
     async def test_request_precedence_and_multimodal_part_order_are_preserved(self):
         client = self._make_client()
         client._should_use_search.return_value = False

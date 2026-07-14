@@ -140,7 +140,6 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
     rag_group = app_commands.Group(name="rag", description="Manage local message retrieval memory")
 
     @rag_group.command(name="status", description="Show local message RAG index status")
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def rag_status(interaction: discord.Interaction):
         index_service = getattr(bot, "message_index_service", None)
         if not index_service:

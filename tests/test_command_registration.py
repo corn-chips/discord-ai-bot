@@ -171,7 +171,9 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         clear_cache = self._command(bot, "clear-cache")
         self.assertTrue(clear_cache.default_permissions.administrator)
 
-        for path in ("rag status", "rag backfill", "rag delete"):
+        self.assertEqual(self._command(bot, "rag status").checks, [])
+
+        for path in ("rag backfill", "rag delete"):
             command = self._command(bot, path)
             self.assertEqual(len(command.checks), 1)
             permission_values = [

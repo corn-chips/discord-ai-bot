@@ -75,12 +75,13 @@ class MessageIndexService:
 
     def __init__(
         self,
-        db_path: str = "data/token_usage.db",
+        db_path: str = "data/message_rag.db",
         embedding_model: str = "gemini-embedding-2",
         embedding_dimensions: int = 768,
         embedding_min_words: int = 2,
         embedding_min_alphanumeric_chars: int = 12,
         vector_cache_enabled: bool = True,
+        legacy_db_path: Optional[str] = None,
     ):
         self.db_path = Path(db_path).expanduser()
         self.embedding_api_model = embedding_model
@@ -101,6 +102,8 @@ class MessageIndexService:
         self.fts_enabled = False
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
+        if legacy_db_path:
+            self._migrate_legacy_database(legacy_db_path)
 
     def _connection(self, *, transaction: bool = False):
         connection_manager = sqlite_transaction if transaction else sqlite_connection
@@ -137,6 +140,7 @@ class MessageIndexService:
                         indexed_at TEXT NOT NULL,
                         content_text TEXT NOT NULL,
                         attachment_summary TEXT NOT NULL DEFAULT '',
+                        embedding_eligibility_text TEXT,
                         content_hash TEXT NOT NULL,
                         hidden INTEGER NOT NULL DEFAULT 0,
                         deleted_at TEXT
@@ -181,6 +185,12 @@ class MessageIndexService:
                     conn,
                     table_name="message_embeddings",
                     column_name="next_retry_at",
+                    column_definition="TEXT",
+                )
+                self._ensure_column(
+                    conn,
+                    table_name="message_index",
+                    column_name="embedding_eligibility_text",
                     column_definition="TEXT",
                 )
                 conn.execute(
@@ -334,6 +344,10 @@ class MessageIndexService:
             created_at=getattr(message, "created_at", datetime.now(timezone.utc)),
             content_text=content_text,
             attachment_summary=self._attachment_summary(message),
+            embedding_eligibility_text=(
+                (getattr(message, "content", "") or "").strip()
+                or (getattr(message, "system_content", "") or "").strip()
+            ),
         )
 
     async def index_discord_message_async(
@@ -376,6 +390,7 @@ class MessageIndexService:
             created_at=created_at or datetime.now(timezone.utc),
             content_text=content_text,
             attachment_summary="",
+            embedding_eligibility_text=content_text,
         )
 
     async def index_bot_response_async(self, **kwargs) -> bool:
@@ -394,6 +409,7 @@ class MessageIndexService:
         created_at: datetime,
         content_text: str,
         attachment_summary: str = "",
+        embedding_eligibility_text: Optional[str] = None,
         hidden: Optional[bool] = None,
     ) -> bool:
         content_text = self._normalize_text(content_text)
@@ -401,7 +417,12 @@ class MessageIndexService:
             return False
 
         content_hash = self._hash_text(content_text)
-        embedding_status = "skipped" if self._embedding_is_trivial(content_text, attachment_summary) else "pending"
+        eligibility_text = (
+            content_text
+            if embedding_eligibility_text is None
+            else self._normalize_text(embedding_eligibility_text)
+        )
+        embedding_status = "skipped" if self._embedding_is_trivial(eligibility_text, attachment_summary) else "pending"
         created_at_iso = created_at.isoformat()
         indexed_at = self._now_iso()
         try:
@@ -421,9 +442,10 @@ class MessageIndexService:
                     INSERT INTO message_index (
                         message_id, guild_id, channel_id, author_id, author_name, is_bot,
                         reply_to_message_id, created_at, indexed_at, content_text,
-                        attachment_summary, content_hash, hidden, deleted_at
+                        attachment_summary, embedding_eligibility_text,
+                        content_hash, hidden, deleted_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                     ON CONFLICT(message_id) DO UPDATE SET
                         guild_id = excluded.guild_id,
                         channel_id = excluded.channel_id,
@@ -435,6 +457,7 @@ class MessageIndexService:
                         indexed_at = excluded.indexed_at,
                         content_text = excluded.content_text,
                         attachment_summary = excluded.attachment_summary,
+                        embedding_eligibility_text = excluded.embedding_eligibility_text,
                         content_hash = excluded.content_hash,
                         hidden = excluded.hidden
                     """,
@@ -450,6 +473,7 @@ class MessageIndexService:
                         indexed_at,
                         content_text,
                         attachment_summary,
+                        eligibility_text,
                         content_hash,
                         1 if resolved_hidden else 0,
                     ),
@@ -575,6 +599,102 @@ class MessageIndexService:
             raise
         return indexed_count
 
+    def _migrate_legacy_database(self, legacy_db_path: str) -> None:
+        """Copy legacy RAG tables once into the dedicated RAG database."""
+        legacy_path = Path(legacy_db_path).expanduser()
+        if (
+            not legacy_path.exists()
+            or legacy_path.resolve() == self.db_path.resolve()
+        ):
+            return
+
+        migration_name = "legacy_shared_rag_v1"
+        tables = (
+            "message_index",
+            "message_embeddings",
+            "message_retrieval_events",
+            "message_backfill_progress",
+        )
+        try:
+            with self._connection(transaction=True) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS rag_migrations (
+                        name TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL
+                    )
+                    """
+                )
+                if conn.execute(
+                    "SELECT 1 FROM rag_migrations WHERE name = ?",
+                    (migration_name,),
+                ).fetchone():
+                    return
+
+                conn.execute("ATTACH DATABASE ? AS legacy", (str(legacy_path),))
+                for table_name in tables:
+                    legacy_exists = conn.execute(
+                        "SELECT 1 FROM legacy.sqlite_master WHERE type='table' AND name=?",
+                        (table_name,),
+                    ).fetchone()
+                    if not legacy_exists:
+                        continue
+                    target_columns = {
+                        row[1] for row in conn.execute(
+                            f"PRAGMA main.table_info({table_name})"
+                        ).fetchall()
+                    }
+                    legacy_columns = {
+                        row[1] for row in conn.execute(
+                            f"PRAGMA legacy.table_info({table_name})"
+                        ).fetchall()
+                    }
+                    common_columns = sorted(target_columns & legacy_columns)
+                    if not common_columns:
+                        continue
+                    columns_sql = ", ".join(f'"{column}"' for column in common_columns)
+                    conn.execute(
+                        f'INSERT OR IGNORE INTO main."{table_name}" ({columns_sql}) '
+                        f'SELECT {columns_sql} FROM legacy."{table_name}"'
+                    )
+
+                conn.execute(
+                    """
+                    UPDATE message_embeddings
+                    SET embedding_model = ?, embedding_vector = NULL,
+                        embedding_status = 'pending', embedded_at = NULL,
+                        last_error = NULL, embedding_attempts = 0,
+                        next_retry_at = NULL
+                    WHERE embedding_model != ?
+                    """,
+                    (self.embedding_model, self.embedding_model),
+                )
+                self._reconcile_embedding_eligibility(conn)
+                if self.fts_enabled:
+                    conn.execute("DELETE FROM message_search_fts")
+                    conn.execute(
+                        """
+                        INSERT INTO message_search_fts(
+                            rowid, content_text, author_name, attachment_summary
+                        )
+                        SELECT message_id, content_text, author_name, attachment_summary
+                        FROM message_index
+                        WHERE hidden = 0 AND deleted_at IS NULL
+                        """
+                    )
+                conn.execute(
+                    "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
+                    (migration_name, self._now_iso()),
+                )
+            logger.info("Copied legacy message RAG data from %s", legacy_path)
+        except Exception as exc:
+            logger.error(
+                "Failed to copy legacy message RAG data from %s: %s",
+                legacy_path,
+                exc,
+                exc_info=True,
+            )
+            raise
     def _embedding_is_trivial(self, content_text: str, attachment_summary: str = "") -> bool:
         if (attachment_summary or "").strip():
             return False
@@ -583,9 +703,19 @@ class MessageIndexService:
         return len(words) < self.embedding_min_words and chars < self.embedding_min_alphanumeric_chars
 
     def _reconcile_embedding_eligibility(self, conn: sqlite3.Connection) -> None:
-        rows = conn.execute("SELECT m.message_id,m.content_text,m.attachment_summary,e.embedding_status FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE e.embedding_model=?", (self.embedding_model,)).fetchall()
+        rows = conn.execute("SELECT m.message_id,m.content_text,m.embedding_eligibility_text,m.attachment_summary,e.embedding_status FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE e.embedding_model=?", (self.embedding_model,)).fetchall()
         for row in rows:
-            trivial = self._embedding_is_trivial(row["content_text"], row["attachment_summary"])
+            eligibility_text = row["embedding_eligibility_text"]
+            if eligibility_text is None:
+                # Additive migration fallback for rows written before the raw
+                # eligibility text was persisted.
+                eligibility_text = re.sub(
+                    r"\s*\[Message type:.*\]\s*$",
+                    "",
+                    row["content_text"] or "",
+                    flags=re.DOTALL,
+                )
+            trivial = self._embedding_is_trivial(eligibility_text, row["attachment_summary"])
             if trivial and row["embedding_status"] != "skipped":
                 conn.execute("UPDATE message_embeddings SET embedding_status='skipped',embedding_vector=NULL,embedded_at=NULL,last_error=NULL,embedding_attempts=0,next_retry_at=NULL WHERE message_id=?", (row["message_id"],))
             elif not trivial and row["embedding_status"] == "skipped":
@@ -607,9 +737,11 @@ class MessageIndexService:
         self._vector_capacity = capacity
 
     def _cache_remove(self, message_id: int) -> None:
-        if not self.vector_cache_enabled or not self._vector_loaded:
+        if not self.vector_cache_enabled:
             return
         with self._vector_lock:
+            if not self._vector_loaded:
+                return
             found = np.flatnonzero(self._vector_message_ids[:self._vector_count] == int(message_id))
             if not len(found): return
             index, last = int(found[0]), self._vector_count - 1
@@ -621,8 +753,11 @@ class MessageIndexService:
             self._vector_count -= 1
 
     def _cache_upsert(self, message_id: int, guild_id: Optional[int], channel_id: int, vector: np.ndarray) -> None:
-        if not self.vector_cache_enabled or not self._vector_loaded or vector.size != self.embedding_dimensions: return
+        if not self.vector_cache_enabled or vector.size != self.embedding_dimensions:
+            return
         with self._vector_lock:
+            if not self._vector_loaded:
+                return
             self._cache_remove(message_id); self._ensure_vector_capacity(self._vector_count + 1)
             index = self._vector_count
             self._vector_matrix[index] = vector; self._vector_message_ids[index] = int(message_id)
@@ -637,11 +772,22 @@ class MessageIndexService:
                 rows = conn.execute("SELECT m.message_id,m.guild_id,m.channel_id,e.embedding_vector FROM message_embeddings e JOIN message_index m ON m.message_id=e.message_id WHERE e.embedding_model=? AND e.embedding_status='done' AND e.embedding_vector IS NOT NULL AND m.hidden=0 AND m.deleted_at IS NULL", (self.embedding_model,)).fetchall()
             self._ensure_vector_capacity(len(rows))
             for row in rows:
-                vector = np.frombuffer(row["embedding_vector"], dtype=np.float32)
-                if vector.size != self.embedding_dimensions: continue
+                vector = self._decode_vector(row["embedding_vector"])
+                if vector is None or vector.size != self.embedding_dimensions:
+                    continue
                 index = self._vector_count; self._vector_matrix[index] = vector
                 self._vector_message_ids[index] = int(row["message_id"]); self._vector_guild_ids[index] = -1 if row["guild_id"] is None else int(row["guild_id"]); self._vector_channel_ids[index] = int(row["channel_id"]); self._vector_count += 1
             self._vector_loaded = True
+
+    @staticmethod
+    def _decode_vector(raw_vector) -> Optional[np.ndarray]:
+        """Decode both current float32 blobs and legacy JSON vectors."""
+        try:
+            if isinstance(raw_vector, (bytes, bytearray, memoryview)):
+                return np.frombuffer(raw_vector, dtype=np.float32)
+            return np.asarray(json.loads(raw_vector), dtype=np.float32)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
     def get_backfill_progress(self, channel_id: int) -> Optional[dict]:
         """Return the durable resume cursor and completion state for one channel."""
         with self._connection() as conn:
@@ -813,15 +959,14 @@ class MessageIndexService:
                         if has_pins
                         else 0
                     )
-            if self._vector_loaded:
-                if channel_id is None:
-                    with self._vector_lock:
+            if self.vector_cache_enabled:
+                with self._vector_lock:
+                    if self._vector_loaded and channel_id is None:
                         self._vector_count = 0
-                else:
-                    with self._vector_lock:
+                    elif self._vector_loaded:
                         ids = self._vector_message_ids[:self._vector_count][self._vector_channel_ids[:self._vector_count] == int(channel_id)].copy()
-                    for message_id in ids:
-                        self._cache_remove(int(message_id))
+                        for message_id in ids:
+                            self._cache_remove(int(message_id))
             return {
                 "messages": int(deleted_messages),
                 "pins": int(deleted_pins),
@@ -863,11 +1008,13 @@ class MessageIndexService:
                             )
             if hidden:
                 self._cache_remove(message_id)
-            elif self._vector_loaded:
+            elif self.vector_cache_enabled:
                 with self._connection() as conn:
                     row = conn.execute("SELECT m.guild_id,m.channel_id,e.embedding_vector FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE m.message_id=? AND e.embedding_status='done'", (message_id,)).fetchone()
                 if row and row["embedding_vector"]:
-                    self._cache_upsert(message_id, row["guild_id"], row["channel_id"], np.frombuffer(row["embedding_vector"], dtype=np.float32))
+                    vector = self._decode_vector(row["embedding_vector"])
+                    if vector is not None:
+                        self._cache_upsert(message_id, row["guild_id"], row["channel_id"], vector)
             return True
         except Exception as exc:
             logger.error("Failed to update hidden state for indexed message %s: %s", message_id, exc)
@@ -1215,8 +1362,9 @@ class MessageIndexService:
             rows = conn.execute(f"SELECT m.*,e.embedding_vector,0.0 AS lexical_score,0.0 AS semantic_score FROM message_embeddings e JOIN message_index m ON m.message_id=e.message_id WHERE e.embedding_model=? AND e.embedding_status='done' AND e.embedding_vector IS NOT NULL AND {scope} AND m.hidden=0 AND m.deleted_at IS NULL {exclude}", [self.embedding_model, *params]).fetchall()
         scored = []
         for row in rows:
-            vector = np.frombuffer(row["embedding_vector"], dtype=np.float32)
-            if vector.size != query_vector.size: continue
+            vector = self._decode_vector(row["embedding_vector"])
+            if vector is None or vector.size != query_vector.size:
+                continue
             score = self._cosine_similarity(vector.tolist(), query_vector.tolist())
             if score > 0: scored.append((score, row))
         results = []

@@ -56,6 +56,7 @@ class BotConfigTest(unittest.TestCase):
         self.assertTrue(config.report_web_enabled)
         self.assertEqual(config.report_web_port, 8080)
         self.assertTrue(config.rag_enabled)
+        self.assertEqual(config.rag_database_path, "data/message_rag.db")
         self.assertEqual(config.rag_embedding_model, "gemini-embedding-2")
         self.assertEqual(config.rag_embedding_dimensions, 768)
         self.assertEqual(config.default_model, "")
@@ -169,6 +170,15 @@ class BotConfigTest(unittest.TestCase):
 
     def test_validate_accepts_complete_valid_config(self):
         self.assertEqual(self._valid_config().validate(), [])
+
+    def test_validate_rejects_shared_token_and_rag_database(self):
+        config = self._valid_config()
+        config.rag_database_path = config.token_db_path
+
+        self.assertIn(
+            "rag.database_path must be separate from bot.token_db_path",
+            config.validate(),
+        )
 
     def test_validate_preserves_error_messages_and_order(self):
         config = self._valid_config()

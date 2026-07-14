@@ -135,7 +135,10 @@ def register_personalization_commands(context: CommandContext) -> None:
 
     # ── Pin / Memory Commands ─────────────────────────────────────────
 
-    pin_service = getattr(bot, "_pin_service", None) or PinService(db_path=config.token_db_path)
+    pin_service = getattr(bot, "_pin_service", None) or PinService(
+        db_path=config.rag_database_path,
+        legacy_db_path=config.token_db_path,
+    )
     bot._pin_service = pin_service
     if getattr(bot, "hybrid_context_retriever", None):
         bot.hybrid_context_retriever.set_pin_service(pin_service)

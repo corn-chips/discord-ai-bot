@@ -7,6 +7,7 @@ are injected into the AI prompt so the bot always remembers them.
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from .sqlite_utils import sqlite_connection, sqlite_transaction
@@ -17,9 +18,15 @@ logger = logging.getLogger(__name__)
 class PinService:
     """Manages per-channel pinned messages persisted in SQLite."""
 
-    def __init__(self, db_path: str = "data/token_usage.db"):
+    def __init__(
+        self,
+        db_path: str = "data/message_rag.db",
+        legacy_db_path: Optional[str] = None,
+    ):
         self.db_path = db_path
         self._ensure_table()
+        if legacy_db_path:
+            self._migrate_legacy_pins(legacy_db_path)
 
     def _ensure_table(self):
         """Create the pinned_messages table if it doesn't exist."""
@@ -44,6 +51,51 @@ class PinService:
             logger.info("Pinned messages table ready")
         except Exception as e:
             logger.error(f"Failed to create pinned_messages table: {e}")
+
+    def _migrate_legacy_pins(self, legacy_db_path: str) -> None:
+        """Copy legacy pins once into the dedicated RAG database."""
+        source = Path(legacy_db_path).expanduser()
+        target = Path(self.db_path).expanduser()
+        if not source.exists() or source.resolve() == target.resolve():
+            return
+        try:
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS rag_migrations (
+                        name TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL
+                    )
+                    """
+                )
+                migration_name = "legacy_shared_pins_v1"
+                if conn.execute(
+                    "SELECT 1 FROM rag_migrations WHERE name = ?",
+                    (migration_name,),
+                ).fetchone():
+                    return
+                conn.execute("ATTACH DATABASE ? AS legacy", (str(source),))
+                if conn.execute(
+                    "SELECT 1 FROM legacy.sqlite_master WHERE type='table' AND name='pinned_messages'"
+                ).fetchone():
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO main.pinned_messages (
+                            id, channel_id, guild_id, content, author_name,
+                            pinned_by, pinned_at, message_id
+                        )
+                        SELECT id, channel_id, guild_id, content, author_name,
+                               pinned_by, pinned_at, message_id
+                        FROM legacy.pinned_messages
+                        """
+                    )
+                conn.execute(
+                    "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
+                    (migration_name, datetime.utcnow().isoformat()),
+                )
+            logger.info("Copied legacy pinned memories from %s", source)
+        except Exception as exc:
+            logger.error("Failed to copy legacy pinned memories from %s: %s", source, exc)
 
     def add_pin(
         self,

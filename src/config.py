@@ -53,6 +53,7 @@ class BotConfig:
 
     # === Hybrid Message RAG ===
     rag_enabled: bool = True
+    rag_database_path: str = "data/message_rag.db"
     rag_embedding_model: str = "gemini-embedding-2"
     rag_embedding_dimensions: int = 768
     rag_cross_channel_enabled: bool = False

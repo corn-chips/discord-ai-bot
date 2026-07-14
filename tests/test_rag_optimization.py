@@ -2,15 +2,20 @@
 
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import numpy as np
+
 from src.services.context_pack_builder import ContextPackBuilder
 from src.services.hybrid_context_retriever import HybridContextRetriever
-from src.services.message_index_service import MessageIndexService
+from src.models.data_models import MessageContext
+from src.services.message_index_service import IndexedMessage, MessageIndexService
+from src.services.pin_service import PinService
 
 
 class EmbeddingEfficiencyTest(unittest.TestCase):
@@ -46,6 +51,63 @@ class EmbeddingEfficiencyTest(unittest.TestCase):
         self._upsert(1, "ok")
         self.assertEqual(self._scalar("SELECT embedding_status FROM message_embeddings WHERE message_id=1"), "skipped")
 
+    def test_real_discord_metadata_does_not_make_trivial_text_eligible(self):
+        message = SimpleNamespace(
+            id=11,
+            author=SimpleNamespace(id=3, bot=False, display_name="Ada", name="Ada"),
+            content="hi",
+            system_content="",
+            attachments=[],
+            embeds=[],
+            stickers=[],
+            message_snapshots=[],
+            type=SimpleNamespace(name="default"),
+            channel=SimpleNamespace(id=2),
+            guild=SimpleNamespace(id=1),
+            reference=None,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        self.assertTrue(self.service.index_discord_message(message))
+        self.assertIn("Message type: default", self._scalar("SELECT content_text FROM message_index WHERE message_id=11"))
+        self.assertEqual(self._scalar("SELECT embedding_status FROM message_embeddings WHERE message_id=11"), "skipped")
+
+    def test_legacy_json_embedding_loads_into_vector_cache(self):
+        self._upsert(12, "legacy vector remains searchable")
+        conn = sqlite3.connect(self.path)
+        try:
+            conn.execute(
+                "UPDATE message_embeddings SET embedding_vector=?, embedding_status='done' WHERE message_id=12",
+                ("[1.0,0.0,0.0]",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        results = self.service.search_semantic(
+            [1, 0, 0], guild_id=1, channel_id=2,
+            cross_channel=False, limit=5,
+        )
+
+        self.assertEqual([item.message_id for item in results], [12])
+
+    def test_cache_mutation_waits_for_initial_load_lock(self):
+        completed = threading.Event()
+
+        def mutate_cache():
+            self.service._cache_upsert(13, 1, 2, np.asarray([1, 0, 0], dtype=np.float32))
+            completed.set()
+
+        with self.service._vector_lock:
+            worker = threading.Thread(target=mutate_cache)
+            worker.start()
+            self.assertFalse(completed.wait(0.05))
+            self.service._vector_loaded = True
+
+        worker.join(timeout=1)
+        self.assertTrue(completed.is_set())
+        self.assertEqual(self.service._vector_count, 1)
+
     def test_warm_vector_cache_updates_without_full_reload(self):
         self._upsert(1, "first eligible message")
         content_hash = self._scalar("SELECT content_hash FROM message_embeddings WHERE message_id=1")
@@ -60,6 +122,25 @@ class EmbeddingEfficiencyTest(unittest.TestCase):
 
 
 class RetrievalGatingTest(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _candidate(message_id):
+        return IndexedMessage(
+            message_id=message_id, guild_id=1, channel_id=2, author_id=3,
+            author_name="Ada", is_bot=False, reply_to_message_id=None,
+            created_at=datetime.now(timezone.utc), content_text=f"candidate {message_id}",
+        )
+
+    @staticmethod
+    def _config():
+        return SimpleNamespace(
+            rag_gating_enabled=True, rag_max_context_messages_low=4,
+            rag_max_context_messages_medium=6, rag_max_context_messages_high=8,
+            rag_cross_channel_enabled=False, rag_lexical_candidates=30,
+            rag_semantic_candidates=24, rag_rerank_candidates=12,
+            rag_rerank_min_boundary_margin=0.15,
+            rag_recency_half_life_hours=72, rag_embedding_model="test",
+        )
+
     async def test_self_contained_request_uses_pins_only(self):
         index = SimpleNamespace(
             search_recent_async=AsyncMock(), search_lexical_async=AsyncMock(),
@@ -81,6 +162,117 @@ class RetrievalGatingTest(unittest.IsolatedAsyncioTestCase):
         gemini.embed_texts.assert_not_awaited(); gemini.select_relevant_context.assert_not_awaited()
         index.search_recent_async.assert_not_awaited(); index.search_lexical_async.assert_not_awaited()
         await retriever.close()
+
+    async def test_rerank_boundary_uses_slots_remaining_after_pins(self):
+        first, second = self._candidate(21), self._candidate(22)
+        index = SimpleNamespace(
+            search_recent_async=AsyncMock(return_value=[first, second]),
+            search_lexical_async=AsyncMock(return_value=[second, first]),
+            search_semantic_async=AsyncMock(return_value=[first, second]),
+            record_retrieval_event_async=AsyncMock(),
+        )
+        gemini = SimpleNamespace(
+            client=object(), embed_texts=AsyncMock(return_value=[[1, 0, 0]]),
+            select_relevant_context=AsyncMock(return_value=[]),
+        )
+        pins = SimpleNamespace(get_pins=lambda channel_id: [
+            (pin_id, f"pin {pin_id}", "Ada", "Ray", datetime.now(timezone.utc).isoformat())
+            for pin_id in range(1, 4)
+        ])
+        retriever = HybridContextRetriever(
+            config=self._config(), message_index=index, context_collector=object(),
+            gemini_client=gemini, pack_builder=ContextPackBuilder(), pin_service=pins,
+        )
+        message = SimpleNamespace(id=1, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=2), author=SimpleNamespace(id=3), reference=None)
+
+        result = await retriever.retrieve(message=message, user_prompt="find it", complexity_level="low")
+
+        gemini.select_relevant_context.assert_awaited_once()
+        rerank_call = gemini.select_relevant_context.await_args
+        self.assertLessEqual(len(rerank_call.args[1]), 12)
+        self.assertEqual(rerank_call.kwargs["max_messages"], 1)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(sum(item.is_pinned_memory for item in result), 3)
+        self.assertEqual(index.record_retrieval_event_async.await_args.kwargs["reranker_reason"], "ambiguous_boundary")
+        await retriever.close()
+
+
+class ContextPriorityTest(unittest.TestCase):
+    def test_reply_anchor_is_not_starved_by_pins(self):
+        builder = ContextPackBuilder()
+        pins = builder.build_pinned_context(
+            [(pin_id, f"pin {pin_id}", "Ada", "Ray", datetime.now(timezone.utc).isoformat()) for pin_id in range(1, 5)],
+            channel_id=2,
+        )
+        anchor = MessageContext(
+            content="direct reply anchor", author="Ada",
+            timestamp=datetime.now(timezone.utc), message_id=99, channel_id=2,
+            retrieval_source="reply_anchor",
+        )
+
+        packed = builder.build_context_pack(
+            pinned_context=pins, retrieved_context=[anchor], max_messages=4,
+        )
+
+        self.assertEqual(len(packed), 4)
+        self.assertEqual(sum(item.is_pinned_memory for item in packed), 3)
+        self.assertEqual(packed[-1].message_id, 99)
+
+
+class RagDatabaseIsolationTest(unittest.TestCase):
+    def test_legacy_rag_data_is_copied_to_dedicated_database_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_db = str(Path(temp_dir) / "token_usage.db")
+            rag_db = str(Path(temp_dir) / "message_rag.db")
+            legacy_index = MessageIndexService(
+                token_db, embedding_model="test", embedding_dimensions=3,
+            )
+            legacy_index.upsert_message(
+                message_id=31, guild_id=1, channel_id=2, author_id=3,
+                author_name="Ada", is_bot=False, reply_to_message_id=None,
+                created_at=datetime.now(timezone.utc),
+                content_text="legacy searchable message",
+            )
+            legacy_pins = PinService(token_db)
+            legacy_pins.add_pin(2, "legacy pin", "Ada", "Ray", guild_id=1)
+            conn = sqlite3.connect(token_db)
+            try:
+                conn.execute("CREATE TABLE token_usage_sentinel(value TEXT)")
+                conn.execute("INSERT INTO token_usage_sentinel VALUES ('preserved')")
+                conn.commit()
+            finally:
+                conn.close()
+
+            migrated_pins = PinService(rag_db, legacy_db_path=token_db)
+            migrated_index = MessageIndexService(
+                rag_db, embedding_model="test", embedding_dimensions=3,
+                legacy_db_path=token_db,
+            )
+
+            self.assertEqual(migrated_index.get_status()["messages"], 1)
+            self.assertEqual(len(migrated_pins.get_pins(2)), 1)
+            self.assertEqual(
+                [item.message_id for item in migrated_index.search_lexical(
+                    "searchable", guild_id=1, channel_id=2,
+                    cross_channel=False, limit=5,
+                )],
+                [31],
+            )
+            target = sqlite3.connect(rag_db)
+            source = sqlite3.connect(token_db)
+            try:
+                self.assertIsNone(target.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='token_usage_sentinel'"
+                ).fetchone())
+                self.assertEqual(source.execute(
+                    "SELECT value FROM token_usage_sentinel"
+                ).fetchone()[0], "preserved")
+                self.assertEqual(source.execute(
+                    "SELECT COUNT(*) FROM message_index"
+                ).fetchone()[0], 1)
+            finally:
+                target.close()
+                source.close()
 
 
 if __name__ == "__main__":

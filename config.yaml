@@ -35,6 +35,7 @@ context:
 # --- Hybrid Message RAG ---
 rag:
   enabled: true
+  database_path: "data/message_rag.db"   # Dedicated RAG/pin database; never share token_usage.db
   embedding_model: "gemini-embedding-2"
   embedding_dimensions: 768             # Compact local vectors; Gemini recommends 768, 1536, or 3072
   cross_channel_enabled: false          # Keep retrieval scoped to current channel unless explicitly enabled

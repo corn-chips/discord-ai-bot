@@ -142,6 +142,13 @@ embedding according to `embedding_min_words` and
 `embedding_min_alphanumeric_chars`. The reranker runs only when the local fused
 ranking has an ambiguous selection boundary.
 
+RAG data is stored separately in `rag.database_path` (default
+`data/message_rag.db`). Message history, FTS, embeddings, retrieval telemetry,
+backfill cursors, and pinned memories never write to the token-usage database.
+On the first startup after upgrading, existing RAG rows and pins are copied from
+the legacy token database into the dedicated database; the old rows are left in
+place as a backup.
+
 Completed 768-dimensional embeddings are lazily cached as float32 vectors in
 process memory. Vector payload RAM is approximately 3 KiB per cached message
 (about 29 MiB per 10,000 messages), plus small NumPy metadata arrays. `/rag

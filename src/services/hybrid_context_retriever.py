@@ -568,7 +568,12 @@ class HybridContextRetriever:
             self._add_candidates(candidates, semantic, source="semantic", weight=2.0)
 
             fused = sorted(candidates.values(), key=lambda item: item.score, reverse=True)
-            rerank_pool = fused[: max(max_messages, self.config.rag_rerank_candidates)]
+            available_slots = self.pack_builder.available_retrieval_slots(
+                pinned_context=pinned_context,
+                reply_context=reply_context,
+                max_messages=max_messages,
+            )
+            rerank_pool = fused[: max(available_slots, self.config.rag_rerank_candidates)]
             retrieved_context = [
                 self.pack_builder.build_message_context(
                     candidate.message,
@@ -579,15 +584,17 @@ class HybridContextRetriever:
                 for candidate in rerank_pool
             ]
 
-            if len(fused) <= max_messages:
+            if available_slots <= 0:
+                reranker_reason = "no_available_slots"
+            elif len(fused) <= available_slots:
                 reranker_reason = "within_context_limit"
             elif self.config.rag_rerank_candidates <= 0:
                 reranker_reason = "disabled"
             elif not getattr(self.gemini_client, "client", None):
                 reranker_reason = "client_unavailable"
             else:
-                boundary = fused[max_messages - 1].score
-                excluded = fused[max_messages].score
+                boundary = fused[available_slots - 1].score
+                excluded = fused[available_slots].score
                 boundary_gap = max(0.0, boundary - excluded) / max(abs(boundary), 1e-9)
                 margin = getattr(self.config, "rag_rerank_min_boundary_margin", 0.15)
                 reranker_reason = "ambiguous_boundary" if boundary_gap < margin else "stable_boundary"
@@ -597,7 +604,7 @@ class HybridContextRetriever:
                     reranked = await self.gemini_client.select_relevant_context(
                         user_prompt,
                         retrieved_context[: self.config.rag_rerank_candidates],
-                        max_messages=max_messages,
+                        max_messages=available_slots,
                         anchor_message_ids=reply_ids,
                     )
                     if reranked:

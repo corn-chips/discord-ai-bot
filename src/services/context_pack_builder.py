@@ -69,21 +69,55 @@ class ContextPackBuilder:
         """Return a bounded context pack with pins preserved ahead of retrieved messages."""
         max_messages = max(1, int(max_messages or 1))
 
-        pinned = list(pinned_context or [])[:max_messages]
+        pinned = list(pinned_context or [])
         retrieved = list(retrieved_context or [])
+        anchors = [ctx for ctx in retrieved if ctx.retrieval_source == "reply_anchor"]
+        ordinary = [ctx for ctx in retrieved if ctx.retrieval_source != "reply_anchor"]
 
-        seen_ids = {ctx.message_id for ctx in pinned}
+        pin_slots, anchor_slots = self._priority_slot_counts(
+            len(pinned),
+            len(anchors),
+            max_messages,
+        )
+        pinned = pinned[:pin_slots]
+        anchors = anchors[:anchor_slots]
+
+        seen_ids = {ctx.message_id for ctx in [*pinned, *anchors]}
         deduped_retrieved = []
-        for ctx in retrieved:
+        for ctx in ordinary:
             if ctx.message_id in seen_ids:
                 continue
             seen_ids.add(ctx.message_id)
             deduped_retrieved.append(ctx)
 
-        remaining_slots = max(0, max_messages - len(pinned))
+        remaining_slots = max(0, max_messages - len(pinned) - len(anchors))
         if remaining_slots:
             deduped_retrieved = deduped_retrieved[:remaining_slots]
         else:
             deduped_retrieved = []
 
-        return pinned + deduped_retrieved
+        return pinned + anchors + deduped_retrieved
+
+    @staticmethod
+    def _priority_slot_counts(pin_count: int, anchor_count: int, max_messages: int) -> tuple[int, int]:
+        """Reserve room for a reply anchor without discarding pinned memory."""
+        max_messages = max(1, int(max_messages or 1))
+        reserve_anchor = 1 if pin_count and anchor_count and max_messages > 1 else 0
+        pin_slots = min(pin_count, max_messages - reserve_anchor)
+        anchor_slots = min(anchor_count, max_messages - pin_slots)
+        return pin_slots, anchor_slots
+
+    def available_retrieval_slots(
+        self,
+        *,
+        pinned_context: list[MessageContext],
+        reply_context: list[MessageContext],
+        max_messages: int,
+    ) -> int:
+        """Return slots left after prioritized pins and reply anchors."""
+        pin_slots, anchor_slots = self._priority_slot_counts(
+            len(pinned_context or []),
+            len(reply_context or []),
+            max_messages,
+        )
+        return max(0, max_messages - pin_slots - anchor_slots)

@@ -281,6 +281,8 @@ def _parse_message_ux_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "rag_enabled": get_config_value(config_data, "rag", "enabled", True),
+        "rag_database_path": os.getenv("RAG_DATABASE_PATH")
+        or get_config_value(config_data, "rag", "database_path", "data/message_rag.db"),
         "rag_embedding_model": str(
             get_config_value(
                 config_data, "rag", "embedding_model", "gemini-embedding-2"
@@ -518,6 +520,10 @@ def _validate_core_values(config: Any) -> List[str]:
     if config.max_context_images < 0:
         errors.append("context.max_images must be zero or positive")
     if config.rag_enabled:
+        if not config.rag_database_path or not str(config.rag_database_path).strip():
+            errors.append("rag.database_path must be a valid filesystem path")
+        elif Path(config.rag_database_path).resolve() == Path(config.token_db_path).resolve():
+            errors.append("rag.database_path must be separate from bot.token_db_path")
         if not config.rag_embedding_model:
             errors.append("rag.embedding_model must not be empty when rag.enabled is true")
         if not 128 <= config.rag_embedding_dimensions <= 3072:

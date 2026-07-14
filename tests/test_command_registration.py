@@ -68,6 +68,7 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         self._bots = []
         self.config = BotConfig(
             token_db_path=str(Path(self._temp_dir.name) / "commands.db"),
+            rag_database_path=str(Path(self._temp_dir.name) / "message_rag.db"),
             available_models=[
                 {"name": "Model A", "value": "model-a"},
                 {"name": "Model B", "value": "model-b"},

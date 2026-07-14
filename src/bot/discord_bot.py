@@ -352,14 +352,18 @@ class DiscordBot(discord.Client):
             cutoff_hours=config.context_cutoff_hours
         )
         self.gemini_client = GeminiClient(config)
-        self._pin_service = PinService(db_path=config.token_db_path)
         self.message_index_service = MessageIndexService(
-            config.token_db_path,
+            config.rag_database_path,
             embedding_model=config.rag_embedding_model,
             embedding_dimensions=config.rag_embedding_dimensions,
             embedding_min_words=config.rag_embedding_min_words,
             embedding_min_alphanumeric_chars=config.rag_embedding_min_alphanumeric_chars,
             vector_cache_enabled=config.rag_vector_cache_enabled,
+            legacy_db_path=config.token_db_path,
+        )
+        self._pin_service = PinService(
+            db_path=config.rag_database_path,
+            legacy_db_path=config.token_db_path,
         )
         self._rag_event_coordinator = _get_or_create_rag_event_coordinator(self)
         self.context_pack_builder = ContextPackBuilder()

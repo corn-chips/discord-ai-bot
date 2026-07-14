@@ -171,17 +171,8 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         clear_cache = self._command(bot, "clear-cache")
         self.assertTrue(clear_cache.default_permissions.administrator)
 
-        self.assertEqual(self._command(bot, "rag status").checks, [])
-
-        for path in ("rag backfill", "rag delete"):
-            command = self._command(bot, path)
-            self.assertEqual(len(command.checks), 1)
-            permission_values = [
-                cell.cell_contents
-                for cell in (command.checks[0].__closure__ or ())
-                if isinstance(cell.cell_contents, dict)
-            ]
-            self.assertEqual(permission_values, [{"manage_guild": True}])
+        for path in ("rag status", "rag backfill", "rag delete"):
+            self.assertEqual(self._command(bot, path).checks, [])
 
         personality = self._command(bot, "personality")
         self.assertTrue(next(iter(personality.parameters)).autocomplete)

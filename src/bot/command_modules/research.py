@@ -196,7 +196,6 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
 
     @rag_group.command(name="backfill", description="Pre-generate local RAG data from channel history")
     @app_commands.describe(limit="Messages to scan; omit or use 0 for the entire accessible history")
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def rag_backfill(interaction: discord.Interaction, limit: Optional[int] = None):
         index_service = getattr(bot, "message_index_service", None)
         if not index_service:
@@ -243,7 +242,6 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
         app_commands.Choice(name="Current channel", value="channel"),
         app_commands.Choice(name="All channels", value="all"),
     ])
-    @app_commands.checks.has_permissions(manage_guild=True)
     async def rag_delete(
         interaction: discord.Interaction,
         scope: app_commands.Choice[str],

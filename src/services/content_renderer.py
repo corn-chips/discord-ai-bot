@@ -74,7 +74,7 @@ class ContentRenderer:
     BLOCK_LATEX_RE = re.compile(r'\$\$(.*?)\$\$', re.DOTALL)
     INLINE_LATEX_RE = re.compile(r'(?<!\$)\$(?!\$)(.+?)\$(?!\$)')
     TABLE_RE = re.compile(
-        r'((?:^\|.+\|$\n?)+)',
+        r'((?:^\|.+\|(?:\r?\n|$))+)',
         re.MULTILINE
     )
     SEPARATOR_ROW_RE = re.compile(r'^\|[\s\-:|]+\|$')
@@ -330,17 +330,21 @@ class ContentRenderer:
         with no citation.
         """
         # Collect expressions that need image rendering
-        # Each entry: (original_match_text, latex_expr, is_block)
-        expressions_to_render: List[Tuple[str, str]] = []
+        # Each entry: (start, end, latex_expr). Keeping source spans prevents an
+        # identical inline expression from being mistaken for one inside a block.
+        expressions_to_render: List[Tuple[int, int, str]] = []
+        block_spans: List[Tuple[int, int]] = []
 
         # Track which inline expressions convert to Unicode (no image needed)
-        unicode_replacements: List[Tuple[str, str]] = []
+        unicode_replacements: List[Tuple[int, int, str]] = []
 
         # First pass: identify block LaTeX ($$...$$)
         for match in self.BLOCK_LATEX_RE.finditer(text):
             latex_expr = match.group(1).strip()
             if latex_expr:
-                expressions_to_render.append((match.group(0), latex_expr))
+                start, end = match.span()
+                block_spans.append((start, end))
+                expressions_to_render.append((start, end, latex_expr))
 
         # Second pass: identify inline LaTeX ($...$) that can't be Unicode-converted
         for match in self.INLINE_LATEX_RE.finditer(text):
@@ -349,43 +353,63 @@ class ContentRenderer:
                 continue
 
             # Skip if this is inside a block expression (already captured)
-            if any(match.group(0) in block_match for block_match, _ in expressions_to_render):
+            if any(
+                block_start <= match.start() and match.end() <= block_end
+                for block_start, block_end in block_spans
+            ):
                 continue
 
             # Try Unicode conversion first
             unicode_result = self._latex_to_unicode(latex_expr)
             if unicode_result is not None:
-                unicode_replacements.append((match.group(0), unicode_result))
+                unicode_replacements.append((*match.span(), unicode_result))
             else:
-                expressions_to_render.append((match.group(0), latex_expr))
+                expressions_to_render.append((*match.span(), latex_expr))
 
-        # Apply Unicode replacements (no citation needed)
-        for original, replacement in unicode_replacements:
-            text = text.replace(original, replacement, 1)
+        expressions_to_render.sort(key=lambda item: item[0])
 
         # If nothing needs image rendering, return early
         if not expressions_to_render:
-            return text
-
-        # Assign citation numbers and replace in text
-        for idx, (original_text, _latex_expr) in enumerate(expressions_to_render, 1):
-            text = text.replace(original_text, f"**[{idx}]**", 1)
+            replacements = unicode_replacements
+        else:
+            replacements = list(unicode_replacements)
 
         # Render combined image with all expressions
         labeled_exprs = [
             (f"[{idx}]", latex_expr)
-            for idx, (_original, latex_expr) in enumerate(expressions_to_render, 1)
+            for idx, (_start, _end, latex_expr) in enumerate(expressions_to_render, 1)
         ]
-        img_bytes = self._render_combined_latex_image(labeled_exprs)
+        img_bytes = (
+            self._render_combined_latex_image(labeled_exprs)
+            if labeled_exprs
+            else None
+        )
 
         if img_bytes:
+            replacements.extend(
+                (start, end, f"**[{idx}]**")
+                for idx, (start, end, _latex_expr) in enumerate(
+                    expressions_to_render,
+                    1,
+                )
+            )
             attachments.append(discord.File(io.BytesIO(img_bytes), filename="equations.png"))
             logger.info(f"Rendered {len(labeled_exprs)} LaTeX expression(s) into combined image")
-        else:
+        elif expressions_to_render:
             # Fallback: put raw LaTeX in code blocks
-            for idx, (original_text, latex_expr) in enumerate(expressions_to_render, 1):
-                text = text.replace(f"**[{idx}]**", f"`{latex_expr}`")
+            replacements.extend(
+                (start, end, f"`{latex_expr}`")
+                for start, end, latex_expr in expressions_to_render
+            )
             logger.warning("Failed to render combined LaTeX image, falling back to code blocks")
+
+        # Apply from the end so every source span remains valid as text changes.
+        for start, end, replacement in sorted(
+            replacements,
+            key=lambda item: item[0],
+            reverse=True,
+        ):
+            text = text[:start] + replacement + text[end:]
 
         return text
 
@@ -558,8 +582,18 @@ class ContentRenderer:
             return text
 
         def _replace_table(match: re.Match) -> str:
-            table_text = match.group(1).strip()
-            return self._format_table_as_code_block(table_text)
+            matched_text = match.group(1)
+            table_text = matched_text.strip()
+            formatted = self._format_table_as_code_block(table_text)
+            # TABLE_RE may consume the line break after a table. Preserve that
+            # boundary so following prose cannot attach to the closing fence.
+            if matched_text.endswith('\r\n'):
+                boundary = '\r\n'
+            elif matched_text.endswith('\n'):
+                boundary = '\n'
+            else:
+                boundary = ''
+            return formatted + boundary
 
         return self.TABLE_RE.sub(_replace_table, text)
 

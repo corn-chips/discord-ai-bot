@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 
 logger = logging.getLogger(__name__)
@@ -43,13 +44,8 @@ class ReportService:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_table()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
     def _ensure_table(self) -> None:
-        with closing(self._connect()) as conn:
+        with sqlite_transaction(self.db_path, row_factory=sqlite3.Row) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS bot_reports (
@@ -79,7 +75,6 @@ class ReportService:
                 ON bot_reports (guild_id, id DESC)
                 """
             )
-            conn.commit()
         logger.info("Report tracking database ready at %s", self.db_path)
 
     def create_report(
@@ -100,7 +95,7 @@ class ReportService:
             raise ValueError("Report description is required")
 
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        with closing(self._connect()) as conn:
+        with sqlite_transaction(self.db_path, row_factory=sqlite3.Row) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO bot_reports (
@@ -127,7 +122,6 @@ class ReportService:
                 ),
             )
             report_id = int(cursor.lastrowid)
-            conn.commit()
 
         report = self.get_report(report_id)
         if not report:
@@ -137,7 +131,7 @@ class ReportService:
     def get_report(self, report_id: int) -> Optional[Report]:
         """Return one report by ID, or None if it does not exist."""
 
-        with closing(self._connect()) as conn:
+        with sqlite_connection(self.db_path, row_factory=sqlite3.Row) as conn:
             row = conn.execute(
                 """
                 SELECT *
@@ -176,7 +170,7 @@ class ReportService:
             """
             params = (bounded_limit,)
 
-        with closing(self._connect()) as conn:
+        with sqlite_connection(self.db_path, row_factory=sqlite3.Row) as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_report(row) for row in rows]
 
@@ -192,7 +186,7 @@ class ReportService:
         normalized_status = self._normalize_status(status)
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-        with closing(self._connect()) as conn:
+        with sqlite_transaction(self.db_path, row_factory=sqlite3.Row) as conn:
             if admin_notes is None:
                 cursor = conn.execute(
                     """
@@ -216,7 +210,6 @@ class ReportService:
                 )
             if cursor.rowcount == 0:
                 return None
-            conn.commit()
 
         return self.get_report(report_id)
 

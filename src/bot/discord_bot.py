@@ -8,10 +8,9 @@ message processing, and coordinates with other services to provide AI responses.
 import asyncio
 import io
 import logging
-import re
-from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable, Deque
+from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable
 
 import discord
 from PIL import Image
@@ -41,91 +40,170 @@ from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
 from .commands import setup_commands
 from .enhanced_command_handler import EnhancedCommandHandler
+from .live_message_coordinator import LiveMessageCoordinator
+from .media_extraction import MediaExtractionCoordinator
+from .rag_event_coordinator import RagEventCoordinator
+from .response_delivery import ResponseDeliveryCoordinator, SplitResponsePaginatorView
+from .response_generation import ResponseGenerationCoordinator
 
 
 logger = logging.getLogger(__name__)
 
 
-class SplitResponsePaginatorView(discord.ui.View):
-    """Simple paginator for split responses with sender-priority navigation."""
+def _get_or_create_live_coordinator(owner: Any) -> LiveMessageCoordinator:
+    """Build the live collaborator lazily for private-wrapper compatibility."""
+    coordinator = getattr(owner, "_live_message_coordinator", None)
+    if coordinator is not None:
+        return coordinator
 
-    def __init__(
-        self,
-        pages: List[str],
-        sender_user_id: int,
-        title: str,
-        priority_window_seconds: float = 2.0,
-        timeout: float = 120.0,
-    ):
-        super().__init__(timeout=timeout)
-        self.pages = pages
-        self.sender_user_id = sender_user_id
-        self.title = title
-        self.priority_window_seconds = priority_window_seconds
-        self.current_page_index = 0
-        self.last_sender_click_time: Optional[datetime] = None
-        self._interaction_lock = asyncio.Lock()
-        self.message: Optional[discord.Message] = None
-        self._update_button_states()
+    def _state_dict(name: str) -> dict:
+        value = getattr(owner, name, None)
+        if value is None:
+            value = {}
+            setattr(owner, name, value)
+        return value
 
-    def build_embed(self) -> discord.Embed:
-        embed = discord.Embed(
-            title=self.title,
-            description=self.pages[self.current_page_index],
-            color=discord.Color.blurple(),
-        )
-        embed.set_footer(text=f"Page {self.current_page_index + 1}/{len(self.pages)}")
-        return embed
+    def _rag_enabled() -> bool:
+        return bool(getattr(getattr(owner, "config", None), "rag_enabled", False))
 
-    def _update_button_states(self, *, disable_all: bool = False) -> None:
-        self.previous_page.disabled = disable_all or self.current_page_index <= 0
-        self.next_page.disabled = disable_all or self.current_page_index >= len(self.pages) - 1
+    def _get_bot_user():
+        return getattr(owner, "user", None)
 
-    def _priority_window_remaining(self) -> float:
-        if self.last_sender_click_time is None:
-            return 0.0
-        elapsed = (datetime.now(timezone.utc) - self.last_sender_click_time).total_seconds()
-        return max(0.0, self.priority_window_seconds - elapsed)
+    def _get_personality_prompt(channel_id: int) -> Optional[str]:
+        service = getattr(owner, "_channel_settings_service", None)
+        return service.get_personality_prompt(channel_id) if service else None
 
-    async def _handle_navigation(self, interaction: discord.Interaction, delta: int) -> None:
-        async with self._interaction_lock:
-            if interaction.user.id != self.sender_user_id:
-                remaining = self._priority_window_remaining()
-                if remaining > 0:
-                    await interaction.response.send_message(
-                        f"The message sender has priority for {remaining:.1f}s.",
-                        ephemeral=True,
-                    )
-                    return
+    retriever = getattr(owner, "hybrid_context_retriever", None)
+    gemini_client = getattr(owner, "gemini_client", None)
+    coordinator = LiveMessageCoordinator(
+        rate_limiter=owner.text_rate_limiter,
+        extract_user_prompt=owner._extract_user_prompt,
+        process_message_with_context=owner._process_message_with_context,
+        is_enabled=getattr(owner, "_is_live_mode_enabled", lambda _channel_id: False),
+        model_name=owner._live_model_name,
+        cooldown_seconds=getattr(owner, "_live_cooldown_seconds", 2.0),
+        reply_style_instruction=getattr(
+            owner,
+            "_live_reply_style_instruction",
+            "Keep replies very short and natural, like normal chatting.",
+        ),
+        turn_window=getattr(owner, "_live_turn_window", 6),
+        rag_enabled=_rag_enabled,
+        retrieve_context=getattr(retriever, "retrieve", None),
+        generate_response=getattr(gemini_client, "generate_response", None),
+        handle_response_error=getattr(owner, "_handle_response_error", None),
+        record_token_usage=getattr(owner, "_record_token_usage", None),
+        send_response=getattr(owner, "_send_response_safely", None),
+        get_bot_user=_get_bot_user,
+        get_personality_prompt=_get_personality_prompt,
+        tasks=_state_dict("_live_channel_tasks"),
+        pending_messages=_state_dict("_live_pending_messages"),
+        locks=_state_dict("_live_channel_locks"),
+        context=_state_dict("_live_channel_context"),
+    )
+    setattr(owner, "_live_message_coordinator", coordinator)
+    return coordinator
 
-            new_index = self.current_page_index + delta
-            if new_index < 0 or new_index >= len(self.pages):
-                await interaction.response.defer()
-                return
 
-            self.current_page_index = new_index
-            if interaction.user.id == self.sender_user_id:
-                self.last_sender_click_time = datetime.now(timezone.utc)
+def _get_or_create_rag_event_coordinator(owner: Any) -> RagEventCoordinator:
+    """Build the RAG mutation collaborator lazily for wrapper compatibility."""
+    coordinator = getattr(owner, "_rag_event_coordinator", None)
+    if coordinator is not None:
+        return coordinator
 
-            self._update_button_states()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+    def _config_flag(name: str) -> bool:
+        return bool(getattr(getattr(owner, "config", None), name, False))
 
-    @discord.ui.button(label="\u2B05\uFE0F", style=discord.ButtonStyle.secondary)
-    async def previous_page(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._handle_navigation(interaction, -1)
+    coordinator = RagEventCoordinator(
+        message_index_service=owner.message_index_service,
+        rag_enabled=lambda: _config_flag("rag_enabled"),
+        index_bot_responses=lambda: _config_flag("rag_index_bot_responses"),
+        get_bot_user=lambda: getattr(owner, "user", None),
+    )
+    setattr(owner, "_rag_event_coordinator", coordinator)
+    return coordinator
 
-    @discord.ui.button(label="\u27A1\uFE0F", style=discord.ButtonStyle.secondary)
-    async def next_page(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._handle_navigation(interaction, 1)
 
-    async def on_timeout(self) -> None:
-        self._update_button_states(disable_all=True)
-        if not self.message:
-            return
-        try:
-            await self.message.edit(view=self)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            pass
+def _get_or_create_response_delivery(owner: Any) -> ResponseDeliveryCoordinator:
+    """Build the response-delivery collaborator lazily for wrapper compatibility."""
+    coordinator = getattr(owner, "_response_delivery", None)
+    if coordinator is not None:
+        return coordinator
+
+    coordinator = ResponseDeliveryCoordinator(
+        message_splitter=owner.message_splitter,
+        content_renderer=owner.content_renderer,
+        error_manager=owner.error_manager,
+        get_split_length=lambda: owner.config.message_split_length,
+        index_sent_bot_response=owner._index_sent_bot_response,
+    )
+    setattr(owner, "_response_delivery", coordinator)
+    return coordinator
+
+
+def _get_or_create_media_extraction(owner: Any) -> MediaExtractionCoordinator:
+    """Build the media collaborator lazily for private-wrapper compatibility."""
+    coordinator = getattr(owner, "_media_extraction", None)
+    if coordinator is not None:
+        return coordinator
+
+    config = owner.config
+    coordinator = MediaExtractionCoordinator(
+        pdf_converter=owner._convert_pdf_to_images,
+        image_to_rgb=owner._convert_image_to_rgb,
+        get_max_context_images=lambda: getattr(config, "max_context_images", 6),
+        get_max_context_messages=lambda: config.max_context_messages,
+        get_max_text_file_size=lambda: config.max_text_file_size_bytes,
+        supported_text_extensions=SUPPORTED_TEXT_EXTENSIONS,
+    )
+    setattr(owner, "_media_extraction", coordinator)
+    return coordinator
+
+
+def _get_or_create_response_generation(owner: Any) -> ResponseGenerationCoordinator:
+    """Build the generation collaborator lazily for private-wrapper compatibility."""
+    coordinator = getattr(owner, "_response_generation", None)
+    if coordinator is not None:
+        return coordinator
+
+    async def _send_status_message(
+        message: discord.Message,
+        content: str,
+    ) -> discord.Message:
+        return await message.reply(content)
+
+    def _get_personality_prompt(channel_id: int) -> Optional[str]:
+        service = getattr(owner, "_channel_settings_service", None)
+        return service.get_personality_prompt(channel_id) if service else None
+
+    def _remove_duplicate_context(recent: List[Any], replied: List[Any]) -> List[Any]:
+        collector = getattr(owner, "context_collector", None)
+        if collector is None:
+            return recent + [item for item in replied if item not in recent]
+        return collector._remove_duplicate_messages(recent, replied)
+
+    coordinator = ResponseGenerationCoordinator(
+        gemini_client=owner.gemini_client,
+        error_manager=owner.error_manager,
+        performance_logger=owner.performance_logger,
+        extract_images=owner._extract_images_from_message,
+        extract_context_images=owner._extract_context_images,
+        extract_audio=owner._extract_audio_from_message,
+        extract_files=owner._extract_files_from_message,
+        attach_image_order_metadata=getattr(
+            owner,
+            "_attach_image_order_metadata",
+            MediaExtractionCoordinator.attach_image_order_metadata,
+        ),
+        remove_duplicate_context=_remove_duplicate_context,
+        resolve_request_preferences=owner._resolve_request_preferences,
+        get_personality_prompt=_get_personality_prompt,
+        get_token_tracker=lambda: getattr(owner, "token_tracker", None),
+        send_status_message=_send_status_message,
+        deliver_response=owner._send_response_safely,
+    )
+    setattr(owner, "_response_generation", coordinator)
+    return coordinator
 
 
 class DiscordBot(discord.Client):
@@ -149,8 +227,16 @@ class DiscordBot(discord.Client):
         intents.messages = True  # Required to receive message events
         
         super().__init__(intents=intents)
+
+        # PyMuPDF work is isolated to one worker because concurrent conversions
+        # are not safe within this process. The executor is drained in close().
+        self._pdf_executor: Optional[ThreadPoolExecutor] = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="discord-pdf",
+        )
         
         self.config = config
+        self._media_extraction = _get_or_create_media_extraction(self)
         self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("discord_bot")
         self.token_tracker = None
@@ -186,6 +272,7 @@ class DiscordBot(discord.Client):
             config.token_db_path,
             embedding_model=config.rag_embedding_model,
         )
+        self._rag_event_coordinator = _get_or_create_rag_event_coordinator(self)
         self.context_pack_builder = ContextPackBuilder()
         self.hybrid_context_retriever = HybridContextRetriever(
             config=config,
@@ -205,6 +292,7 @@ class DiscordBot(discord.Client):
         
         # Initialize content renderer for LaTeX and table formatting
         self.content_renderer = ContentRenderer()
+        self._response_delivery = _get_or_create_response_delivery(self)
 
         # Initialize UX enhancement services
         self.user_experience_service = UserExperienceService(config)
@@ -257,7 +345,8 @@ class DiscordBot(discord.Client):
         self._live_channel_tasks: Dict[int, asyncio.Task] = {}
         self._live_pending_messages: Dict[int, List[discord.Message]] = {}
         self._live_channel_locks: Dict[int, asyncio.Lock] = {}
-        self._live_channel_context: Dict[int, Deque[MessageContext]] = {}
+        self._live_channel_context: Dict[int, Any] = {}
+        self._live_message_coordinator = _get_or_create_live_coordinator(self)
         
         logger.info("DiscordBot initialized with configuration")
     
@@ -382,48 +471,23 @@ class DiscordBot(discord.Client):
             logger.error(f"Event kwargs: {kwargs}")
 
     async def on_raw_message_delete(self, payload):
-        """Keep the persistent RAG index aligned when Discord deletes a message."""
-        if not self.config.rag_enabled:
-            return
-        try:
-            await self.message_index_service.mark_deleted_async(payload.message_id)
-        except Exception as exc:
-            logger.debug("Failed to mark deleted message %s in RAG index: %s", payload.message_id, exc)
+        """Delegate one Discord deletion to the RAG event collaborator."""
+        await _get_or_create_rag_event_coordinator(self).handle_raw_delete(
+            payload.message_id
+        )
 
     async def on_raw_bulk_message_delete(self, payload):
-        """Keep the persistent RAG index aligned for bulk Discord deletes."""
-        if not self.config.rag_enabled:
-            return
-        for message_id in payload.message_ids:
-            try:
-                await self.message_index_service.mark_deleted_async(message_id)
-            except Exception as exc:
-                logger.debug("Failed to mark bulk-deleted message %s in RAG index: %s", message_id, exc)
+        """Delegate Discord bulk deletion to the RAG event collaborator."""
+        await _get_or_create_rag_event_coordinator(self).handle_raw_bulk_delete(
+            payload.message_ids
+        )
 
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        """Refresh or remove indexed content when an indexed Discord message changes."""
-        if not self.config.rag_enabled:
-            return
-        author = getattr(after, "author", None)
-        if getattr(author, "bot", False):
-            if not self.config.rag_index_bot_responses:
-                return
-            if not self.user or getattr(author, "id", None) != self.user.id:
-                return
-            # Paginator navigation and timeout only mutate embeds/components.
-            # Keep the canonical full generated text stored for RAG in that case.
-            if before.content == after.content:
-                return
-
-        try:
-            indexed = await self.message_index_service.index_discord_message_async(
-                after,
-                include_bot_user_id=self.user.id if self.user else None,
-            )
-            if not indexed:
-                await self.message_index_service.mark_deleted_async(after.id)
-        except Exception as exc:
-            logger.debug("Failed to refresh edited message %s in RAG index: %s", after.id, exc)
+        """Delegate an edited Discord message to the RAG event collaborator."""
+        await _get_or_create_rag_event_coordinator(self).handle_message_edit(
+            before,
+            after,
+        )
 
     async def get_service_health_status(self) -> Dict[str, str]:
         """
@@ -501,32 +565,46 @@ class DiscordBot(discord.Client):
             except Exception as e:
                 logger.error(f"Error cleaning up user experience service: {e}")
         
-        # Call parent close method
-        live_tasks = [task for task in self._live_channel_tasks.values() if not task.done()]
-        if live_tasks:
-            for task in live_tasks:
-                task.cancel()
-            await asyncio.gather(*live_tasks, return_exceptions=True)
+        live_coordinator = getattr(self, "_live_message_coordinator", None)
+        if live_coordinator is not None:
+            await live_coordinator.close()
             logger.info("Live channel workers stopped")
+        else:
+            # Compatibility for partially constructed instances used by lifecycle tests.
+            live_tasks = [
+                task
+                for task in getattr(self, "_live_channel_tasks", {}).values()
+                if not task.done()
+            ]
+            if live_tasks:
+                for task in live_tasks:
+                    task.cancel()
+                await asyncio.gather(*live_tasks, return_exceptions=True)
+                logger.info("Live channel workers stopped")
+
+        pdf_executor = self._pdf_executor
+        self._pdf_executor = None
+        if pdf_executor is not None:
+            try:
+                await asyncio.to_thread(
+                    pdf_executor.shutdown,
+                    wait=True,
+                    cancel_futures=True,
+                )
+                logger.info("PDF conversion worker stopped")
+            except Exception as e:
+                logger.error(f"Error stopping PDF conversion worker: {e}")
 
         await super().close()
         logger.info("✅ Bot shutdown complete")
     
     def _get_live_channel_lock(self, channel_id: int) -> asyncio.Lock:
-        """Get or create a per-channel lock for live-mode state changes."""
-        lock = self._live_channel_locks.get(channel_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._live_channel_locks[channel_id] = lock
-        return lock
+        """Compatibility wrapper for the live collaborator's channel lock."""
+        return _get_or_create_live_coordinator(self).get_channel_lock(channel_id)
 
-    def _get_live_context_buffer(self, channel_id: int) -> Deque[MessageContext]:
-        """Get or create the rolling in-memory context buffer for a live channel."""
-        buffer = self._live_channel_context.get(channel_id)
-        if buffer is None:
-            buffer = deque(maxlen=self._live_turn_window * 2)
-            self._live_channel_context[channel_id] = buffer
-        return buffer
+    def _get_live_context_buffer(self, channel_id: int):
+        """Compatibility wrapper for one channel's rolling live context."""
+        return _get_or_create_live_coordinator(self).get_context_buffer(channel_id)
 
     def _is_live_mode_enabled(self, channel_id: int) -> bool:
         """Return whether mention-free live mode is enabled for this channel."""
@@ -539,66 +617,12 @@ class DiscordBot(discord.Client):
             return False
 
     async def _enqueue_live_message(self, message: discord.Message):
-        """Enqueue a live-mode message for batched single-reply processing."""
-        channel_id = message.channel.id
-        lock = self._get_live_channel_lock(channel_id)
-        async with lock:
-            self._live_pending_messages.setdefault(channel_id, []).append(message)
-            task = self._live_channel_tasks.get(channel_id)
-            if task and not task.done():
-                return
-
-            self._live_channel_tasks[channel_id] = asyncio.create_task(
-                self._run_live_channel_worker(channel_id),
-                name=f"live-worker-{channel_id}",
-            )
+        """Compatibility wrapper for live-mode queueing."""
+        await _get_or_create_live_coordinator(self).enqueue(message)
 
     async def _run_live_channel_worker(self, channel_id: int):
-        """Process live-mode messages serially with post-response cooldown."""
-        lock = self._get_live_channel_lock(channel_id)
-        try:
-            while True:
-                if not self._is_live_mode_enabled(channel_id):
-                    async with lock:
-                        self._live_pending_messages.pop(channel_id, None)
-                    break
-
-                async with lock:
-                    pending_messages = self._live_pending_messages.pop(channel_id, [])
-
-                if not pending_messages:
-                    break
-
-                response_sent = False
-                try:
-                    response_sent = await self._process_live_messages(pending_messages)
-                except Exception as exc:
-                    first_message = pending_messages[0]
-                    last_message = pending_messages[-1]
-                    logger.error(
-                        (
-                            "Live worker error in channel "
-                            f"{channel_id} for messages {first_message.id}-{last_message.id}: {exc}"
-                        ),
-                        exc_info=True,
-                    )
-
-                if not self._is_live_mode_enabled(channel_id):
-                    async with lock:
-                        self._live_pending_messages.pop(channel_id, None)
-                    break
-
-                if response_sent:
-                    await asyncio.sleep(self._live_cooldown_seconds)
-        finally:
-            async with lock:
-                self._live_channel_tasks.pop(channel_id, None)
-                has_pending = bool(self._live_pending_messages.get(channel_id))
-                if has_pending and self._is_live_mode_enabled(channel_id):
-                    self._live_channel_tasks[channel_id] = asyncio.create_task(
-                        self._run_live_channel_worker(channel_id),
-                        name=f"live-worker-{channel_id}",
-                    )
+        """Compatibility wrapper for a channel's live worker."""
+        await _get_or_create_live_coordinator(self).run_channel_worker(channel_id)
 
     def _append_live_context_entry(
         self,
@@ -610,196 +634,25 @@ class DiscordBot(discord.Client):
         is_reply: bool = False,
         replied_to_id: Optional[int] = None,
     ):
-        """Append a single message entry to the in-memory live rolling context."""
-        cleaned = (content or "").strip()
-        if not cleaned:
-            return
-        if len(cleaned) > 1200:
-            cleaned = cleaned[:1200] + "..."
-
-        self._get_live_context_buffer(channel_id).append(
-            MessageContext(
-                content=cleaned,
-                author=author,
-                timestamp=timestamp,
-                message_id=message_id,
-                channel_id=channel_id,
-                is_reply=is_reply,
-                replied_to_id=replied_to_id,
-            )
+        """Compatibility wrapper for appending live rolling context."""
+        _get_or_create_live_coordinator(self).append_context_entry(
+            channel_id=channel_id,
+            content=content,
+            author=author,
+            message_id=message_id,
+            timestamp=timestamp,
+            is_reply=is_reply,
+            replied_to_id=replied_to_id,
         )
 
     async def _process_live_messages(self, messages: List[discord.Message]) -> bool:
-        """Fast-path processing for mention-free live mode in a single channel."""
-        if not messages:
-            return False
-
-        channel_id = messages[-1].channel.id
-        attachment_index = next(
-            (index for index, msg in enumerate(messages) if msg.attachments),
-            None,
-        )
-        if attachment_index is not None:
-            remaining_messages = messages[attachment_index + 1:]
-            messages = messages[:attachment_index + 1]
-            if remaining_messages:
-                lock = self._get_live_channel_lock(channel_id)
-                async with lock:
-                    newly_queued = self._live_pending_messages.get(channel_id, [])
-                    self._live_pending_messages[channel_id] = remaining_messages + newly_queued
-
-        rate_limit_replied = False
-        allowed_user_ids = set()
-        messages_by_user: Dict[int, List[discord.Message]] = {}
-        for queued_message in messages:
-            messages_by_user.setdefault(queued_message.author.id, []).append(queued_message)
-
-        for user_id, user_messages in messages_by_user.items():
-            is_allowed, rate_limit_message = await self.text_rate_limiter.check_and_record(user_id)
-            if is_allowed:
-                allowed_user_ids.add(user_id)
-            else:
-                try:
-                    await user_messages[-1].reply(rate_limit_message)
-                    rate_limit_replied = True
-                except (discord.Forbidden, discord.HTTPException) as exc:
-                    logger.warning(
-                        "Could not send live-mode rate-limit reply to user %s: %s",
-                        user_id,
-                        exc,
-                    )
-
-        messages = [msg for msg in messages if msg.author.id in allowed_user_ids]
-        if not messages:
-            return rate_limit_replied
-
-        target_message = messages[-1]
-        prompt_entries: List[Tuple[discord.Message, str]] = []
-        for msg in messages:
-            prompt = self._extract_user_prompt(msg)
-            if prompt:
-                prompt_entries.append((msg, prompt))
-
-        # Process through the first attachment in sequence and retain the suffix
-        # for the next worker pass. This keeps every accepted message ordered and
-        # prevents an attachment from discarding adjacent queued text.
-        if messages[-1].attachments:
-            attachment_message = messages[-1]
-            attachment_entries = [
-                (msg, self._extract_user_prompt(msg))
-                for msg in messages
-            ]
-            attachment_entries = [entry for entry in attachment_entries if entry[1]]
-            attachment_prompt = self._build_live_user_prompt(attachment_entries)
-
-            await self._process_message_with_context(
-                attachment_message,
-                attachment_prompt,
-                complexity_level="low",
-                routed_intent="live_mode",
-                model_override=self._live_model_name,
-                prompt_mode_override="short",
-                search_override=False,
-                show_status_message=False,
-                skip_context_media=False,
-                apply_user_preferences=False,
-            )
-            return True
-
-        if not prompt_entries:
-            return False
-
-        user_prompt = self._build_live_user_prompt(prompt_entries)
-
-        rolling_context = list(self._get_live_context_buffer(channel_id))
-        live_context = rolling_context
-        if self.config.rag_enabled:
-            try:
-                rag_context = await self.hybrid_context_retriever.retrieve(
-                    message=target_message,
-                    user_prompt=user_prompt,
-                    complexity_level="low",
-                    bot_user_id=self.user.id if self.user else None,
-                )
-                seen_context_ids = set()
-                live_context = []
-                for ctx in rag_context + rolling_context:
-                    if ctx.message_id in seen_context_ids:
-                        continue
-                    seen_context_ids.add(ctx.message_id)
-                    live_context.append(ctx)
-            except Exception as exc:
-                logger.debug("Live-mode RAG retrieval failed; using rolling context: %s", exc)
-
-        personality_prompt = self._live_reply_style_instruction
-        if hasattr(self, "_channel_settings_service") and self._channel_settings_service:
-            channel_personality = self._channel_settings_service.get_personality_prompt(channel_id)
-            if channel_personality:
-                personality_prompt = f"{channel_personality}\n{self._live_reply_style_instruction}"
-
-        api_response = await self.gemini_client.generate_response(
-            user_prompt,
-            live_context,
-            model_override=self._live_model_name,
-            prompt_mode_override="short",
-            complexity_override="low",
-            search_override=False,
-            personality_prompt=personality_prompt,
-            language=None,
-        )
-
-        if not api_response.success:
-            await self._handle_response_error(target_message, api_response)
-            return True
-
-        await self._record_token_usage(target_message, api_response.token_usage)
-        sent_message = await self._send_response_safely(
-            target_message,
-            api_response.content,
-            api_response.grounding_sources,
-        )
-
-        for source_message, source_prompt in prompt_entries:
-            self._append_live_context_entry(
-                channel_id=channel_id,
-                content=source_prompt,
-                author=source_message.author.display_name,
-                message_id=source_message.id,
-                timestamp=source_message.created_at,
-                is_reply=source_message.reference is not None,
-                replied_to_id=source_message.reference.message_id if source_message.reference else None,
-            )
-
-        if sent_message:
-            self._append_live_context_entry(
-                channel_id=channel_id,
-                content=api_response.content,
-                author=self.user.display_name if self.user else "Grok",
-                message_id=sent_message.id,
-                timestamp=datetime.now(timezone.utc),
-                is_reply=True,
-                replied_to_id=target_message.id,
-            )
-            return True
-
-        return rate_limit_replied
+        """Compatibility wrapper for processing one live-mode batch."""
+        return await _get_or_create_live_coordinator(self).process_messages(messages)
 
     @staticmethod
     def _build_live_user_prompt(prompt_entries: List[Tuple[discord.Message, str]]) -> str:
-        """Build one ordered prompt from a live-mode message batch."""
-        if not prompt_entries:
-            return ""
-        if len(prompt_entries) == 1:
-            return prompt_entries[0][1]
-        user_prompt_lines = [
-            f"- {msg.author.display_name}: {prompt}"
-            for msg, prompt in prompt_entries
-        ]
-        return (
-            "New live chat messages (oldest to newest):\n"
-            + "\n".join(user_prompt_lines)
-            + "\nReply once to all of these in one short chat response."
-        )
+        """Compatibility wrapper for building an ordered live prompt."""
+        return LiveMessageCoordinator.build_user_prompt(prompt_entries)
 
     async def on_message(self, message: discord.Message):
         """
@@ -1177,6 +1030,20 @@ class DiscordBot(discord.Client):
         Returns:
             List of PIL Image objects, one per page
         """
+        pdf_executor = self._pdf_executor
+        if pdf_executor is None:
+            raise RuntimeError("PDF conversion worker is shut down")
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            pdf_executor,
+            self._convert_pdf_to_images_sync,
+            pdf_bytes,
+            filename,
+        )
+
+    def _convert_pdf_to_images_sync(self, pdf_bytes: bytes, filename: str) -> List[Image.Image]:
+        """Synchronously render PDF pages for the async worker-thread wrapper."""
         images = []
         try:
             logger.info(f"=" * 80)
@@ -1233,18 +1100,14 @@ class DiscordBot(discord.Client):
         attachment_index: int,
         pdf_page_number: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Create metadata that links an image part back to its source message."""
-        entry = {
-            "source_type": source_type,
-            "source_message_id": source_message.id,
-            "source_timestamp": source_message.created_at.isoformat(),
-            "source_author": source_message.author.display_name,
-            "attachment_name": attachment_name,
-            "attachment_index": attachment_index,
-        }
-        if pdf_page_number is not None:
-            entry["pdf_page_number"] = pdf_page_number
-        return entry
+        """Compatibility wrapper for image-source metadata."""
+        return MediaExtractionCoordinator.create_image_context_entry(
+            source_type,
+            source_message,
+            attachment_name,
+            attachment_index,
+            pdf_page_number,
+        )
 
     @staticmethod
     def _attach_image_order_metadata(
@@ -1252,154 +1115,18 @@ class DiscordBot(discord.Client):
         context: List[MessageContext],
         current_message: discord.Message
     ) -> List[Dict[str, Any]]:
-        """Annotate image metadata with explicit image and message order labels."""
-        sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
-        context_order_map = {
-            msg.message_id: f"CTX_MSG_{idx:03d}"
-            for idx, msg in enumerate(sorted_context, start=1)
-        }
-        replied_message_id = current_message.reference.message_id if current_message.reference else None
-
-        enriched_entries = []
-        for idx, entry in enumerate(image_context, start=1):
-            enriched = dict(entry)
-            enriched["image_index"] = idx
-
-            source_message_id = enriched.get("source_message_id")
-            if source_message_id in context_order_map:
-                source_order = context_order_map[source_message_id]
-            elif source_message_id == current_message.id:
-                source_order = "CURRENT_USER_MESSAGE"
-            elif replied_message_id and source_message_id == replied_message_id:
-                source_order = "REPLIED_TO_MESSAGE"
-            else:
-                source_order = "NON_CONTEXT_MESSAGE"
-
-            enriched["source_message_order"] = source_order
-            enriched_entries.append(enriched)
-
-        return enriched_entries
+        """Compatibility wrapper for explicit image/message ordering metadata."""
+        return MediaExtractionCoordinator.attach_image_order_metadata(
+            image_context,
+            context,
+            current_message,
+        )
     
     async def _extract_images_from_message(self, message: discord.Message) -> Tuple[List[Image.Image], List[Dict[str, Any]]]:
-        """
-        Extract and download images from a Discord message.
-        Also converts PDF files to images for processing.
-        
-        Args:
-            message: The Discord message to extract images from
-            
-        Returns:
-            Tuple containing image list and parallel image metadata list
-        """
-        images = []
-        image_context = []
-        
-        # Check message attachments for images and PDFs
-        for attachment_idx, attachment in enumerate(message.attachments, start=1):
-            # Check if attachment is a PDF
-            if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
-                try:
-                    logger.info(f"📄 PDF detected: {attachment.filename}")
-                    # Download the PDF
-                    pdf_bytes = await attachment.read()
-                    
-                    # Convert PDF pages to images
-                    pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
-                    
-                    if pdf_images:
-                        for page_idx, page_image in enumerate(pdf_images, start=1):
-                            images.append(page_image)
-                            image_context.append(
-                                self._create_image_context_entry(
-                                    source_type="current_message",
-                                    source_message=message,
-                                    attachment_name=attachment.filename,
-                                    attachment_index=attachment_idx,
-                                    pdf_page_number=page_idx,
-                                )
-                            )
-                        logger.info(f"✅ Added {len(pdf_images)} page(s) from PDF: {attachment.filename}")
-                    else:
-                        logger.warning(f"⚠️ No pages could be extracted from PDF: {attachment.filename}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to process PDF {attachment.filename}: {e}", exc_info=True)
-            
-            # Check if attachment is an image based on content type or filename
-            elif attachment.content_type and attachment.content_type.startswith('image/'):
-                try:
-                    # Download the image
-                    image_bytes = await attachment.read()
-                    
-                    # Convert to PIL Image and ensure RGB mode
-                    image = Image.open(io.BytesIO(image_bytes))
-                    image = self._convert_image_to_rgb(image)
-                    
-                    images.append(image)
-                    image_context.append(
-                        self._create_image_context_entry(
-                            source_type="current_message",
-                            source_message=message,
-                            attachment_name=attachment.filename,
-                            attachment_index=attachment_idx,
-                        )
-                    )
-                    logger.info(f"Loaded image from attachment: {attachment.filename} ({image.size[0]}x{image.size[1]})")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to load image from attachment {attachment.filename}: {e}")
-        
-        # Also check if the message is a reply and has images/PDFs in the replied message
-        if message.reference and message.reference.resolved:
-            replied_message = message.reference.resolved
-            if isinstance(replied_message, discord.Message):
-                for attachment_idx, attachment in enumerate(replied_message.attachments, start=1):
-                    # Check for PDFs in replied message
-                    if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
-                        try:
-                            logger.info(f"📄 PDF detected in replied message: {attachment.filename}")
-                            pdf_bytes = await attachment.read()
-                            pdf_images = await self._convert_pdf_to_images(pdf_bytes, attachment.filename)
-                            
-                            if pdf_images:
-                                for page_idx, page_image in enumerate(pdf_images, start=1):
-                                    images.append(page_image)
-                                    image_context.append(
-                                        self._create_image_context_entry(
-                                            source_type="replied_message",
-                                            source_message=replied_message,
-                                            attachment_name=attachment.filename,
-                                            attachment_index=attachment_idx,
-                                            pdf_page_number=page_idx,
-                                        )
-                                    )
-                                logger.info(f"✅ Added {len(pdf_images)} page(s) from replied PDF: {attachment.filename}")
-                            
-                        except Exception as e:
-                            logger.error(f"Failed to process PDF from replied message {attachment.filename}: {e}")
-                    
-                    # Check for images in replied message
-                    elif attachment.content_type and attachment.content_type.startswith('image/'):
-                        try:
-                            image_bytes = await attachment.read()
-                            image = Image.open(io.BytesIO(image_bytes))
-                            image = self._convert_image_to_rgb(image)
-                            
-                            images.append(image)
-                            image_context.append(
-                                self._create_image_context_entry(
-                                    source_type="replied_message",
-                                    source_message=replied_message,
-                                    attachment_name=attachment.filename,
-                                    attachment_index=attachment_idx,
-                                )
-                            )
-                            logger.info(f"Loaded image from replied message: {attachment.filename} ({image.size[0]}x{image.size[1]})")
-                            
-                        except Exception as e:
-                            logger.error(f"Failed to load image from replied message attachment {attachment.filename}: {e}")
-        
-        return images, image_context
+        """Compatibility wrapper for current/replied image and PDF extraction."""
+        return await _get_or_create_media_extraction(self).extract_images_from_message(
+            message
+        )
 
     async def _extract_context_images(
         self,
@@ -1407,297 +1134,24 @@ class DiscordBot(discord.Client):
         context: List[MessageContext],
         exclude_message_ids: Optional[set[int]] = None
     ) -> Tuple[List[Image.Image], List[Dict[str, Any]]]:
-        """
-        Extract recent image attachments from context messages in the same channel.
-
-        Args:
-            message: The current Discord message
-            context: Collected MessageContext list
-            exclude_message_ids: Optional message IDs to skip (e.g., current/replied message)
-
-        Returns:
-            Tuple containing context images and parallel metadata entries
-        """
-        max_context_images = max(0, getattr(self.config, "max_context_images", 6))
-        if max_context_images == 0 or not context:
-            return [], []
-
-        excluded_ids = exclude_message_ids or set()
-        context_message_ids = {msg.message_id for msg in context if msg.message_id not in excluded_ids}
-        if not context_message_ids:
-            return [], []
-
-        images = []
-        image_context = []
-        history_limit = max(len(context_message_ids) * 2, self.config.max_context_messages * 2)
-
-        try:
-            async for ctx_message in message.channel.history(limit=history_limit):
-                if len(images) >= max_context_images:
-                    break
-                if ctx_message.id not in context_message_ids:
-                    continue
-
-                for attachment_idx, attachment in enumerate(ctx_message.attachments, start=1):
-                    if len(images) >= max_context_images:
-                        break
-                    is_image = (
-                        (attachment.content_type and attachment.content_type.startswith("image/"))
-                        or attachment.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))
-                    )
-                    if not is_image:
-                        continue
-                    try:
-                        image_bytes = await attachment.read()
-                        image = Image.open(io.BytesIO(image_bytes))
-                        image = self._convert_image_to_rgb(image)
-                        images.append(image)
-                        image_context.append(
-                            self._create_image_context_entry(
-                                source_type="context_message",
-                                source_message=ctx_message,
-                                attachment_name=attachment.filename,
-                                attachment_index=attachment_idx,
-                            )
-                        )
-                        logger.info(
-                            f"Loaded context image: {attachment.filename} from message {ctx_message.id} "
-                            f"({image.size[0]}x{image.size[1]})"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to load context image {attachment.filename} "
-                            f"from message {ctx_message.id}: {e}"
-                        )
-        except discord.Forbidden:
-            logger.warning(f"No permission to read channel history for context images in channel {message.channel.id}")
-        except discord.HTTPException as e:
-            logger.error(f"Discord API error retrieving context images: {e}")
-
-        if len(images) > 1:
-            ordered_pairs = sorted(
-                zip(images, image_context),
-                key=lambda pair: (
-                    pair[1].get("source_timestamp", ""),
-                    int(pair[1].get("source_message_id", 0) or 0),
-                    int(pair[1].get("attachment_index", 0) or 0),
-                    int(pair[1].get("pdf_page_number", 0) or 0),
-                ),
-            )
-            images = [pair[0] for pair in ordered_pairs]
-            image_context = [pair[1] for pair in ordered_pairs]
-
-        return images, image_context
+        """Compatibility wrapper for bounded context-image extraction."""
+        return await _get_or_create_media_extraction(self).extract_context_images(
+            message,
+            context,
+            exclude_message_ids,
+        )
     
     async def _extract_audio_from_message(self, message: discord.Message) -> List[Dict[str, Any]]:
-        """
-        Extract and download audio files from a Discord message.
-        
-        Args:
-            message: The Discord message to extract audio from
-            
-        Returns:
-            List of audio file dictionaries {'data': bytes, 'mime_type': str}
-        """
-        audio_files = []
-        
-        async def process_audio_attachment(attachment, source: str = "message") -> None:
-            """Process a single audio attachment."""
-            is_audio = False
-            mime_type = attachment.content_type
-            
-            # Check if it's a voice message
-            if hasattr(attachment, 'is_voice_message') and attachment.is_voice_message():
-                is_audio = True
-                mime_type = 'audio/ogg'  # Voice messages are typically OGG
-                logger.info(f"🎤 Voice message detected in {source}: {attachment.filename}")
-            
-            # Check content type
-            elif mime_type and any(t in mime_type for t in ['audio/', 'video/mp4']):
-                is_audio = True
-            # Check filename extension if content type is generic
-            elif attachment.filename.lower().endswith(('.mp3', '.wav', '.aac', '.m4a', '.ogg', '.mpga')):
-                is_audio = True
-                # Map extension to mime type
-                ext_mime_map = {
-                    '.mp3': 'audio/mp3',
-                    '.wav': 'audio/wav',
-                    '.aac': 'audio/aac',
-                    '.m4a': 'audio/mp4',
-                    '.ogg': 'audio/ogg',
-                    '.mpga': 'audio/mpeg'
-                }
-                for ext, mime in ext_mime_map.items():
-                    if attachment.filename.lower().endswith(ext):
-                        mime_type = mime
-                        break
-            
-            if is_audio:
-                try:
-                    logger.info(f"🎵 Audio detected in {source}: {attachment.filename}")
-                    audio_bytes = await attachment.read()
-                    
-                    audio_files.append({
-                        'data': audio_bytes,
-                        'mime_type': mime_type or 'audio/mp3',
-                        'filename': attachment.filename
-                    })
-                    logger.info(f"✅ Loaded audio from {source}: {attachment.filename} ({len(audio_bytes)} bytes)")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to process audio {attachment.filename}: {e}", exc_info=True)
-        
-        # Process attachments from the main message
-        for attachment in message.attachments:
-            await process_audio_attachment(attachment, "message")
-        
-        # Also check replied message
-        if message.reference and message.reference.resolved:
-            replied_message = message.reference.resolved
-            if isinstance(replied_message, discord.Message):
-                for attachment in replied_message.attachments:
-                    await process_audio_attachment(attachment, "reply")
-                            
-        return audio_files
+        """Compatibility wrapper for current/replied audio extraction."""
+        return await _get_or_create_media_extraction(self).extract_audio_from_message(
+            message
+        )
     
     async def _extract_files_from_message(self, message: discord.Message) -> tuple[List[Dict[str, str]], List[str]]:
-        """
-        Extract and read non-image files from a Discord message.
-        
-        Args:
-            message: The Discord message to extract files from
-            
-        Returns:
-            Tuple of (list of file dictionaries with name and content, list of unsupported filenames)
-        """
-        files = []
-        unsupported_files = []
-        
-        logger.info(f"Extracting files from message {message.id}")
-        logger.info(f"Total attachments in message: {len(message.attachments)}")
-        
-        # Supported text-based file extensions (imported from constants)
-        text_extensions = SUPPORTED_TEXT_EXTENSIONS
-        
-        # Maximum file size to read
-        max_file_size = self.config.max_text_file_size_bytes
-        
-        async def process_attachment(attachment: discord.Attachment) -> None:
-            """Process a single attachment."""
-            logger.info(f"Processing attachment: {attachment.filename}")
-            logger.info(f"  - Content type: {attachment.content_type}")
-            logger.info(f"  - Size: {attachment.size} bytes ({attachment.size / 1024:.2f} KB)")
-            
-            # Skip images (handled by _extract_images_from_message)
-            if attachment.content_type and attachment.content_type.startswith('image/'):
-                logger.info(f"  → Skipping {attachment.filename} (image file - handled separately)")
-                return
-            
-            # Skip PDFs (now handled by _extract_images_from_message as images)
-            if attachment.content_type == 'application/pdf' or attachment.filename.lower().endswith('.pdf'):
-                logger.info(f"  → Skipping {attachment.filename} (PDF file - converted to images and handled separately)")
-                return
-            
-            # Check file size
-            if attachment.size > max_file_size:
-                logger.warning(f"  → REJECTED: {attachment.filename} is too large ({attachment.size} bytes = {attachment.size / (1024*1024):.1f}MB)")
-                logger.warning(f"  → Maximum allowed size: {max_file_size / (1024*1024):.1f}MB")
-                unsupported_files.append(f"{attachment.filename} (too large: {attachment.size / (1024*1024):.1f}MB)")
-                return
-            
-            # Get file extension
-            file_ext = None
-            if '.' in attachment.filename:
-                file_ext = '.' + attachment.filename.rsplit('.', 1)[1].lower()
-                logger.info(f"  - File extension: {file_ext}")
-            else:
-                logger.info(f"  - No file extension detected")
-            
-            # Check if it's a supported text file
-            is_supported = file_ext in text_extensions or attachment.content_type and (
-                attachment.content_type.startswith('text/') or 
-                'json' in attachment.content_type or
-                'xml' in attachment.content_type or
-                'yaml' in attachment.content_type
-            )
-            
-            if is_supported:
-                logger.info(f"  ✓ {attachment.filename} is a SUPPORTED file type")
-                try:
-                    logger.info(f"  → Downloading file content...")
-                    # Download and decode the file
-                    file_bytes = await attachment.read()
-                    logger.info(f"  → Downloaded {len(file_bytes)} bytes")
-                    
-                    # Try multiple encodings
-                    content = None
-                    tried_encodings = []
-                    for encoding in ['utf-8', 'latin-1', 'cp1252', 'ascii']:
-                        try:
-                            content = file_bytes.decode(encoding)
-                            logger.info(f"  ✓ Successfully decoded {attachment.filename} with {encoding} encoding")
-                            break
-                        except UnicodeDecodeError:
-                            tried_encodings.append(encoding)
-                            logger.debug(f"  ✗ Failed to decode with {encoding}")
-                            continue
-                    
-                    if content is None:
-                        logger.error(f"  → FAILED: Could not decode file {attachment.filename} with any encoding")
-                        logger.error(f"  → Tried encodings: {', '.join(tried_encodings)}")
-                        unsupported_files.append(f"{attachment.filename} (encoding error)")
-                        return
-                    
-                    files.append({
-                        'name': attachment.filename,
-                        'content': content,
-                        'size': attachment.size
-                    })
-                    logger.info(f"  ✅ SUCCESS: Loaded {attachment.filename}")
-                    logger.info(f"     - File size: {attachment.size} bytes ({attachment.size / 1024:.2f} KB)")
-                    logger.info(f"     - Content length: {len(content)} characters")
-                    logger.info(f"     - Content preview: {content[:150]}..." if len(content) > 150 else f"     - Full content: {content}")
-                    
-                except Exception as e:
-                    logger.error(f"  → FAILED: Error loading {attachment.filename}: {e}")
-                    logger.error(f"  → Exception type: {type(e).__name__}")
-                    unsupported_files.append(f"{attachment.filename} (error: {str(e)})")
-            else:
-                # Unsupported file type
-                logger.warning(f"  → REJECTED: {attachment.filename} is an UNSUPPORTED file type")
-                logger.warning(f"  → Extension '{file_ext}' not in supported list")
-                logger.warning(f"  → Content type '{attachment.content_type}' not recognized as text-based")
-                unsupported_files.append(f"{attachment.filename} (unsupported type)")
-        
-        # Process attachments from the main message
-        logger.info("Processing attachments from main message...")
-        for idx, attachment in enumerate(message.attachments, 1):
-            logger.info(f"Attachment {idx}/{len(message.attachments)}: {attachment.filename}")
-            await process_attachment(attachment)
-        
-        # Also check if the message is a reply and has files in the replied message
-        if message.reference and message.reference.resolved:
-            replied_message = message.reference.resolved
-            if isinstance(replied_message, discord.Message):
-                logger.info(f"Message is a reply, processing {len(replied_message.attachments)} attachments from replied message...")
-                for idx, attachment in enumerate(replied_message.attachments, 1):
-                    logger.info(f"Replied attachment {idx}/{len(replied_message.attachments)}: {attachment.filename}")
-                    await process_attachment(attachment)
-        
-        # Final summary
-        logger.info("=" * 40)
-        logger.info(f"FILE EXTRACTION SUMMARY:")
-        logger.info(f"  ✅ Successfully processed: {len(files)} file(s)")
-        if files:
-            for f in files:
-                logger.info(f"     - {f['name']}")
-        logger.info(f"  ❌ Failed/Unsupported: {len(unsupported_files)} file(s)")
-        if unsupported_files:
-            for f in unsupported_files:
-                logger.info(f"     - {f}")
-        logger.info("=" * 40)
-        
-        return files, unsupported_files
+        """Compatibility wrapper for current/replied text-file extraction."""
+        return await _get_or_create_media_extraction(self).extract_files_from_message(
+            message
+        )
         
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         """
@@ -1748,109 +1202,26 @@ class DiscordBot(discord.Client):
         return False
     
     async def _update_progress_message(self, message: discord.Message, progress_percent: int):
-        """
-        Update progress message with current percentage.
-        
-        Args:
-            message: The message to update
-            progress_percent: Progress percentage (0-100)
-        """
-        try:
-            await message.edit(content=f"🎨 Editing your image... {progress_percent}% complete")
-        except Exception as e:
-            logger.warning(f"Failed to update progress message: {e}")
+        """Compatibility wrapper for progress-message updates."""
+        await ResponseGenerationCoordinator.update_progress_message(
+            message,
+            progress_percent,
+        )
     
     async def _add_error_reaction(self, message: discord.Message):
-        """
-        Add an error reaction to a message.
-        
-        Args:
-            message: The message to add reaction to
-        """
-        try:
-            await message.add_reaction("❌")
-        except Exception as e:
-            logger.debug(f"Failed to add error reaction: {e}")
+        """Compatibility wrapper for best-effort error reactions."""
+        await ResponseGenerationCoordinator.add_error_reaction(message)
     
     def _get_user_friendly_error_message(self, error_msg: str) -> str:
-        """
-        Convert technical error messages to user-friendly ones.
-        
-        Args:
-            error_msg: Technical error message
-            
-        Returns:
-            User-friendly error message
-        """
-        error_lower = error_msg.lower()
-        
-        if "rate limit" in error_lower:
-            return "You're making requests too quickly. Please wait a moment and try again."
-        elif "timeout" in error_lower:
-            return "The image editing service timed out. Please try again with a smaller image."
-        elif "invalid" in error_lower and "format" in error_lower:
-            return "The image format is not supported. Please use PNG, JPEG, or GIF."
-        elif "too large" in error_lower or "size" in error_lower:
-            return "The image is too large. Please use an image smaller than 10MB."
-        elif "service unavailable" in error_lower:
-            return "The image editing service is temporarily unavailable. Please try again later."
-        elif "authentication" in error_lower:
-            return "There's an issue with the image editing service configuration. Please contact support."
-        else:
-            return f"Image editing failed: {error_msg}"
+        """Compatibility wrapper for user-facing image-editing errors."""
+        return ResponseGenerationCoordinator.get_user_friendly_error_message(error_msg)
     
     async def _handle_response_error(self, message: discord.Message, api_response):
-        """
-        Handle API response errors with user-friendly messages.
-        
-        Implements requirements 4.2, 4.4: Provide user-friendly error messages
-        and handle various error scenarios appropriately.
-        
-        Args:
-            message: The original Discord message
-            api_response: The failed APIResponse object
-        """
-        # Create error context from API response
-        from ..utils.error_manager import ErrorType
-        
-        # Map API response error types to ErrorType enum
-        error_type_mapping = {
-            "rate_limit": ErrorType.RATE_LIMIT,
-            "timeout": ErrorType.TIMEOUT,
-            "authentication_error": ErrorType.AUTHENTICATION_ERROR,
-            "service_unavailable": ErrorType.SERVICE_UNAVAILABLE,
-            "empty_response": ErrorType.EMPTY_RESPONSE,
-            "invalid_request": ErrorType.INVALID_REQUEST,
-            "configuration_error": ErrorType.CONFIGURATION_ERROR,
-            "unknown_error": ErrorType.UNKNOWN_ERROR,
-            "safety_filter": ErrorType.EMPTY_RESPONSE,  # Treat safety filter as empty response
-            "max_tokens": ErrorType.INVALID_REQUEST,
-            "recitation": ErrorType.EMPTY_RESPONSE
-        }
-        
-        error_type = error_type_mapping.get(api_response.error_type, ErrorType.UNKNOWN_ERROR)
-        base_message = self.error_manager.get_user_message(error_type)
-        
-        # Add specific error details from the API response
-        if api_response.content:
-            user_message = f"{base_message}\n\n**Details:** {api_response.content}"
-        else:
-            user_message = f"{base_message}\n\n**Error Type:** `{api_response.error_type}`"
-        
-        # Create error context
-        from ..utils.error_manager import ErrorContext
-        error_context = ErrorContext(
-            error_type=error_type,
-            user_message=user_message,
-            technical_details=api_response.content or f"API response error: {api_response.error_type}",
-            retry_after=api_response.retry_after
+        """Compatibility wrapper for shared API-response error handling."""
+        await _get_or_create_response_generation(self).handle_response_error(
+            message,
+            api_response,
         )
-        
-        # Log the error
-        self.error_manager.log_error(error_context, f"API Response Error: {api_response.error_type}")
-        
-        # Send error response
-        await self.error_manager.send_error_response(message, error_context)
     
     async def _generate_and_send_response(
         self,
@@ -1866,339 +1237,26 @@ class DiscordBot(discord.Client):
         apply_user_preferences: bool = True,
         complexity_level: str = "low",
     ):
-        """
-        Generate AI response and send it to Discord with comprehensive error handling.
-        
-        Implements requirements 1.4, 1.5, 4.2, 4.4:
-        - Deliver responses as replies to original messages
-        - Handle timeout scenarios appropriately
-        - Provide user-friendly error messages
-        - Continue processing other mentions during failures
-        
-        Args:
-            message: The original Discord message
-            user_prompt: The extracted user prompt
-            context: The collected conversation context
-        """
-        # Add typing indicator to show the bot is working
-        status_message = None
-        try:
-            async with message.channel.typing():
-                try:
-                    # Track performance metrics
-                    import time
-                    start_time = time.time()
-                    effective_model_override = model_override
-                    
-                    # Extract images from the message
-                    if skip_context_media:
-                        images, image_context = [], []
-                    else:
-                        images, image_context = await self._extract_images_from_message(message)
-
-                    # Also include recent channel images from the collected context
-                    exclude_context_ids = {message.id}
-                    if message.reference and message.reference.resolved and isinstance(message.reference.resolved, discord.Message):
-                        exclude_context_ids.add(message.reference.resolved.id)
-                    if skip_context_media:
-                        context_images, context_image_context = [], []
-                    else:
-                        context_images, context_image_context = await self._extract_context_images(
-                            message,
-                            context,
-                            exclude_context_ids,
-                        )
-                    if context_images:
-                        images.extend(context_images)
-                        image_context.extend(context_image_context)
-                        logger.info(
-                            f"✅ Added {len(context_images)} context image(s) from recent channel history "
-                            f"(total images sent: {len(images)})"
-                        )
-                    
-                    # Extract audio files from the message
-                    audio_files = await self._extract_audio_from_message(message)
-                    if audio_files:
-                        logger.info(f"✅ Extracted {len(audio_files)} audio file(s)")
-                        
-                        # Keep limited context for audio transcription (for tone/speaker identification)
-                        if message.reference and message.reference.message_id:
-                            replied_id = message.reference.message_id
-                            # Keep the replied-to message + last 5 recent messages
-                            original_context_len = len(context)
-                            replied = [msg for msg in context if msg.message_id == replied_id]
-                            recent = context[-5:] if len(context) > 5 else context
-                            context = self.context_collector._remove_duplicate_messages(recent, replied)
-                            logger.info(f"Audio transcription: Context restricted to replied message + recent (kept {len(context)}/{original_context_len} messages)")
-                        else:
-                            # No reply, keep last 5 messages for minimal context
-                            original_context_len = len(context)
-                            context = context[-5:] if len(context) > 5 else context
-                            logger.info(f"Audio transcription: Context trimmed to recent messages (kept {len(context)}/{original_context_len} messages)")
-
-                    # Recompute image/message ordering against the final context sent to the model
-                    if image_context:
-                        image_context = self._attach_image_order_metadata(image_context, context, message)
-                    
-                    # Extract files from the message
-                    logger.info("=" * 80)
-                    logger.info("FILE EXTRACTION STARTED")
-                    files, unsupported_files = await self._extract_files_from_message(message)
-                    logger.info(f"File extraction complete: {len(files)} supported, {len(unsupported_files)} unsupported")
-                    
-                    # Log details about successfully processed files
-                    if files:
-                        logger.info("✅ SUCCESSFULLY PROCESSED FILES:")
-                        for idx, file_info in enumerate(files, 1):
-                            logger.info(f"  {idx}. {file_info['name']}")
-                            logger.info(f"     - Size: {file_info['size']} bytes ({file_info['size'] / 1024:.2f} KB)")
-                            logger.info(f"     - Content length: {len(file_info['content'])} characters")
-                            logger.debug("     - File content preview redacted")
-                    else:
-                        logger.info("❌ No files were successfully processed")
-                    
-                    # Log details about unsupported files
-                    if unsupported_files:
-                        logger.warning("⚠️ UNSUPPORTED/FAILED FILES:")
-                        for idx, unsupported in enumerate(unsupported_files, 1):
-                            logger.warning(f"  {idx}. {unsupported}")
-                    
-                    logger.info("=" * 80)
-                    
-                    # Notify user about unsupported files if any
-                    if unsupported_files:
-                        unsupported_msg = "ℹ️ Note: The following files could not be processed:\n" + "\n".join(f"- {f}" for f in unsupported_files)
-                        logger.info(f"Sending unsupported files notification to user")
-                        try:
-                            await message.channel.send(unsupported_msg)
-                        except Exception as e:
-                            logger.error(f"Failed to send unsupported files message: {e}")
-                    
-                    # Validate prompt is not empty (or has images/files/audio)
-                    if (not user_prompt or not user_prompt.strip()) and len(images) == 0 and len(files) == 0 and len(audio_files) == 0:
-                        logger.warning("Empty user prompt and no images/files/audio provided to response generation")
-                        await message.reply("Please provide a message, attach an image/audio, or upload a file for me to respond to! 📝")
-                        return
-                    
-                    # Build enhanced prompt with file contents
-                    enhanced_prompt = user_prompt
-                    
-                    # Add file contents to the prompt
-                    if files:
-                        logger.info("=" * 80)
-                        logger.info("BUILDING AI PROMPT WITH FILE CONTENTS")
-                        file_contents_text = "\n\n--- UPLOADED FILES ---\n"
-                        for file_info in files:
-                            file_contents_text += f"\n📄 **File: {file_info['name']}** (Size: {file_info['size']} bytes)\n"
-                            file_contents_text += f"```\n{file_info['content']}\n```\n"
-                            logger.info(f"  ✓ Added {file_info['name']} to AI prompt")
-                        
-                        # Prepend file contents to the prompt
-                        if not enhanced_prompt or not enhanced_prompt.strip():
-                            enhanced_prompt = f"I have uploaded the following file(s). Please analyze them:\n{file_contents_text}"
-                            logger.info("Using auto-generated prompt for files (no user message)")
-                        else:
-                            enhanced_prompt = f"{file_contents_text}\n\nUser's question/request: {enhanced_prompt}"
-                            logger.info(f"Combined file contents with user prompt: '{user_prompt[:100]}...'")
-                        
-                        logger.info(f"✅ Enhanced prompt built with {len(files)} file(s)")
-                        logger.info(f"Total prompt length: {len(enhanced_prompt)} characters")
-                        logger.info("=" * 80)
-                    
-                    # If only audio/images, provide a default prompt
-                    elif not enhanced_prompt or not enhanced_prompt.strip():
-                        if audio_files:
-                            enhanced_prompt = "Please provide a verbatim transcription of this audio. Preserve all speech patterns including stutters, repetitions, and informal language (e.g., 'gonna', 'wanna'). Include non-verbal sounds and emotions in brackets, such as [laughter], [sigh], [unintelligible]. Do not summarize or clean up the text; transcribe exactly what is heard."
-                            logger.info("Using default prompt for audio-only message")
-                        elif images:
-                            enhanced_prompt = "What's in this image? Please describe it in detail."
-                            logger.info("Using default prompt for image-only message")
-                    
-                    # Generate AI response with timeout handling (including images and files if present)
-                    logger.info("=" * 80)
-                    logger.info("SENDING TO AI API")
-                    logger.info(f"  - Prompt length: {len(enhanced_prompt)} characters")
-                    logger.info(f"  - Context messages: {len(context)}")
-                    logger.info(f"  - Images included: {len(images) if images else 0}")
-                    logger.info(f"  - Audio files included: {len(audio_files) if audio_files else 0}")
-                    logger.info(f"  - Files included in prompt: {len(files)}")
-                    if files:
-                        logger.info("  - Files sent to AI:")
-                        for f in files:
-                            logger.info(f"    • {f['name']}")
-                    logger.info("=" * 80)
-                    
-                    # Load channel personality and user preferences
-                    personality_prompt = None
-                    if hasattr(self, '_channel_settings_service') and self._channel_settings_service:
-                        personality_prompt = self._channel_settings_service.get_personality_prompt(message.channel.id)
-                    effective_model_override, user_language = self._resolve_request_preferences(
-                        user_id=message.author.id,
-                        request_model_override=effective_model_override,
-                        apply_user_preferences=apply_user_preferences,
-                        complexity_level=complexity_level,
-                    )
-
-                    # Get estimated response time and show it to user
-                    estimated_time = self.gemini_client.get_estimated_response_time(
-                        model_name=effective_model_override or self.gemini_client.get_current_model(),
-                        prompt_mode=prompt_mode_override,
-                    )
-                    model_name = effective_model_override or self.gemini_client.get_current_model()
-                    
-                    # Send status message by default so users get immediate feedback
-                    if show_status_message:
-                        try:
-                            status_message = await message.reply(
-                            f"⏳ Processing your request with {model_name}...\n"
-                            f"*Estimated time: {estimated_time}*"
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to send status message: {e}")
-                    
-                    # Thinking now uses Gemini API native thinking_config; no custom <thinking> parsing.
-                    on_chunk = None
-
-                    api_response = await self.gemini_client.generate_response(
-                            enhanced_prompt, context,
-                            images=images if images else None,
-                            image_context=image_context if image_context else None,
-                            audio_files=audio_files if audio_files else None,
-                            on_chunk=on_chunk,
-                            model_override=effective_model_override,
-                            prompt_mode_override=prompt_mode_override,
-                            complexity_override=complexity_level,
-                            search_override=search_override,
-                            personality_prompt=personality_prompt,
-                            language=user_language,
-                        )
-                    
-                    # Delete status message if it was sent
-                    if status_message:
-                        try:
-                            await status_message.delete()
-                        except Exception as e:
-                            logger.debug(f"Failed to delete status message after response: {e}")
-                    
-                    duration = time.time() - start_time
-                    
-                    if api_response.success:
-                        logger.info("=" * 80)
-                        logger.info("✅ AI RESPONSE GENERATED SUCCESSFULLY")
-                        logger.info(f"  - Response length: {len(api_response.content) if api_response.content else 0} characters")
-                        logger.info(f"  - Processing duration: {duration:.2f} seconds")
-                        logger.info(f"  - Files were included in request: {len(files) > 0}")
-                        if files:
-                            logger.info(f"  - Files that were processed by AI:")
-                            for f in files:
-                                logger.info(f"    ✓ {f['name']}")
-                        logger.info("=" * 80)
-                        
-                        # Log performance metrics
-                        self.performance_logger.log_message_processing(
-                            duration=duration,
-                            context_messages=len(context),
-                            response_length=len(api_response.content) if api_response.content else 0,
-                            user_id=message.author.id,
-                            guild_id=message.guild.id if message.guild else None
-                        )
-                        
-                        await self._record_token_usage(message, api_response.token_usage)
-
-                        await self._send_response_safely(message, api_response.content, api_response.grounding_sources)
-                    else:
-                        logger.error(f"Failed to generate response: {api_response.error_type}")
-                        await self._handle_response_error(message, api_response)
-                        
-                except asyncio.TimeoutError:
-                    # Delete status message if it exists
-                    if status_message:
-                        try:
-                            await status_message.delete()
-                        except Exception as e:
-                            logger.debug(f"Failed to delete status message after timeout: {e}")
-                    
-                    timeout_used = self.gemini_client.get_timeout_for_model(
-                        effective_model_override or self.gemini_client.get_current_model(),
-                        prompt_mode_override,
-                    )
-                    logger.error(f"Response generation timed out for message {message.id} after {timeout_used}s")
-                    timeout_response = APIResponse(
-                        success=False,
-                        error_type="timeout",
-                        content=f"Response generation timed out after {timeout_used} seconds. The model may be overloaded. Please try again or use a simpler question."
-                    )
-                    await self._handle_response_error(message, timeout_response)
-                    
-                except ConnectionError as e:
-                    logger.error(f"Connection error during API call: {e}")
-                    error_context = self.error_manager.create_error_context(
-                        e, "I'm having trouble connecting to my AI service. Please try again in a moment! 🌐"
-                    )
-                    self.error_manager.log_error(error_context, "API connection error")
-                    await self.error_manager.send_error_response(message, error_context)
-                    
-                except ValueError as e:
-                    logger.error(f"Invalid value provided to API: {e}")
-                    error_context = self.error_manager.create_error_context(
-                        e, "There was an issue with the request format. Please try rephrasing your message! 📝"
-                    )
-                    self.error_manager.log_error(error_context, "API value error")
-                    await self.error_manager.send_error_response(message, error_context)
-                    
-                except Exception as e:
-                    error_context = self.error_manager.create_error_context(e)
-                    self.error_manager.log_error(error_context, f"Unexpected error during response generation for message {message.id}")
-                    await self.error_manager.send_error_response(message, error_context)
-                    
-        except discord.Forbidden as e:
-            logger.error(f"Missing permissions to show typing indicator in channel {message.channel.id}")
-            # Continue without typing indicator
-            error_context = self.error_manager.create_error_context(
-                e, "I don't have permission to respond in this channel. Please check my permissions! 🔒"
-            )
-            self.error_manager.log_error(error_context, "Permission error showing typing indicator")
-            await self.error_manager.send_error_response(message, error_context)
-            
-        except discord.HTTPException as e:
-            logger.error(f"Discord HTTP error showing typing indicator: {e}")
-            error_context = self.error_manager.create_error_context(
-                e, "I'm having trouble communicating with Discord. Please try again! 🌐"
-            )
-            self.error_manager.log_error(error_context, "Discord HTTP error")
-            await self.error_manager.send_error_response(message, error_context)
-    
-    async def _record_token_usage(self, message: discord.Message, token_usage: Optional[TokenUsage]):
-        """Persist token usage stats for the current request."""
-
-        if not token_usage:
-            return
-        if not self.token_tracker:
-            return
-
-        username = (
-            message.author.display_name
-            or getattr(message.author, "global_name", None)
-            or message.author.name
-            or str(message.author)
+        """Compatibility wrapper for AI response generation orchestration."""
+        await _get_or_create_response_generation(self).generate_and_send_response(
+            message,
+            user_prompt,
+            context,
+            model_override=model_override,
+            prompt_mode_override=prompt_mode_override,
+            search_override=search_override,
+            show_status_message=show_status_message,
+            skip_context_media=skip_context_media,
+            apply_user_preferences=apply_user_preferences,
+            complexity_level=complexity_level,
         )
-        username = username[:80]  # Avoid storing excessively long names
 
-        guild_id = message.guild.id if message.guild else 0
-        guild_name = message.guild.name if message.guild else "Direct Messages"
-
-        try:
-            await self.token_tracker.record_usage(
-                user_id=message.author.id,
-                username=username,
-                guild_id=guild_id,
-                guild_name=guild_name,
-                input_tokens=token_usage.input_tokens,
-                output_tokens=token_usage.output_tokens,
-                total_tokens=token_usage.total_tokens,
-            )
-        except Exception as exc:
-            logger.error(f"Failed to record token usage for user {message.author.id}: {exc}")
+    async def _record_token_usage(self, message: discord.Message, token_usage: Optional[TokenUsage]):
+        """Compatibility wrapper for best-effort token usage persistence."""
+        await _get_or_create_response_generation(self).record_token_usage(
+            message,
+            token_usage,
+        )
 
     async def _index_sent_bot_response(
         self,
@@ -2227,115 +1285,17 @@ class DiscordBot(discord.Client):
             logger.debug("Failed to index bot response %s for RAG: %s", getattr(sent_message, "id", None), exc)
 
     async def _send_response_safely(self, message: discord.Message, response_content: str, grounding_sources: list = None):
-        """
-        Safely send a response to Discord with error handling.
-        
-        Implements requirement 1.4: Post generated responses as replies to original messages.
-        
-        Args:
-            message: The original Discord message to reply to
-            response_content: The AI-generated response content
-            grounding_sources: Optional list of grounding sources from the API
-        """
-        try:
-            # Validate response content
-            if not response_content or not response_content.strip():
-                logger.warning("Empty response content generated")
-                await message.reply("I generated a response, but it appears to be empty. Could you try asking differently? 🤔")
-                return
-
-            # Render LaTeX and format tables for Discord
-            rendered = self.content_renderer.process_response(response_content)
-            response_content = rendered.text
-            attachments = rendered.attachments
-            if attachments:
-                logger.info(f"Content renderer produced {len(attachments)} image attachment(s) (LaTeX)")
-
-            # Honor both the configured split threshold and Discord's hard limit.
-            direct_message_limit = min(self.config.message_split_length, 2000)
-            if len(response_content) > direct_message_limit:
-                logger.info(f"Response too long ({len(response_content)} chars), splitting into multiple messages")
-                sent_message = await self._send_split_response(message, response_content, attachments=attachments)
-            else:
-                # Send the response as a reply (with any LaTeX image attachments)
-                sent_message = await message.reply(response_content, files=attachments if attachments else None)
-                logger.info(f"Successfully sent response to {message.author} in #{getattr(message.channel, 'name', 'DM')}")
-            
-            # Send grounding sources as a separate message if available
-            if grounding_sources and len(grounding_sources) > 0:
-                await self._send_grounding_sources(sent_message, grounding_sources)
-
-            await self._index_sent_bot_response(
-                source_message=message,
-                sent_message=sent_message,
-                response_content=response_content,
-            )
-            
-            return sent_message
-            
-        except discord.Forbidden as e:
-            logger.error(f"Permission denied sending response in channel {message.channel.id}")
-            error_context = self.error_manager.create_error_context(
-                e, "I don't have permission to send messages in this channel. Please check my permissions! 🔒"
-            )
-            await self.error_manager.send_error_response(
-                message, 
-                error_context, 
-                fallback_reaction="🔒"
-            )
-            
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limit
-                logger.warning(f"Rate limited sending response: {e}")
-                error_context = self.error_manager.create_error_context(
-                    e, "I'm being rate limited by Discord. Please try again in a moment! 🕒"
-                )
-            elif e.status >= 500:  # Server error
-                logger.error(f"Discord server error sending response: {e}")
-                error_context = self.error_manager.create_error_context(
-                    e, "Discord is experiencing issues. Please try again in a moment! 🛠️"
-                )
-            else:
-                logger.error(f"HTTP error sending response: {e}")
-                error_context = self.error_manager.create_error_context(
-                    e, "I had trouble sending my response. Please try again! 📤"
-                )
-            
-            await self.error_manager.send_error_response(
-                message, 
-                error_context, 
-                fallback_reaction="⚠️"
-            )
-            
-        except discord.NotFound as e:
-            logger.error(f"Message or channel not found: {e}")
-            error_context = self.error_manager.create_error_context(
-                e, "The message or channel no longer exists. Please try again! 🔍"
-            )
-            await self.error_manager.send_error_response(
-                message, 
-                error_context, 
-                fallback_reaction="❓"
-            )
-            
-        except Exception as e:
-            logger.error(f"Unexpected error sending response: {e}", exc_info=True)
-            error_context = self.error_manager.handle_discord_error(e, message)
-            await self.error_manager.send_error_response(
-                message, 
-                error_context, 
-                fallback_reaction="⚠️"
-            )
+        """Compatibility wrapper for rendered and indexed response delivery."""
+        return await _get_or_create_response_delivery(self).send_response_safely(
+            message,
+            response_content,
+            grounding_sources,
+        )
     
     @staticmethod
     def _clean_split_part_for_embed(content: str) -> str:
-        """Remove continuation markers so embed pages show clean content."""
-        cleaned = re.sub(r'^\*\(continued from part \d+/\d+\)\*\n\n', '', content)
-        cleaned = re.sub(r'\n\n\*\(continues in part \d+/\d+\)\*$', '', cleaned)
-        cleaned = re.sub(r'^\*\(continued\.\.\.\)\*\n\n', '', cleaned)
-        cleaned = re.sub(r'\n\n\*\(continues\.\.\.\)\*$', '', cleaned)
-        cleaned = cleaned.strip()
-        return cleaned if cleaned else content.strip()
+        """Compatibility wrapper for paginator page cleanup."""
+        return ResponseDeliveryCoordinator.clean_split_part_for_embed(content)
 
     async def _send_paginated_embed(
         self,
@@ -2346,146 +1306,36 @@ class DiscordBot(discord.Client):
         attachments: Optional[List[discord.File]] = None,
         title: str = "Response",
     ) -> discord.Message:
-        """Send split content as a single message embed with arrow navigation."""
-        view = SplitResponsePaginatorView(
-            pages=pages,
-            sender_user_id=sender_user_id,
+        """Compatibility wrapper for paginator delivery."""
+        return await _get_or_create_response_delivery(self).send_paginated_embed(
+            pages,
+            sender_user_id,
+            send_page_callable,
+            attachments=attachments,
             title=title,
-            priority_window_seconds=2.0,
-            timeout=120.0,
         )
 
-        send_kwargs = {
-            "embed": view.build_embed(),
-            "view": view,
-        }
-        if attachments:
-            send_kwargs["files"] = attachments
-
-        sent_message = await send_page_callable(**send_kwargs)
-        view.message = sent_message
-        return sent_message
-
     async def _send_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
-        """
-        Split a long response into multiple messages and send them using intelligent splitting.
-
-        Args:
-            message: The original Discord message to reply to
-            response_content: The long response content to split
-            attachments: Optional list of discord.File attachments (sent with first message)
-
-        Returns:
-            The first sent message (for reply threading)
-        """
-        try:
-            # Use the intelligent message splitter
-            message_parts = self.message_splitter.split_message(response_content)
-
-            # Log split statistics
-            stats = self.message_splitter.get_split_statistics(message_parts)
-            logger.info(f"Message split statistics: {stats}")
-
-            # Validate split integrity
-            if not self.message_splitter.validate_split_integrity(response_content, message_parts):
-                logger.warning("Split integrity validation failed, falling back to simple split")
-                return await self._send_simple_split_response(message, response_content, attachments=attachments)
-
-            # Send the parts — first part replies to original, rest are regular messages
-            if len(message_parts) <= 1:
-                return await message.reply(message_parts[0].content, files=attachments if attachments else None)
-
-            embed_pages = [self._clean_split_part_for_embed(part.content) for part in message_parts]
-
-            async def _send_first_page(**kwargs) -> discord.Message:
-                return await message.reply(**kwargs)
-
-            sent_message = await self._send_paginated_embed(
-                pages=embed_pages,
-                sender_user_id=message.author.id,
-                send_page_callable=_send_first_page,
-                attachments=attachments,
-                title="Response",
-            )
-            logger.info(f"Successfully sent response in paginated embed with {len(embed_pages)} pages")
-            return sent_message
-
-        except Exception as e:
-            logger.error(f"Error in intelligent message splitting: {e}", exc_info=True)
-            logger.info("Falling back to simple message splitting")
-            return await self._send_simple_split_response(message, response_content, attachments=attachments)
+        """Compatibility wrapper for intelligent response splitting."""
+        return await _get_or_create_response_delivery(self).send_split_response(
+            message,
+            response_content,
+            attachments=attachments,
+        )
     
     async def _send_simple_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
-        """
-        Fallback method for simple message splitting when intelligent splitting fails.
-        
-        Args:
-            message: The original Discord message to reply to
-            response_content: The long response content to split
-            
-        Returns:
-            The first sent message (for reply threading)
-        """
-        max_length = min(self.config.message_split_length, 2000)
-        parts = [
-            response_content[start:start + max_length]
-            for start in range(0, len(response_content), max_length)
-        ]
-        
-        # Send the parts — first part replies to original, rest are regular messages
-        first_message = None
-
-        for idx, part in enumerate(parts):
-            if idx == 0:
-                sent = await message.reply(part, files=attachments if attachments else None)
-                first_message = sent
-            else:
-                sent = await message.channel.send(part)
-
-            logger.info(f"Sent message part {idx + 1}/{len(parts)}")
-
-        logger.info(f"Successfully sent response in {len(parts)} parts using simple splitting")
-        return first_message
+        """Compatibility wrapper for fixed-size fallback splitting."""
+        return await _get_or_create_response_delivery(self).send_simple_split_response(
+            message,
+            response_content,
+            attachments=attachments,
+        )
     
     async def _send_grounding_sources(self, reply_message: discord.Message, grounding_sources: list):
-        """
-        Send grounding sources as a separate reply message.
-        
-        Args:
-            reply_message: The bot's response message to reply to
-            grounding_sources: List of grounding source dictionaries with 'uri' and optional 'title'
-        """
-        try:
-            if not grounding_sources:
-                return
-            
-            # Format sources into a message
-            # Wrap URLs in <> to prevent Discord from creating embeds
-            sources_text = "📚 **Sources:**\n"
-            for idx, source in enumerate(grounding_sources[:10], 1):  # Limit to 10 sources
-                uri = source.get('uri', '')
-                title = source.get('title')
-                
-                if title:
-                    # Use <> to suppress embed preview
-                    sources_text += f"{idx}. {title}: <{uri}>\n"
-                else:
-                    # Use <> to suppress embed preview
-                    sources_text += f"{idx}. <{uri}>\n"
-            
-            # Check length and truncate if needed
-            if len(sources_text) > 2000:
-                sources_text = sources_text[:1997] + "..."
-            
-            # Reply to the bot's own message with sources
-            await reply_message.reply(sources_text)
-            logger.info(f"Successfully sent {len(grounding_sources)} grounding sources")
-            
-        except discord.Forbidden:
-            logger.warning("No permission to send grounding sources message")
-        except discord.HTTPException as e:
-            logger.error(f"Failed to send grounding sources: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error sending grounding sources: {e}", exc_info=True)
+        """Compatibility wrapper for grounding-source replies."""
+        await _get_or_create_response_delivery(self).send_grounding_sources(
+            reply_message,
+            grounding_sources,
+        )
     
 

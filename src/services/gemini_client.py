@@ -11,6 +11,7 @@ import json
 import logging
 import random
 import re
+import time
 from typing import List, Optional
 
 from google import genai
@@ -21,6 +22,14 @@ from ..models.data_models import APIResponse, MessageContext, TokenUsage
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger
 from ..utils.token_extraction import extract_token_usage
+from .gemini_response_pipeline import (
+    GeminiAttemptResult,
+    GeminiRequestContent,
+    GeminiRequestPlan,
+    GeminiRequestRouting,
+    build_error_response,
+    build_success_response,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -806,7 +815,480 @@ Candidate messages:
         except Exception as exc:
             logger.warning("Gemini embedding request failed with model %s: %s", target_model, exc)
             return [None for _ in sanitized_texts]
-    
+
+    def _resolve_response_request_routing(
+        self,
+        prompt: str,
+        model_override: Optional[str],
+        prompt_mode_override: Optional[str],
+        thinking_level_override: Optional[str],
+        complexity_override: Optional[str],
+        search_override: Optional[bool],
+    ) -> GeminiRequestRouting:
+        """Resolve per-request precedence without mutating shared runtime state."""
+        target_model = model_override if model_override else self._current_model_name
+        if complexity_override in {"low", "medium", "high"}:
+            effective_complexity = complexity_override
+        else:
+            effective_complexity = self._current_complexity_level
+            if complexity_override is not None:
+                logger.warning(
+                    "Invalid complexity override '%s'; using '%s'",
+                    complexity_override,
+                    effective_complexity,
+                )
+
+        if thinking_level_override is not None:
+            thinking_level = self._normalize_thinking_level(thinking_level_override)
+        else:
+            thinking_level = self._resolve_thinking_level_for_request(
+                target_model,
+                prompt_mode_override=prompt_mode_override,
+                complexity_level=effective_complexity,
+            )
+
+        logger.info("=" * 80)
+        logger.info("API CALL INITIATED")
+        logger.info("Model: %s", target_model)
+        logger.info("Thinking level: %s", thinking_level)
+        logger.info("Gemini API key configured for request")
+
+        use_search = (
+            search_override
+            if search_override is not None
+            else self._should_use_search(prompt)
+        )
+        if use_search:
+            logger.info("Google Search enabled for this request")
+
+        return GeminiRequestRouting(
+            model_name=target_model,
+            complexity_level=effective_complexity,
+            thinking_level=thinking_level,
+            use_search=use_search,
+        )
+
+    def _build_response_request_content(
+        self,
+        prompt: str,
+        context: Optional[List[MessageContext]],
+        images: Optional[List],
+        image_context: Optional[List[dict]],
+        audio_files: Optional[List[dict]],
+        personality_prompt: Optional[str],
+        language: Optional[str],
+        complexity_level: str,
+    ) -> GeminiRequestContent:
+        """Format text and append media parts in provider-visible order."""
+        normalized_image_context = self._normalize_image_context(images, image_context)
+        formatted_prompt = self.format_prompt(
+            prompt,
+            context,
+            personality_prompt=personality_prompt,
+            language=language,
+            image_context=normalized_image_context,
+            complexity_override=complexity_level,
+        )
+        content_parts = [formatted_prompt]
+
+        if images and len(images) > 0:
+            for image in images:
+                image_buffer = io.BytesIO()
+                image.save(image_buffer, format="PNG")
+                content_parts.append(
+                    types.Part.from_bytes(
+                        data=image_buffer.getvalue(),
+                        mime_type="image/png",
+                    )
+                )
+            logger.info("Added %s image(s) to request", len(images))
+
+        if audio_files and len(audio_files) > 0:
+            for audio in audio_files:
+                content_parts.append(
+                    types.Part.from_bytes(
+                        data=audio["data"],
+                        mime_type=audio["mime_type"],
+                    )
+                )
+            logger.info("Added %s audio file(s) to request", len(audio_files))
+
+        logger.info("Input prompt length: %s characters", len(formatted_prompt))
+        logger.debug("Input prompt preview redacted")
+        return GeminiRequestContent(
+            parts=content_parts,
+            formatted_prompt=formatted_prompt,
+            image_context=normalized_image_context,
+        )
+
+    @staticmethod
+    def _log_response_request_context(
+        context: Optional[List[MessageContext]],
+        image_context: Optional[List[dict]],
+    ) -> None:
+        """Log request context metadata without exposing prompt contents."""
+        if context:
+            logger.info("Context messages provided: %s", len(context))
+            for index, message in enumerate(context):
+                logger.info(
+                    "  Context[%s]: Author=%s, Length=%s chars, Timestamp=%s",
+                    index,
+                    message.author,
+                    len(message.content),
+                    message.timestamp,
+                )
+        else:
+            logger.info("No context messages provided")
+
+        if image_context:
+            logger.info("Image context entries provided: %s", len(image_context))
+            for item in image_context:
+                logger.info(
+                    "  Image[%s]: source=%s, message_order=%s, message_id=%s, attachment=%s",
+                    item.get("image_index"),
+                    item.get("source_type"),
+                    item.get("source_message_order"),
+                    item.get("source_message_id"),
+                    item.get("attachment_name"),
+                )
+
+    def _complete_response_request_plan(
+        self,
+        routing: GeminiRequestRouting,
+    ) -> GeminiRequestPlan:
+        """Select the per-attempt timeout after request content is prepared."""
+        timeout_duration = self.get_timeout_for_model(
+            routing.model_name,
+            thinking_level=routing.thinking_level,
+        )
+        logger.info(
+            "Using timeout: %ss for model %s (thinking_level: %s)",
+            timeout_duration,
+            routing.model_name,
+            routing.thinking_level,
+        )
+        return GeminiRequestPlan(
+            model_name=routing.model_name,
+            complexity_level=routing.complexity_level,
+            thinking_level=routing.thinking_level,
+            use_search=routing.use_search,
+            timeout_duration=timeout_duration,
+        )
+
+    def _build_successful_response(
+        self,
+        attempt_result: GeminiAttemptResult,
+        plan: GeminiRequestPlan,
+        response_text: str,
+        *,
+        truncated: bool,
+    ) -> APIResponse:
+        """Log, enrich, and construct a successful public response."""
+        if truncated:
+            logger.warning(
+                "Gemini API response hit max tokens, returning partial response (%s chars)",
+                len(response_text),
+            )
+        else:
+            logger.info("Successfully generated response from Gemini API")
+        logger.info("Output token count (estimated): %s", len(response_text.split()))
+        logger.info("Output length: %s characters", len(response_text))
+        logger.debug("Output preview redacted")
+        logger.info("=" * 80)
+
+        self.performance_logger.log_api_call(
+            api_name="gemini_generate_content",
+            duration=attempt_result.duration,
+            success=True,
+        )
+        grounding_sources = self._extract_grounding_sources(
+            attempt_result.response,
+            plan.use_search,
+        )
+        token_usage = self._extract_token_usage(attempt_result.response)
+        model_info = self._get_model_display_name(
+            model_name=plan.model_name,
+            thinking_level=plan.thinking_level,
+        )
+        return build_success_response(
+            response_text,
+            model_info,
+            plan.use_search,
+            grounding_sources,
+            token_usage,
+            truncated=truncated,
+        )
+
+    def _interpret_provider_response(
+        self,
+        attempt_result: GeminiAttemptResult,
+        plan: GeminiRequestPlan,
+    ) -> Optional[APIResponse]:
+        """Interpret one provider response while preserving finish-reason behavior."""
+        response = attempt_result.response
+        duration = attempt_result.duration
+        logger.info("-" * 80)
+        logger.info("API RESPONSE RECEIVED (Duration: %.3fs)", duration)
+        logger.info("Response object type: %s", type(response))
+
+        if not response:
+            logger.warning("Gemini API returned None response")
+            logger.info("=" * 80)
+            self.performance_logger.log_api_call(
+                api_name="gemini_generate_content",
+                duration=duration,
+                success=False,
+                error_type="empty_response",
+            )
+            return build_error_response(
+                "empty_response",
+                "The AI returned no response",
+            )
+
+        if not hasattr(response, "candidates") or not response.candidates:
+            logger.warning("Gemini API returned response without candidates")
+            logger.info("=" * 80)
+            self.performance_logger.log_api_call(
+                api_name="gemini_generate_content",
+                duration=duration,
+                success=False,
+                error_type="empty_response",
+            )
+            return build_error_response(
+                "empty_response",
+                "The AI generated an empty response",
+            )
+
+        candidate = response.candidates[0]
+        finish_reason_raw = candidate.finish_reason
+        finish_reason = self._normalize_finish_reason(finish_reason_raw)
+        logger.info("Number of candidates: %s", len(response.candidates))
+        logger.info(
+            "Finish reason: %s -> normalized: %s (%s)",
+            finish_reason_raw,
+            finish_reason,
+            self._get_finish_reason_name(finish_reason_raw),
+        )
+
+        if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
+            logger.info("Safety ratings:")
+            for rating in candidate.safety_ratings:
+                logger.info("  %s: %s", rating.category, rating.probability)
+
+        if finish_reason == 1:
+            response_text = self._get_response_text(response)
+            if response_text:
+                return self._build_successful_response(
+                    attempt_result,
+                    plan,
+                    response_text,
+                    truncated=False,
+                )
+            return None
+
+        if finish_reason == 2:
+            response_text = self._get_response_text(response)
+            if response_text:
+                return self._build_successful_response(
+                    attempt_result,
+                    plan,
+                    response_text,
+                    truncated=True,
+                )
+            logger.error("Max tokens hit but no response text available")
+            logger.info("=" * 80)
+            self.performance_logger.log_api_call(
+                api_name="gemini_generate_content",
+                duration=duration,
+                success=False,
+                error_type="max_tokens_no_content",
+            )
+            return build_error_response(
+                "max_tokens",
+                "The response was too complex to generate. Please try breaking your question into smaller parts.",
+            )
+
+        if finish_reason == 3:
+            logger.warning("Gemini API response blocked by safety filters")
+            if hasattr(candidate, "safety_ratings") and candidate.safety_ratings:
+                logger.warning("Triggered safety ratings:")
+                for rating in candidate.safety_ratings:
+                    logger.warning("  %s: %s", rating.category, rating.probability)
+            logger.info("=" * 80)
+            self.performance_logger.log_api_call(
+                api_name="gemini_generate_content",
+                duration=duration,
+                success=False,
+                error_type="safety_filter",
+            )
+            return build_error_response(
+                "safety_filter",
+                "I can't respond to that due to content safety guidelines. Please rephrase your message.",
+            )
+
+        if finish_reason == 4:
+            logger.warning("Gemini API response blocked due to recitation")
+            logger.info("=" * 80)
+            self.performance_logger.log_api_call(
+                api_name="gemini_generate_content",
+                duration=duration,
+                success=False,
+                error_type="recitation",
+            )
+            return build_error_response(
+                "recitation",
+                "I can't provide that response as it may be copyrighted content.",
+            )
+
+        logger.warning(
+            "Gemini API returned unexpected finish_reason: %s",
+            finish_reason,
+        )
+        logger.info("=" * 80)
+        self.performance_logger.log_api_call(
+            api_name="gemini_generate_content",
+            duration=duration,
+            success=False,
+            error_type="unknown_finish_reason",
+        )
+        return build_error_response(
+            "unknown_finish_reason",
+            "Received an unexpected response from the AI. Please try again.",
+        )
+
+    async def _execute_response_attempt(
+        self,
+        request_content: GeminiRequestContent,
+        plan: GeminiRequestPlan,
+        on_chunk: Optional[callable],
+        attempt: int,
+    ) -> GeminiAttemptResult:
+        """Execute one provider attempt under the request-scoped timeout."""
+        logger.debug(
+            "Generating response (attempt %s/%s)",
+            attempt + 1,
+            self.config.max_retries + 1,
+        )
+        start_time = time.time()
+        response = await asyncio.wait_for(
+            self._generate_response_async(
+                request_content.parts,
+                plan.use_search,
+                on_chunk,
+                model_override=plan.model_name,
+                thinking_level=plan.thinking_level,
+                complexity_level=plan.complexity_level,
+            ),
+            timeout=plan.timeout_duration,
+        )
+        return GeminiAttemptResult(
+            response=response,
+            duration=time.time() - start_time,
+        )
+
+    def _handle_response_timeout(
+        self,
+        attempt: int,
+        plan: GeminiRequestPlan,
+    ) -> Optional[APIResponse]:
+        """Record a timed-out attempt and build the final timeout response."""
+        logger.warning("Gemini API request timed out (attempt %s)", attempt + 1)
+        logger.warning("Timeout duration: %ss", plan.timeout_duration)
+        logger.info("=" * 80)
+        self.performance_logger.log_api_call(
+            api_name="gemini_generate_content",
+            duration=plan.timeout_duration,
+            success=False,
+            error_type="timeout",
+        )
+        if attempt == self.config.max_retries:
+            return build_error_response(
+                "timeout",
+                "Request timed out after multiple attempts",
+            )
+        return None
+
+    async def _handle_response_exception(
+        self,
+        error: Exception,
+        attempt: int,
+    ) -> Optional[APIResponse]:
+        """Classify a failed attempt, back off when retryable, or return an error."""
+        logger.error(
+            "Exception during API call: %s: %s",
+            type(error).__name__,
+            str(error),
+        )
+        logger.error("Exception details: %r", error, exc_info=True)
+        error_context = self.error_manager.handle_api_error(
+            error,
+            f"Gemini API attempt {attempt + 1}",
+        )
+        logger.error("Error type: %s", error_context.error_type.value)
+        logger.error("Should retry: %s", error_context.should_retry)
+        if error_context.retry_after:
+            logger.error("Retry after: %ss", error_context.retry_after)
+        logger.info("=" * 80)
+        self.performance_logger.log_api_call(
+            api_name="gemini_generate_content",
+            duration=0,
+            success=False,
+            error_type=error_context.error_type.value,
+        )
+
+        if error_context.should_retry and attempt < self.config.max_retries:
+            wait_time = (
+                error_context.retry_after
+                or self._calculate_backoff_delay(attempt)
+            )
+            logger.info(
+                "Retrying after %.2f seconds (attempt %s)",
+                wait_time,
+                attempt + 1,
+            )
+            await asyncio.sleep(wait_time)
+            return None
+
+        return build_error_response(
+            error_context.error_type.value,
+            error_context.user_message,
+        )
+
+    async def _run_response_attempts(
+        self,
+        request_content: GeminiRequestContent,
+        plan: GeminiRequestPlan,
+        on_chunk: Optional[callable],
+    ) -> APIResponse:
+        """Own retry, timeout, cancellation, and response interpretation flow."""
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                attempt_result = await self._execute_response_attempt(
+                    request_content,
+                    plan,
+                    on_chunk,
+                    attempt,
+                )
+                interpreted_response = self._interpret_provider_response(
+                    attempt_result,
+                    plan,
+                )
+                if interpreted_response is not None:
+                    return interpreted_response
+            except asyncio.TimeoutError:
+                timeout_response = self._handle_response_timeout(attempt, plan)
+                if timeout_response is not None:
+                    return timeout_response
+            except Exception as error:
+                error_response = await self._handle_response_exception(error, attempt)
+                if error_response is not None:
+                    return error_response
+
+        return build_error_response(
+            "unknown_error",
+            "An unexpected error occurred",
+        )
+
     async def generate_response(
         self,
         prompt: str,
@@ -838,407 +1320,44 @@ Candidate messages:
             thinking_level_override: Optional explicit thinking level for this request
             complexity_override: Optional complexity tier ("low" | "medium" | "high") for this request
             search_override: Optional boolean to force enable/disable search for this request
-            
+
         Returns:
             APIResponse containing the generated response or error information
         """
         if not self.client:
             logger.error("Attempted to generate response but Gemini client is not configured")
-            return APIResponse(
-                success=False,
-                error_type="configuration_error",
-                content="Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable."
-            )
-        
-        # Use request overrides without mutating global runtime state
-        target_model = model_override if model_override else self._current_model_name
-        if complexity_override in {"low", "medium", "high"}:
-            effective_complexity = complexity_override
-        else:
-            effective_complexity = self._current_complexity_level
-            if complexity_override is not None:
-                logger.warning(
-                    "Invalid complexity override '%s'; using '%s'",
-                    complexity_override,
-                    effective_complexity,
-                )
-
-        if thinking_level_override is not None:
-            target_thinking_level = self._normalize_thinking_level(thinking_level_override)
-        else:
-            target_thinking_level = self._resolve_thinking_level_for_request(
-                target_model,
-                prompt_mode_override=prompt_mode_override,
-                complexity_level=effective_complexity,
+            return build_error_response(
+                "configuration_error",
+                "Gemini API not properly configured. Please check your GEMINI_API_KEY environment variable.",
             )
 
-        # Log API call initiation
-        logger.info("=" * 80)
-        logger.info("API CALL INITIATED")
-        logger.info(f"Model: {target_model}")
-        logger.info(f"Thinking level: {target_thinking_level}")
-        logger.info("Gemini API key configured for request")
-        
-        # Determine if Google Search should be used
-        if search_override is not None:
-            use_search = search_override
-        else:
-            use_search = self._should_use_search(prompt)
-            
-        if use_search:
-            logger.info("Google Search enabled for this request")
-        
-        # Build content for API call
-        content_parts = []
-
-        # Normalize image metadata to ensure strict alignment with image order
-        normalized_image_context = self._normalize_image_context(images, image_context)
-
-        # Add text prompt (with personality and language if provided)
-        formatted_prompt = self.format_prompt(
+        routing = self._resolve_response_request_routing(
+            prompt,
+            model_override,
+            prompt_mode_override,
+            thinking_level_override,
+            complexity_override,
+            search_override,
+        )
+        request_content = self._build_response_request_content(
             prompt,
             context,
-            personality_prompt=personality_prompt,
-            language=language,
-            image_context=normalized_image_context,
-            complexity_override=effective_complexity,
+            images,
+            image_context,
+            audio_files,
+            personality_prompt,
+            language,
+            routing.complexity_level,
         )
-        content_parts.append(formatted_prompt)
-        
-        # Add images - convert PIL Images to bytes for the Gemini SDK
-        if images and len(images) > 0:
-            for img in images:
-                # Convert PIL Image to bytes for the SDK
-                img_buffer = io.BytesIO()
-                img.save(img_buffer, format='PNG')
-                img_bytes = img_buffer.getvalue()
-                content_parts.append(types.Part.from_bytes(data=img_bytes, mime_type='image/png'))
-            logger.info(f"Added {len(images)} image(s) to request")
-            
-        # Add audio files
-        if audio_files and len(audio_files) > 0:
-            for audio in audio_files:
-                content_parts.append(types.Part.from_bytes(data=audio['data'], mime_type=audio['mime_type']))
-            logger.info(f"Added {len(audio_files)} audio file(s) to request")
-            
-        logger.info(f"Input prompt length: {len(formatted_prompt)} characters")
-        logger.debug("Input prompt preview redacted")
-        
-        # Log context details
-        if context:
-            logger.info(f"Context messages provided: {len(context)}")
-            for i, msg in enumerate(context):
-                logger.info(f"  Context[{i}]: Author={msg.author}, Length={len(msg.content)} chars, Timestamp={msg.timestamp}")
-        else:
-            logger.info("No context messages provided")
-
-        if normalized_image_context:
-            logger.info(f"Image context entries provided: {len(normalized_image_context)}")
-            for item in normalized_image_context:
-                logger.info(
-                    "  Image[%s]: source=%s, message_order=%s, message_id=%s, attachment=%s",
-                    item.get("image_index"),
-                    item.get("source_type"),
-                    item.get("source_message_order"),
-                    item.get("source_message_id"),
-                    item.get("attachment_name"),
-                )
-        
-        # Get dynamic timeout based on effective request model/thinking level
-        timeout_duration = self.get_timeout_for_model(
-            target_model,
-            thinking_level=target_thinking_level,
+        self._log_response_request_context(
+            context,
+            request_content.image_context,
         )
-            
-        logger.info(
-            "Using timeout: %ss for model %s (thinking_level: %s)",
-            timeout_duration,
-            target_model,
-            target_thinking_level,
-        )
-        
-        for attempt in range(self.config.max_retries + 1):
-            try:
-                logger.debug(f"Generating response (attempt {attempt + 1}/{self.config.max_retries + 1})")
-                
-                # Generate response with timeout and performance tracking
-                import time
-                start_time = time.time()
-                
-                response = await asyncio.wait_for(
-                    self._generate_response_async(
-                        content_parts,
-                        use_search,
-                        on_chunk,
-                        model_override=target_model,
-                        thinking_level=target_thinking_level,
-                        complexity_level=effective_complexity,
-                    ),
-                    timeout=timeout_duration
-                )
-                
-                duration = time.time() - start_time
-                
-                # Log API response details
-                logger.info("-" * 80)
-                logger.info(f"API RESPONSE RECEIVED (Duration: {duration:.3f}s)")
-                logger.info(f"Response object type: {type(response)}")
-                
-                # Check if response is valid
-                if not response:
-                    logger.warning("Gemini API returned None response")
-                    logger.info("=" * 80)
-                    self.performance_logger.log_api_call(
-                        api_name="gemini_generate_content",
-                        duration=duration,
-                        success=False,
-                        error_type="empty_response"
-                    )
-                    return APIResponse(
-                        success=False,
-                        error_type="empty_response",
-                        content="The AI returned no response"
-                    )
-                
-                # Check finish_reason before accessing text
-                if hasattr(response, 'candidates') and response.candidates:
-                    candidate = response.candidates[0]
-                    finish_reason_raw = candidate.finish_reason
-                    finish_reason = self._normalize_finish_reason(finish_reason_raw)
-                    
-                    # Log candidate details
-                    logger.info(f"Number of candidates: {len(response.candidates)}")
-                    logger.info(f"Finish reason: {finish_reason_raw} -> normalized: {finish_reason} ({self._get_finish_reason_name(finish_reason_raw)})")
-                    
-                    # Log safety ratings if available
-                    if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
-                        logger.info("Safety ratings:")
-                        for rating in candidate.safety_ratings:
-                            logger.info(f"  {rating.category}: {rating.probability}")
-                    
-                    # Handle different finish reasons
-                    if finish_reason == 1:  # STOP - normal completion
-                        response_text_content = self._get_response_text(response)
-                        if response_text_content:
-                            logger.info("Successfully generated response from Gemini API")
-                            logger.info(f"Output token count (estimated): {len(response_text_content.split())}")
-                            logger.info(f"Output length: {len(response_text_content)} characters")
-                            logger.debug("Output preview redacted")
-                            logger.info("=" * 80)
-                            
-                            self.performance_logger.log_api_call(
-                                api_name="gemini_generate_content",
-                                duration=duration,
-                                success=True
-                            )
-                            
-                            # Extract grounding sources using unified helper method
-                            grounding_sources = self._extract_grounding_sources(response, use_search)
-                            token_usage = self._extract_token_usage(response)
-                            
-                            # Add grounding indicator if search was used
-                            response_text = response_text_content.strip()
-                            
-                            # Add model information header
-                            model_info = self._get_model_display_name(
-                                model_name=target_model,
-                                thinking_level=target_thinking_level,
-                            )
-                            model_header = f"🤖 *[Model: {model_info}]*"
-                            
-                            if use_search:
-                                response_text = f"{model_header}\n🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
-                            else:
-                                response_text = f"{model_header}\n\n{response_text}"
-                            
-                            return APIResponse(
-                                success=True,
-                                content=response_text,
-                                grounding_sources=grounding_sources if grounding_sources else None,
-                                token_usage=token_usage
-                            )
-                    elif finish_reason == 2:  # MAX_TOKENS
-                        # Response hit max tokens but we still got partial content
-                        response_text_content = self._get_response_text(response)
-                        if response_text_content:
-                            logger.warning(f"Gemini API response hit max tokens, returning partial response ({len(response_text_content)} chars)")
-                            logger.info(f"Output token count (estimated): {len(response_text_content.split())}")
-                            logger.info(f"Output length: {len(response_text_content)} characters")
-                            logger.debug("Output preview redacted")
-                            logger.info("=" * 80)
-                            
-                            self.performance_logger.log_api_call(
-                                api_name="gemini_generate_content",
-                                duration=duration,
-                                success=True  # Still consider it successful since we got content
-                            )
-                            
-                            # Extract grounding sources using unified helper method
-                            grounding_sources = self._extract_grounding_sources(response, use_search)
-                            token_usage = self._extract_token_usage(response)
-                            
-                            # Add grounding indicator and note about truncation
-                            response_text = response_text_content.strip()
-                            
-                            # Add model information header
-                            model_info = self._get_model_display_name(
-                                model_name=target_model,
-                                thinking_level=target_thinking_level,
-                            )
-                            model_header = f"🤖 *[Model: {model_info}]*"
-                            
-                            if use_search:
-                                response_text = f"{model_header}\n🌐 *[Grounding: Online Search Enabled]*\n\n{response_text}"
-                            else:
-                                response_text = f"{model_header}\n\n{response_text}"
-                            
-                            # Add note that response was truncated
-                            response_text += "\n\n*[Note: Response was very long and may have been truncated. You can ask for specific parts or a summary.]*"
-                            
-                            return APIResponse(
-                                success=True,
-                                content=response_text,
-                                grounding_sources=grounding_sources if grounding_sources else None,
-                                token_usage=token_usage
-                            )
-                        else:
-                            # No text but hit max tokens (shouldn't happen, but handle it)
-                            logger.error("Max tokens hit but no response text available")
-                            logger.info("=" * 80)
-                            self.performance_logger.log_api_call(
-                                api_name="gemini_generate_content",
-                                duration=duration,
-                                success=False,
-                                error_type="max_tokens_no_content"
-                            )
-                            return APIResponse(
-                                success=False,
-                                error_type="max_tokens",
-                                content="The response was too complex to generate. Please try breaking your question into smaller parts."
-                            )
-                    elif finish_reason == 3:  # SAFETY
-                        logger.warning("Gemini API response blocked by safety filters")
-                        if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
-                            logger.warning("Triggered safety ratings:")
-                            for rating in candidate.safety_ratings:
-                                logger.warning(f"  {rating.category}: {rating.probability}")
-                        logger.info("=" * 80)
-                        
-                        self.performance_logger.log_api_call(
-                            api_name="gemini_generate_content",
-                            duration=duration,
-                            success=False,
-                            error_type="safety_filter"
-                        )
-                        return APIResponse(
-                            success=False,
-                            error_type="safety_filter",
-                            content="I can't respond to that due to content safety guidelines. Please rephrase your message."
-                        )
-                    elif finish_reason == 4:  # RECITATION
-                        logger.warning("Gemini API response blocked due to recitation")
-                        logger.info("=" * 80)
-                        
-                        self.performance_logger.log_api_call(
-                            api_name="gemini_generate_content",
-                            duration=duration,
-                            success=False,
-                            error_type="recitation"
-                        )
-                        return APIResponse(
-                            success=False,
-                            error_type="recitation",
-                            content="I can't provide that response as it may be copyrighted content."
-                        )
-                    else:
-                        logger.warning(f"Gemini API returned unexpected finish_reason: {finish_reason}")
-                        logger.info("=" * 80)
-                        
-                        self.performance_logger.log_api_call(
-                            api_name="gemini_generate_content",
-                            duration=duration,
-                            success=False,
-                            error_type="unknown_finish_reason"
-                        )
-                        return APIResponse(
-                            success=False,
-                            error_type="unknown_finish_reason",
-                            content="Received an unexpected response from the AI. Please try again."
-                        )
-                else:
-                    logger.warning("Gemini API returned response without candidates")
-                    logger.info("=" * 80)
-                    
-                    self.performance_logger.log_api_call(
-                        api_name="gemini_generate_content",
-                        duration=duration,
-                        success=False,
-                        error_type="empty_response"
-                    )
-                    return APIResponse(
-                        success=False,
-                        error_type="empty_response",
-                        content="The AI generated an empty response"
-                    )
-                    
-            except asyncio.TimeoutError:
-                logger.warning(f"Gemini API request timed out (attempt {attempt + 1})")
-                logger.warning(f"Timeout duration: {timeout_duration}s")
-                logger.info("=" * 80)
-                
-                # Log timeout performance
-                self.performance_logger.log_api_call(
-                    api_name="gemini_generate_content",
-                    duration=timeout_duration,
-                    success=False,
-                    error_type="timeout"
-                )
-                
-                if attempt == self.config.max_retries:
-                    return APIResponse(
-                        success=False,
-                        error_type="timeout",
-                        content="Request timed out after multiple attempts"
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Exception during API call: {type(e).__name__}: {str(e)}")
-                logger.error(f"Exception details: {repr(e)}", exc_info=True)
-                
-                error_context = self.error_manager.handle_api_error(e, f"Gemini API attempt {attempt + 1}")
-                
-                logger.error(f"Error type: {error_context.error_type.value}")
-                logger.error(f"Should retry: {error_context.should_retry}")
-                if error_context.retry_after:
-                    logger.error(f"Retry after: {error_context.retry_after}s")
-                logger.info("=" * 80)
-                
-                # Log failed API call
-                self.performance_logger.log_api_call(
-                    api_name="gemini_generate_content",
-                    duration=0,  # Unknown duration for exceptions
-                    success=False,
-                    error_type=error_context.error_type.value
-                )
-                
-                # Handle rate limiting with exponential backoff
-                if error_context.should_retry and attempt < self.config.max_retries:
-                    wait_time = error_context.retry_after or self._calculate_backoff_delay(attempt)
-                    logger.info(f"Retrying after {wait_time:.2f} seconds (attempt {attempt + 1})")
-                    await asyncio.sleep(wait_time)
-                    continue
-                else:
-                    return APIResponse(
-                        success=False,
-                        error_type=error_context.error_type.value,
-                        content=error_context.user_message
-                    )
-        
-        # This should never be reached, but included for completeness
-        return APIResponse(
-            success=False,
-            error_type="unknown_error",
-            content="An unexpected error occurred"
+        plan = self._complete_response_request_plan(routing)
+        return await self._run_response_attempts(
+            request_content,
+            plan,
+            on_chunk,
         )
     
     async def _generate_response_async(

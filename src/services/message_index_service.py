@@ -12,7 +12,6 @@ import logging
 import math
 import re
 import sqlite3
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +19,7 @@ from typing import Iterable, Optional
 
 from ..models.data_models import MessageContext
 from .context_collector import ContextCollector
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -71,18 +71,9 @@ class MessageIndexService:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    @contextmanager
-    def _connection(self):
-        conn = self._connect()
-        try:
-            yield conn
-        finally:
-            conn.close()
+    def _connection(self, *, transaction: bool = False):
+        connection_manager = sqlite_transaction if transaction else sqlite_connection
+        return connection_manager(self.db_path, row_factory=sqlite3.Row)
 
     @staticmethod
     def _ensure_column(
@@ -100,7 +91,7 @@ class MessageIndexService:
 
     def _ensure_schema(self) -> None:
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS message_index (
@@ -193,7 +184,6 @@ class MessageIndexService:
                 except sqlite3.OperationalError as exc:
                     self.fts_enabled = False
                     logger.warning("SQLite FTS5 is unavailable; lexical RAG search disabled: %s", exc)
-                conn.commit()
             logger.info("Message RAG index schema ready")
         except Exception as exc:
             logger.error("Failed to initialize message RAG index: %s", exc, exc_info=True)
@@ -345,7 +335,7 @@ class MessageIndexService:
         created_at_iso = created_at.isoformat()
         indexed_at = self._now_iso()
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 existing = conn.execute(
                     "SELECT content_hash, hidden, deleted_at FROM message_index WHERE message_id = ?",
                     (message_id,),
@@ -448,7 +438,6 @@ class MessageIndexService:
                         content_hash,
                     ),
                 )
-                conn.commit()
             return True
         except Exception as exc:
             logger.error("Failed to index message %s: %s", message_id, exc, exc_info=True)
@@ -475,7 +464,7 @@ class MessageIndexService:
 
     def mark_hidden(self, message_id: int, hidden: bool = True) -> bool:
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 conn.execute(
                     "UPDATE message_index SET hidden = ? WHERE message_id = ?",
                     (1 if hidden else 0, message_id),
@@ -500,7 +489,6 @@ class MessageIndexService:
                                 """,
                                 (message_id, row["content_text"], row["author_name"], row["attachment_summary"] or ""),
                             )
-                conn.commit()
             return True
         except Exception as exc:
             logger.error("Failed to update hidden state for indexed message %s: %s", message_id, exc)
@@ -509,7 +497,7 @@ class MessageIndexService:
     def mark_deleted(self, message_id: int) -> bool:
         """Mark an indexed message as deleted and remove it from FTS retrieval."""
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 conn.execute(
                     """
                     UPDATE message_index
@@ -521,7 +509,6 @@ class MessageIndexService:
                 )
                 if self.fts_enabled:
                     conn.execute("DELETE FROM message_search_fts WHERE rowid = ?", (message_id,))
-                conn.commit()
             return True
         except Exception as exc:
             logger.error("Failed to mark indexed message %s deleted: %s", message_id, exc)
@@ -693,7 +680,7 @@ class MessageIndexService:
     def store_embedding(self, message_id: int, vector: list[float], content_hash: str) -> bool:
         try:
             vector_json = json.dumps([float(value) for value in vector], separators=(",", ":"))
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 conn.execute(
                     """
                     UPDATE message_embeddings
@@ -708,7 +695,6 @@ class MessageIndexService:
                     """,
                     (vector_json, self._now_iso(), message_id, content_hash),
                 )
-                conn.commit()
             return True
         except Exception as exc:
             logger.error("Failed to store embedding for message %s: %s", message_id, exc)
@@ -719,7 +705,7 @@ class MessageIndexService:
 
     def mark_embedding_failed(self, message_id: int, error: str) -> None:
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 row = conn.execute(
                     """
                     SELECT embedding_attempts
@@ -751,7 +737,6 @@ class MessageIndexService:
                         message_id,
                     ),
                 )
-                conn.commit()
         except Exception as exc:
             logger.error("Failed to mark embedding failure for message %s: %s", message_id, exc)
 
@@ -857,7 +842,7 @@ class MessageIndexService:
         latency_ms: int,
     ) -> None:
         try:
-            with self._connection() as conn:
+            with self._connection(transaction=True) as conn:
                 conn.execute(
                     """
                     INSERT INTO message_retrieval_events (
@@ -877,7 +862,6 @@ class MessageIndexService:
                         latency_ms,
                     ),
                 )
-                conn.commit()
         except Exception as exc:
             logger.debug("Failed to record retrieval event: %s", exc)
 

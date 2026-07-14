@@ -6,9 +6,10 @@ are injected into the AI prompt so the bot always remembers them.
 """
 
 import logging
-import sqlite3
 from datetime import datetime
 from typing import List, Optional, Tuple
+
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -23,25 +24,23 @@ class PinService:
     def _ensure_table(self):
         """Create the pinned_messages table if it doesn't exist."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS pinned_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_id INTEGER NOT NULL,
-                    guild_id INTEGER,
-                    content TEXT NOT NULL,
-                    author_name TEXT NOT NULL,
-                    pinned_by TEXT NOT NULL,
-                    pinned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    message_id INTEGER
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_pinned_channel
-                ON pinned_messages (channel_id)
-            """)
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS pinned_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        channel_id INTEGER NOT NULL,
+                        guild_id INTEGER,
+                        content TEXT NOT NULL,
+                        author_name TEXT NOT NULL,
+                        pinned_by TEXT NOT NULL,
+                        pinned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        message_id INTEGER
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_pinned_channel
+                    ON pinned_messages (channel_id)
+                """)
             logger.info("Pinned messages table ready")
         except Exception as e:
             logger.error(f"Failed to create pinned_messages table: {e}")
@@ -62,26 +61,24 @@ class PinService:
             The pin ID if successful, None otherwise.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                """
-                INSERT INTO pinned_messages
-                    (channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    channel_id,
-                    guild_id,
-                    content,
-                    author_name,
-                    pinned_by,
-                    datetime.utcnow().isoformat(),
-                    message_id,
-                ),
-            )
-            pin_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO pinned_messages
+                        (channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        channel_id,
+                        guild_id,
+                        content,
+                        author_name,
+                        pinned_by,
+                        datetime.utcnow().isoformat(),
+                        message_id,
+                    ),
+                )
+                pin_id = cursor.lastrowid
             logger.info(f"Pinned message #{pin_id} in channel {channel_id}")
             return pin_id
         except Exception as e:
@@ -96,18 +93,17 @@ class PinService:
             List of (id, content, author_name, pinned_by, pinned_at) tuples.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                """
-                SELECT id, content, author_name, pinned_by, pinned_at
-                FROM pinned_messages
-                WHERE channel_id = ?
-                ORDER BY pinned_at ASC
-                """,
-                (channel_id,),
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            with sqlite_connection(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, content, author_name, pinned_by, pinned_at
+                    FROM pinned_messages
+                    WHERE channel_id = ?
+                    ORDER BY pinned_at ASC
+                    """,
+                    (channel_id,),
+                )
+                rows = cursor.fetchall()
             return rows
         except Exception as e:
             logger.error(f"Failed to get pins for channel {channel_id}: {e}")
@@ -121,14 +117,12 @@ class PinService:
             True if a row was deleted, False otherwise.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "DELETE FROM pinned_messages WHERE id = ? AND channel_id = ?",
-                (pin_id, channel_id),
-            )
-            deleted = cursor.rowcount > 0
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                cursor = conn.execute(
+                    "DELETE FROM pinned_messages WHERE id = ? AND channel_id = ?",
+                    (pin_id, channel_id),
+                )
+                deleted = cursor.rowcount > 0
             if deleted:
                 logger.info(f"Deleted pin #{pin_id} from channel {channel_id}")
             return deleted

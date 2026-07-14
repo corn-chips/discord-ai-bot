@@ -5,10 +5,11 @@ Manages per-user preferences (preferred model, language) stored in SQLite.
 """
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +35,16 @@ class UserPreferencesService:
     def _ensure_table(self):
         """Create the user_preferences table if it doesn't exist."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id INTEGER PRIMARY KEY,
-                    preferred_model TEXT,
-                    preferred_language TEXT,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_preferences (
+                        user_id INTEGER PRIMARY KEY,
+                        preferred_model TEXT,
+                        preferred_language TEXT,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
             logger.info("User preferences table ready")
         except Exception as e:
             logger.error(f"Failed to create user_preferences table: {e}")
@@ -53,13 +52,12 @@ class UserPreferencesService:
     def get_preferences(self, user_id: int) -> UserPreferences:
         """Get preferences for a user. Returns defaults if not set."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "SELECT preferred_model, preferred_language FROM user_preferences WHERE user_id = ?",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite_connection(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT preferred_model, preferred_language FROM user_preferences WHERE user_id = ?",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
             if row:
                 return UserPreferences(
                     user_id=user_id,
@@ -86,10 +84,8 @@ class UserPreferencesService:
     def clear_preferences(self, user_id: int) -> bool:
         """Clear all preferences for a user."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
             logger.info(f"Cleared preferences for user {user_id}")
             return True
         except Exception as e:
@@ -103,16 +99,14 @@ class UserPreferencesService:
             return False
         try:
             now = datetime.utcnow().isoformat()
-            conn = sqlite3.connect(self.db_path)
-            conn.execute(f"""
-                INSERT INTO user_preferences (user_id, {column}, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    {column} = excluded.{column},
-                    updated_at = excluded.updated_at
-            """, (user_id, value, now, now))
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute(f"""
+                    INSERT INTO user_preferences (user_id, {column}, created_at, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        {column} = excluded.{column},
+                        updated_at = excluded.updated_at
+                """, (user_id, value, now, now))
             logger.info(f"Set {column}={value} for user {user_id}")
             return True
         except Exception as e:

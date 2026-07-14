@@ -5,9 +5,10 @@ Stores original content for hidden bot messages so /unhide can restore them.
 """
 
 import logging
-import sqlite3
 from datetime import datetime
 from typing import List, Optional, Tuple
+
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -22,27 +23,25 @@ class MessageVisibilityService:
     def _ensure_table(self):
         """Create the hidden_messages table if it does not exist."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS hidden_messages (
-                    message_id INTEGER PRIMARY KEY,
-                    channel_id INTEGER NOT NULL,
-                    guild_id INTEGER,
-                    original_content TEXT NOT NULL,
-                    hidden_by INTEGER,
-                    hidden_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS hidden_messages (
+                        message_id INTEGER PRIMARY KEY,
+                        channel_id INTEGER NOT NULL,
+                        guild_id INTEGER,
+                        original_content TEXT NOT NULL,
+                        hidden_by INTEGER,
+                        hidden_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_hidden_messages_channel_hidden_at
-                ON hidden_messages (channel_id, hidden_at DESC)
-                """
-            )
-            conn.commit()
-            conn.close()
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_hidden_messages_channel_hidden_at
+                    ON hidden_messages (channel_id, hidden_at DESC)
+                    """
+                )
             logger.info("Hidden messages table ready")
         except Exception as exc:
             logger.error(f"Failed to create hidden_messages table: {exc}")
@@ -62,30 +61,28 @@ class MessageVisibilityService:
             True if successful, otherwise False.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute(
-                """
-                INSERT INTO hidden_messages
-                    (message_id, channel_id, guild_id, original_content, hidden_by, hidden_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(message_id) DO UPDATE SET
-                    channel_id = excluded.channel_id,
-                    guild_id = excluded.guild_id,
-                    original_content = excluded.original_content,
-                    hidden_by = excluded.hidden_by,
-                    hidden_at = excluded.hidden_at
-                """,
-                (
-                    message_id,
-                    channel_id,
-                    guild_id,
-                    original_content,
-                    hidden_by,
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO hidden_messages
+                        (message_id, channel_id, guild_id, original_content, hidden_by, hidden_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(message_id) DO UPDATE SET
+                        channel_id = excluded.channel_id,
+                        guild_id = excluded.guild_id,
+                        original_content = excluded.original_content,
+                        hidden_by = excluded.hidden_by,
+                        hidden_at = excluded.hidden_at
+                    """,
+                    (
+                        message_id,
+                        channel_id,
+                        guild_id,
+                        original_content,
+                        hidden_by,
+                        datetime.utcnow().isoformat(),
+                    ),
+                )
             return True
         except Exception as exc:
             logger.error(f"Failed to save hidden message {message_id}: {exc}")
@@ -103,19 +100,18 @@ class MessageVisibilityService:
             List of tuples: (message_id, original_content, hidden_at), newest first.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                """
-                SELECT message_id, original_content, hidden_at
-                FROM hidden_messages
-                WHERE channel_id = ?
-                ORDER BY hidden_at DESC
-                LIMIT ?
-                """,
-                (channel_id, limit),
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            with sqlite_connection(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT message_id, original_content, hidden_at
+                    FROM hidden_messages
+                    WHERE channel_id = ?
+                    ORDER BY hidden_at DESC
+                    LIMIT ?
+                    """,
+                    (channel_id, limit),
+                )
+                rows = cursor.fetchall()
             return rows
         except Exception as exc:
             logger.error(f"Failed to get hidden messages for channel {channel_id}: {exc}")
@@ -129,14 +125,12 @@ class MessageVisibilityService:
             True if a row was deleted, otherwise False.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "DELETE FROM hidden_messages WHERE message_id = ?",
-                (message_id,),
-            )
-            deleted = cursor.rowcount > 0
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                cursor = conn.execute(
+                    "DELETE FROM hidden_messages WHERE message_id = ?",
+                    (message_id,),
+                )
+                deleted = cursor.rowcount > 0
             return deleted
         except Exception as exc:
             logger.error(f"Failed to remove hidden message {message_id}: {exc}")

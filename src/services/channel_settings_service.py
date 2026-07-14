@@ -9,6 +9,8 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Optional
 
+from .sqlite_utils import sqlite_connection, sqlite_transaction
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,22 +27,20 @@ class ChannelSettingsService:
     def _ensure_table(self):
         """Create the channel_settings table if it doesn't exist."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS channel_settings (
-                    channel_id INTEGER PRIMARY KEY,
-                    personality TEXT NOT NULL DEFAULT 'default',
-                    live_enabled INTEGER NOT NULL DEFAULT 0,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS channel_settings (
+                        channel_id INTEGER PRIMARY KEY,
+                        personality TEXT NOT NULL DEFAULT 'default',
+                        live_enabled INTEGER NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                self._ensure_column(
+                    conn,
+                    column_name="live_enabled",
+                    column_definition="INTEGER NOT NULL DEFAULT 0",
                 )
-            """)
-            self._ensure_column(
-                conn,
-                column_name="live_enabled",
-                column_definition="INTEGER NOT NULL DEFAULT 0",
-            )
-            conn.commit()
-            conn.close()
             logger.info("Channel settings table ready")
         except Exception as e:
             logger.error(f"Failed to create channel_settings table: {e}")
@@ -61,13 +61,12 @@ class ChannelSettingsService:
     def get_personality(self, channel_id: int) -> str:
         """Get the personality setting for a channel. Returns 'default' if not set."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "SELECT personality FROM channel_settings WHERE channel_id = ?",
-                (channel_id,)
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite_connection(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT personality FROM channel_settings WHERE channel_id = ?",
+                    (channel_id,)
+                )
+                row = cursor.fetchone()
             return row[0] if row else "default"
         except Exception as e:
             logger.error(f"Failed to get personality for channel {channel_id}: {e}")
@@ -96,16 +95,14 @@ class ChannelSettingsService:
             return False
 
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                INSERT INTO channel_settings (channel_id, personality, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(channel_id) DO UPDATE SET
-                    personality = excluded.personality,
-                    updated_at = excluded.updated_at
-            """, (channel_id, personality, datetime.utcnow().isoformat()))
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO channel_settings (channel_id, personality, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(channel_id) DO UPDATE SET
+                        personality = excluded.personality,
+                        updated_at = excluded.updated_at
+                """, (channel_id, personality, datetime.utcnow().isoformat()))
             logger.info(f"Set personality for channel {channel_id} to '{personality}'")
             return True
         except Exception as e:
@@ -119,13 +116,12 @@ class ChannelSettingsService:
     def get_live_enabled(self, channel_id: int) -> bool:
         """Return whether mention-free live mode is enabled for a channel."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "SELECT live_enabled FROM channel_settings WHERE channel_id = ?",
-                (channel_id,),
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite_connection(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT live_enabled FROM channel_settings WHERE channel_id = ?",
+                    (channel_id,),
+                )
+                row = cursor.fetchone()
             if not row:
                 return False
             return bool(row[0])
@@ -136,19 +132,17 @@ class ChannelSettingsService:
     def set_live_enabled(self, channel_id: int, enabled: bool) -> bool:
         """Enable or disable mention-free live mode for a channel."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute(
-                """
-                INSERT INTO channel_settings (channel_id, live_enabled, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(channel_id) DO UPDATE SET
-                    live_enabled = excluded.live_enabled,
-                    updated_at = excluded.updated_at
-                """,
-                (channel_id, 1 if enabled else 0, datetime.utcnow().isoformat()),
-            )
-            conn.commit()
-            conn.close()
+            with sqlite_transaction(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO channel_settings (channel_id, live_enabled, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(channel_id) DO UPDATE SET
+                        live_enabled = excluded.live_enabled,
+                        updated_at = excluded.updated_at
+                    """,
+                    (channel_id, 1 if enabled else 0, datetime.utcnow().isoformat()),
+                )
             logger.info(f"Set live mode for channel {channel_id} to {enabled}")
             return True
         except Exception as e:

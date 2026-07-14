@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class TokenTracker:
         self._initialize_db()
 
     def _initialize_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with sqlite_transaction(self._db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS token_usage (
@@ -105,7 +106,7 @@ class TokenTracker:
         output_tokens: int,
         total_tokens: int,
     ) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with sqlite_transaction(self._db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO token_usage (
@@ -128,7 +129,6 @@ class TokenTracker:
                     int(total_tokens),
                 ),
             )
-            conn.commit()
 
     async def get_top_users(self, guild_id: int, limit: int = 10) -> List[TokenLeaderboardEntry]:
         """Return the top token consumers for a guild."""
@@ -149,7 +149,7 @@ class TokenTracker:
         ]
 
     def _get_top_users_sync(self, guild_id: int, limit: int) -> list[tuple]:
-        with sqlite3.connect(self._db_path) as conn:
+        with sqlite_connection(self._db_path) as conn:
             cursor = conn.execute(
                 """
                 SELECT

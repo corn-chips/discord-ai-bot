@@ -299,14 +299,18 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
         "rag_backfill_limit": int(
             get_config_value(config_data, "rag", "backfill_limit", 0)
         ),
+        "rag_gating_enabled": get_config_value(config_data, "rag", "gating_enabled", True),
         "rag_lexical_candidates": int(
-            get_config_value(config_data, "rag", "lexical_candidates", 40)
+            get_config_value(config_data, "rag", "lexical_candidates", 30)
         ),
         "rag_semantic_candidates": int(
-            get_config_value(config_data, "rag", "semantic_candidates", 40)
+            get_config_value(config_data, "rag", "semantic_candidates", 24)
         ),
         "rag_rerank_candidates": int(
-            get_config_value(config_data, "rag", "rerank_candidates", 30)
+            get_config_value(config_data, "rag", "rerank_candidates", 12)
+        ),
+        "rag_rerank_min_boundary_margin": float(
+            get_config_value(config_data, "rag", "rerank_min_boundary_margin", 0.15)
         ),
         "rag_recency_half_life_hours": int(
             get_config_value(config_data, "rag", "recency_half_life_hours", 72)
@@ -315,10 +319,19 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
             get_config_value(config_data, "rag", "max_context_messages_low", 4)
         ),
         "rag_max_context_messages_medium": int(
-            get_config_value(config_data, "rag", "max_context_messages_medium", 8)
+            get_config_value(config_data, "rag", "max_context_messages_medium", 6)
         ),
         "rag_max_context_messages_high": int(
-            get_config_value(config_data, "rag", "max_context_messages_high", 12)
+            get_config_value(config_data, "rag", "max_context_messages_high", 8)
+        ),
+        "rag_embedding_min_words": int(
+            get_config_value(config_data, "rag", "embedding_min_words", 2)
+        ),
+        "rag_embedding_min_alphanumeric_chars": int(
+            get_config_value(config_data, "rag", "embedding_min_alphanumeric_chars", 12)
+        ),
+        "rag_vector_cache_enabled": get_config_value(
+            config_data, "rag", "vector_cache_enabled", True
         ),
     }
 
@@ -515,6 +528,12 @@ def _validate_core_values(config: Any) -> List[str]:
             errors.append("rag.lexical_candidates and rag.semantic_candidates must be positive")
         if config.rag_rerank_candidates < 0:
             errors.append("rag.rerank_candidates must be zero or positive")
+        if not 0 <= config.rag_rerank_min_boundary_margin <= 1:
+            errors.append("rag.rerank_min_boundary_margin must be between 0 and 1")
+        if config.rag_embedding_min_words < 0:
+            errors.append("rag.embedding_min_words must be zero or positive")
+        if config.rag_embedding_min_alphanumeric_chars < 0:
+            errors.append("rag.embedding_min_alphanumeric_chars must be zero or positive")
         if config.rag_recency_half_life_hours <= 0:
             errors.append("rag.recency_half_life_hours must be positive")
         if (
@@ -523,6 +542,8 @@ def _validate_core_values(config: Any) -> List[str]:
             or config.rag_max_context_messages_high <= 0
         ):
             errors.append("rag.max_context_messages_low/medium/high must all be positive")
+        elif not (config.rag_max_context_messages_low <= config.rag_max_context_messages_medium <= config.rag_max_context_messages_high):
+            errors.append("rag.max_context_messages_low <= medium <= high is required")
     if config.response_timeout <= 0:
         errors.append("response.timeout must be positive")
     if config.max_retries < 0:

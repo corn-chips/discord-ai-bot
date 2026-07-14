@@ -10,6 +10,7 @@ import logging
 import re
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Optional, Tuple
 from enum import Enum
 
@@ -31,6 +32,14 @@ class CommandIntent(Enum):
     IMAGE_GENERATE = "image_generate"
     STATUS = "status"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class RoutingDecision:
+    intent: CommandIntent = CommandIntent.UNKNOWN
+    complexity: str = "low"
+    edit_type: Optional[EditType] = None
+    needs_context: bool = True
 
 
 class EnhancedCommandHandler:
@@ -58,7 +67,7 @@ class EnhancedCommandHandler:
         self.image_processing_service = image_processing_service
         self.error_manager = error_manager
         self.gemini_client = gemini_client
-        self._router_cache: "OrderedDict[Tuple[str, bool], Tuple[float, Tuple[CommandIntent, str, Optional[EditType]]]]" = OrderedDict()
+        self._router_cache: "OrderedDict[Tuple[str, bool], Tuple[float, RoutingDecision]]" = OrderedDict()
         self._router_cache_size = max(1, bot.config.router_cache_size)
         self._router_cache_ttl = max(1, bot.config.router_cache_ttl)
 
@@ -83,7 +92,7 @@ class EnhancedCommandHandler:
 
     def _get_cached_router_result(
         self, cache_key: Tuple[str, bool]
-    ) -> Optional[Tuple[CommandIntent, str, Optional[EditType]]]:
+    ) -> Optional[RoutingDecision]:
         """Return cached router decision if fresh."""
         now = time.monotonic()
         cached = self._router_cache.get(cache_key)
@@ -101,7 +110,7 @@ class EnhancedCommandHandler:
     def _set_cached_router_result(
         self,
         cache_key: Tuple[str, bool],
-        decision: Tuple[CommandIntent, str, Optional[EditType]],
+        decision: RoutingDecision,
     ) -> None:
         """Store router decision in bounded LRU cache."""
         self._router_cache[cache_key] = (time.monotonic(), decision)
@@ -110,7 +119,7 @@ class EnhancedCommandHandler:
         while len(self._router_cache) > self._router_cache_size:
             self._router_cache.popitem(last=False)
     
-    async def _check_intent_and_complexity(self, message_content: str, has_images: bool) -> Tuple[CommandIntent, str, Optional[EditType]]:
+    async def _check_intent_and_complexity(self, message_content: str, has_images: bool) -> RoutingDecision:
         """
         Use Gemini router model to determine user intent and complexity.
         
@@ -143,7 +152,8 @@ Return JSON with this schema:
 {{
   "intent": "image_generate" | "image_edit" | "text",
   "complexity": "low" | "medium" | "high",
-  "edit_type": "object_removal" | "background" | "style" | "color" | "general" | null
+  "edit_type": "object_removal" | "background" | "style" | "color" | "general" | null,
+  "needs_context": true | false
 }}
 
 Intent rules:
@@ -163,6 +173,9 @@ Edit type rules:
 - Set "edit_type" only when intent is "image_edit".
 - For image edits choose one of: "object_removal", "background", "style", "color", "general".
 - For non-image intents return null.
+
+Context rule: needs_context=false only when the request is fully self-contained and
+does not benefit from conversation history. When uncertain, return true.
 """
 
             # Create router model instance for classification.
@@ -171,7 +184,7 @@ Edit type rules:
 
             if not self.gemini_client.client:
                 logger.warning("Gemini client not initialized, skipping router")
-                return CommandIntent.UNKNOWN, "low", None
+                return RoutingDecision()
 
             # Generate response using the new SDK
             response = await asyncio.to_thread(
@@ -197,17 +210,20 @@ Edit type rules:
                     intent_str = result.get("intent", "text").lower()
                     complexity_level = result.get("complexity", "low").lower()
                     edit_type_str = result.get("edit_type")
+                    needs_context = result.get("needs_context")
                     logger.debug(f"Router raw response: intent={intent_str}, complexity={complexity_level}")
                 else:
                     logger.warning(f"Unexpected router response type: {type(result)}, value: {result}")
                     intent_str = "text"
                     complexity_level = "low"
                     edit_type_str = None
+                    needs_context = True
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse router JSON response: {response.text}")
                 intent_str = "text"
                 complexity_level = "low"
                 edit_type_str = None
+                needs_context = True
             
             # Parse the response
             intent = CommandIntent.UNKNOWN
@@ -228,7 +244,9 @@ Edit type rules:
             if intent == CommandIntent.IMAGE_EDIT and has_images and not edit_type:
                 edit_type = EditType.GENERAL_EDIT
 
-            decision = (intent, complexity_level, edit_type)
+            if not isinstance(needs_context, bool):
+                needs_context = True
+            decision = RoutingDecision(intent, complexity_level, edit_type, needs_context)
             self._set_cached_router_result(cache_key, decision)
 
             logger.info(
@@ -243,9 +261,9 @@ Edit type rules:
         except Exception as e:
             logger.error(f"Error in router model: {e}", exc_info=True)
             # On error, default to unknown intent and low complexity (safer/faster fallback)
-            return CommandIntent.UNKNOWN, "low", None
+            return RoutingDecision()
     
-    async def handle_message(self, message: discord.Message) -> Tuple[bool, str, CommandIntent]:
+    async def handle_message(self, message: discord.Message) -> Tuple[bool, RoutingDecision]:
         """
         Handle a Discord message and determine if it contains commands.
         
@@ -269,7 +287,8 @@ Edit type rules:
             )
             
             # Use router model to determine intent and complexity - NO KEYWORD MATCHING
-            intent, complexity_level, edit_type = await self._check_intent_and_complexity(message.content, has_images)
+            decision = await self._check_intent_and_complexity(message.content, has_images)
+            intent, complexity_level, edit_type = decision.intent, decision.complexity, decision.edit_type
             
             logger.info(f"📋 Handler routing: intent={intent.value}, has_images={has_images}, complexity={complexity_level}")
             
@@ -279,7 +298,7 @@ Edit type rules:
                     await message.reply(
                         "Image generation is currently disabled by server configuration."
                     )
-                    return True, complexity_level, intent
+                    return True, decision
 
                 if has_images:
                     # User wants to generate but has images attached - might be confused
@@ -287,17 +306,20 @@ Edit type rules:
                     await self.handle_image_edit_command(message, detected_edit_type=edit_type)
                 else:
                     await self.handle_image_generation_command(message)
-                return True, complexity_level, intent
+                return True, decision
             
             elif intent == CommandIntent.IMAGE_EDIT:
+                if not self.image_processing_service:
+                    await message.reply("Image editing is currently disabled by server configuration.")
+                    return True, decision
                 if has_images:
                     await self.handle_image_edit_command(message, detected_edit_type=edit_type)
                 else:
                     await self._suggest_image_upload(message)
-                return True, complexity_level, intent
+                return True, decision
             
             # UNKNOWN intent - let main bot handle it with the determined complexity
-            return False, complexity_level, intent
+            return False, decision
             
         except Exception as e:
             logger.error(f"Error handling message in enhanced command handler: {e}", exc_info=True)
@@ -305,7 +327,7 @@ Edit type rules:
                 e, "I had trouble processing your command. Please try again!"
             )
             await self.error_manager.send_error_response(message, error_context)
-            return True, "medium", CommandIntent.UNKNOWN  # Default to medium on error
+            return True, RoutingDecision(complexity="medium")
     
 
     async def handle_image_edit_command(self, message: discord.Message, detected_edit_type: Optional[EditType] = None):

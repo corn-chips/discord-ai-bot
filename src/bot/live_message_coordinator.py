@@ -287,6 +287,7 @@ class LiveMessageCoordinator:
                     user_prompt=user_prompt,
                     complexity_level="low",
                     bot_user_id=bot_user.id if bot_user else None,
+                    force_full_context=True,
                 )
                 seen_context_ids = set()
                 live_context = []

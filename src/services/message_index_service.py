@@ -12,6 +12,7 @@ import logging
 import math
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,11 +78,25 @@ class MessageIndexService:
         db_path: str = "data/token_usage.db",
         embedding_model: str = "gemini-embedding-2",
         embedding_dimensions: int = 768,
+        embedding_min_words: int = 2,
+        embedding_min_alphanumeric_chars: int = 12,
+        vector_cache_enabled: bool = True,
     ):
         self.db_path = Path(db_path).expanduser()
         self.embedding_api_model = embedding_model
         self.embedding_dimensions = int(embedding_dimensions)
         self.embedding_model = f"{embedding_model}@{self.embedding_dimensions}"
+        self.embedding_min_words = max(0, int(embedding_min_words))
+        self.embedding_min_alphanumeric_chars = max(0, int(embedding_min_alphanumeric_chars))
+        self.vector_cache_enabled = bool(vector_cache_enabled)
+        self._vector_lock = threading.RLock()
+        self._vector_loaded = False
+        self._vector_count = 0
+        self._vector_capacity = 0
+        self._vector_matrix = np.empty((0, self.embedding_dimensions), dtype=np.float32)
+        self._vector_message_ids = np.empty(0, dtype=np.int64)
+        self._vector_guild_ids = np.empty(0, dtype=np.int64)
+        self._vector_channel_ids = np.empty(0, dtype=np.int64)
         self.max_embedding_attempts = 3
         self.fts_enabled = False
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,6 +218,17 @@ class MessageIndexService:
                     )
                     """
                 )
+                for column_name, definition in (
+                    ("retrieval_mode", "TEXT"),
+                    ("recent_candidates", "INTEGER NOT NULL DEFAULT 0"),
+                    ("lexical_candidates", "INTEGER NOT NULL DEFAULT 0"),
+                    ("semantic_candidates", "INTEGER NOT NULL DEFAULT 0"),
+                    ("query_embedding_used", "INTEGER NOT NULL DEFAULT 0"),
+                    ("reranker_used", "INTEGER NOT NULL DEFAULT 0"),
+                    ("reranker_reason", "TEXT"),
+                    ("selected_count", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    self._ensure_column(conn, table_name="message_retrieval_events", column_name=column_name, column_definition=definition)
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS message_backfill_progress (
@@ -226,6 +252,7 @@ class MessageIndexService:
                 except sqlite3.OperationalError as exc:
                     self.fts_enabled = False
                     logger.warning("SQLite FTS5 is unavailable; lexical RAG search disabled: %s", exc)
+                self._reconcile_embedding_eligibility(conn)
             logger.info("Message RAG index schema ready")
         except Exception as exc:
             logger.error("Failed to initialize message RAG index: %s", exc, exc_info=True)
@@ -374,6 +401,7 @@ class MessageIndexService:
             return False
 
         content_hash = self._hash_text(content_text)
+        embedding_status = "skipped" if self._embedding_is_trivial(content_text, attachment_summary) else "pending"
         created_at_iso = created_at.isoformat()
         indexed_at = self._now_iso()
         try:
@@ -487,10 +515,11 @@ class MessageIndexService:
                     (
                         message_id,
                         self.embedding_model,
-                        "pending" if not is_deleted else "done",
+                        embedding_status if not is_deleted else "skipped",
                         content_hash,
                     ),
                 )
+            self._cache_remove(message_id)
             return True
         except Exception as exc:
             logger.error("Failed to index message %s: %s", message_id, exc, exc_info=True)
@@ -546,6 +575,73 @@ class MessageIndexService:
             raise
         return indexed_count
 
+    def _embedding_is_trivial(self, content_text: str, attachment_summary: str = "") -> bool:
+        if (attachment_summary or "").strip():
+            return False
+        words = re.findall(r"[A-Za-z0-9]+", content_text or "")
+        chars = len(re.findall(r"[A-Za-z0-9]", content_text or ""))
+        return len(words) < self.embedding_min_words and chars < self.embedding_min_alphanumeric_chars
+
+    def _reconcile_embedding_eligibility(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute("SELECT m.message_id,m.content_text,m.attachment_summary,e.embedding_status FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE e.embedding_model=?", (self.embedding_model,)).fetchall()
+        for row in rows:
+            trivial = self._embedding_is_trivial(row["content_text"], row["attachment_summary"])
+            if trivial and row["embedding_status"] != "skipped":
+                conn.execute("UPDATE message_embeddings SET embedding_status='skipped',embedding_vector=NULL,embedded_at=NULL,last_error=NULL,embedding_attempts=0,next_retry_at=NULL WHERE message_id=?", (row["message_id"],))
+            elif not trivial and row["embedding_status"] == "skipped":
+                conn.execute("UPDATE message_embeddings SET embedding_status='pending',embedding_vector=NULL,embedded_at=NULL,last_error=NULL,embedding_attempts=0,next_retry_at=NULL WHERE message_id=?", (row["message_id"],))
+
+    def _ensure_vector_capacity(self, required: int) -> None:
+        if required <= self._vector_capacity:
+            return
+        capacity = max(required, 64 if not self._vector_capacity else self._vector_capacity * 2)
+        matrix = np.empty((capacity, self.embedding_dimensions), dtype=np.float32)
+        ids = np.empty(capacity, dtype=np.int64); guilds = np.empty(capacity, dtype=np.int64); channels = np.empty(capacity, dtype=np.int64)
+        if self._vector_count:
+            matrix[:self._vector_count] = self._vector_matrix[:self._vector_count]
+            ids[:self._vector_count] = self._vector_message_ids[:self._vector_count]
+            guilds[:self._vector_count] = self._vector_guild_ids[:self._vector_count]
+            channels[:self._vector_count] = self._vector_channel_ids[:self._vector_count]
+        self._vector_matrix, self._vector_message_ids = matrix, ids
+        self._vector_guild_ids, self._vector_channel_ids = guilds, channels
+        self._vector_capacity = capacity
+
+    def _cache_remove(self, message_id: int) -> None:
+        if not self.vector_cache_enabled or not self._vector_loaded:
+            return
+        with self._vector_lock:
+            found = np.flatnonzero(self._vector_message_ids[:self._vector_count] == int(message_id))
+            if not len(found): return
+            index, last = int(found[0]), self._vector_count - 1
+            if index != last:
+                self._vector_matrix[index] = self._vector_matrix[last]
+                self._vector_message_ids[index] = self._vector_message_ids[last]
+                self._vector_guild_ids[index] = self._vector_guild_ids[last]
+                self._vector_channel_ids[index] = self._vector_channel_ids[last]
+            self._vector_count -= 1
+
+    def _cache_upsert(self, message_id: int, guild_id: Optional[int], channel_id: int, vector: np.ndarray) -> None:
+        if not self.vector_cache_enabled or not self._vector_loaded or vector.size != self.embedding_dimensions: return
+        with self._vector_lock:
+            self._cache_remove(message_id); self._ensure_vector_capacity(self._vector_count + 1)
+            index = self._vector_count
+            self._vector_matrix[index] = vector; self._vector_message_ids[index] = int(message_id)
+            self._vector_guild_ids[index] = -1 if guild_id is None else int(guild_id); self._vector_channel_ids[index] = int(channel_id)
+            self._vector_count += 1
+
+    def _load_vector_cache(self) -> None:
+        if not self.vector_cache_enabled or self._vector_loaded: return
+        with self._vector_lock:
+            if self._vector_loaded: return
+            with self._connection() as conn:
+                rows = conn.execute("SELECT m.message_id,m.guild_id,m.channel_id,e.embedding_vector FROM message_embeddings e JOIN message_index m ON m.message_id=e.message_id WHERE e.embedding_model=? AND e.embedding_status='done' AND e.embedding_vector IS NOT NULL AND m.hidden=0 AND m.deleted_at IS NULL", (self.embedding_model,)).fetchall()
+            self._ensure_vector_capacity(len(rows))
+            for row in rows:
+                vector = np.frombuffer(row["embedding_vector"], dtype=np.float32)
+                if vector.size != self.embedding_dimensions: continue
+                index = self._vector_count; self._vector_matrix[index] = vector
+                self._vector_message_ids[index] = int(row["message_id"]); self._vector_guild_ids[index] = -1 if row["guild_id"] is None else int(row["guild_id"]); self._vector_channel_ids[index] = int(row["channel_id"]); self._vector_count += 1
+            self._vector_loaded = True
     def get_backfill_progress(self, channel_id: int) -> Optional[dict]:
         """Return the durable resume cursor and completion state for one channel."""
         with self._connection() as conn:
@@ -717,6 +813,15 @@ class MessageIndexService:
                         if has_pins
                         else 0
                     )
+            if self._vector_loaded:
+                if channel_id is None:
+                    with self._vector_lock:
+                        self._vector_count = 0
+                else:
+                    with self._vector_lock:
+                        ids = self._vector_message_ids[:self._vector_count][self._vector_channel_ids[:self._vector_count] == int(channel_id)].copy()
+                    for message_id in ids:
+                        self._cache_remove(int(message_id))
             return {
                 "messages": int(deleted_messages),
                 "pins": int(deleted_pins),
@@ -756,6 +861,13 @@ class MessageIndexService:
                                 """,
                                 (message_id, row["content_text"], row["author_name"], row["attachment_summary"] or ""),
                             )
+            if hidden:
+                self._cache_remove(message_id)
+            elif self._vector_loaded:
+                with self._connection() as conn:
+                    row = conn.execute("SELECT m.guild_id,m.channel_id,e.embedding_vector FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE m.message_id=? AND e.embedding_status='done'", (message_id,)).fetchone()
+                if row and row["embedding_vector"]:
+                    self._cache_upsert(message_id, row["guild_id"], row["channel_id"], np.frombuffer(row["embedding_vector"], dtype=np.float32))
             return True
         except Exception as exc:
             logger.error("Failed to update hidden state for indexed message %s: %s", message_id, exc)
@@ -776,6 +888,7 @@ class MessageIndexService:
                 )
                 if self.fts_enabled:
                     conn.execute("DELETE FROM message_search_fts WHERE rowid = ?", (message_id,))
+            self._cache_remove(message_id)
             return True
         except Exception as exc:
             logger.error("Failed to mark indexed message %s deleted: %s", message_id, exc)
@@ -972,7 +1085,7 @@ class MessageIndexService:
                 return False
             vector_blob = sqlite3.Binary(vector_array.tobytes())
             with self._connection(transaction=True) as conn:
-                conn.execute(
+                cursor = conn.execute(
                     """
                     UPDATE message_embeddings
                     SET embedding_vector = ?,
@@ -986,7 +1099,10 @@ class MessageIndexService:
                     """,
                     (vector_blob, self._now_iso(), message_id, content_hash),
                 )
-            return True
+                row = conn.execute("SELECT guild_id,channel_id FROM message_index WHERE message_id=?", (message_id,)).fetchone()
+            if cursor.rowcount and row:
+                self._cache_upsert(message_id, row["guild_id"], row["channel_id"], vector_array)
+            return bool(cursor.rowcount)
         except Exception as exc:
             logger.error("Failed to store embedding for message %s: %s", message_id, exc)
             return False
@@ -1055,92 +1171,58 @@ class MessageIndexService:
         limit: int,
         exclude_message_ids: Optional[Iterable[int]] = None,
     ) -> list[IndexedMessage]:
-        if not query_embedding:
-            return []
-        params: list = []
-        scope = self._scope_clause(guild_id, channel_id, cross_channel, params)
-        exclude = self._exclude_clause(exclude_message_ids or [], params)
+        if not query_embedding: return []
         try:
             query_vector = np.asarray(query_embedding, dtype=np.float32)
             query_norm = float(np.linalg.norm(query_vector))
-            if query_vector.ndim != 1 or query_vector.size == 0 or query_norm == 0:
-                return []
-
-            top_rows: list[tuple[float, sqlite3.Row]] = []
-            with self._connection() as conn:
-                cursor = conn.execute(
-                    f"""
-                    SELECT m.*, e.embedding_vector, 0.0 AS lexical_score, 0.0 AS semantic_score
-                    FROM message_embeddings e
-                    JOIN message_index m ON m.message_id = e.message_id
-                    WHERE e.embedding_model = ?
-                      AND e.embedding_status = 'done'
-                      AND e.embedding_vector IS NOT NULL
-                      AND {scope}
-                      AND m.hidden = 0
-                      AND m.deleted_at IS NULL
-                      {exclude}
-                    """,
-                    [self.embedding_model, *params],
-                )
-                while True:
-                    rows = cursor.fetchmany(256)
-                    if not rows:
-                        break
-
-                    vectors = []
-                    vector_rows = []
-                    for row in rows:
-                        raw_vector = row["embedding_vector"]
-                        try:
-                            if isinstance(raw_vector, (bytes, bytearray, memoryview)):
-                                vector = np.frombuffer(raw_vector, dtype=np.float32)
-                            else:
-                                vector = np.asarray(
-                                    json.loads(raw_vector),
-                                    dtype=np.float32,
-                                )
-                        except (TypeError, ValueError, json.JSONDecodeError):
-                            continue
-                        if vector.size != query_vector.size:
-                            continue
-                        vectors.append(vector)
-                        vector_rows.append(row)
-
-                    if not vectors:
-                        continue
-                    matrix = np.vstack(vectors)
-                    norms = np.linalg.norm(matrix, axis=1)
-                    valid = norms > 0
-                    scores = np.zeros(len(vectors), dtype=np.float32)
-                    scores[valid] = (
-                        matrix[valid] @ query_vector
-                    ) / (norms[valid] * query_norm)
-                    top_rows.extend(
-                        (float(score), row)
-                        for score, row in zip(scores, vector_rows)
-                        if np.isfinite(score) and score > 0
-                    )
-                    if len(top_rows) > max(256, limit * 8):
-                        top_rows = sorted(
-                            top_rows,
-                            key=lambda item: item[0],
-                            reverse=True,
-                        )[: max(limit * 2, limit)]
-
+            if query_vector.ndim != 1 or query_vector.size == 0 or query_norm == 0: return []
+            if not self.vector_cache_enabled or query_vector.size != self.embedding_dimensions:
+                return self._search_semantic_sql_compat(query_vector, guild_id=guild_id, channel_id=channel_id, cross_channel=cross_channel, limit=limit, exclude_message_ids=exclude_message_ids)
+            self._load_vector_cache()
+            with self._vector_lock:
+                count = self._vector_count
+                if not count: return []
+                mask = self._vector_channel_ids[:count] == int(channel_id)
+                if cross_channel and guild_id is not None:
+                    mask = self._vector_guild_ids[:count] == int(guild_id)
+                excluded = set(int(value) for value in (exclude_message_ids or []))
+                if excluded: mask &= ~np.isin(self._vector_message_ids[:count], list(excluded))
+                positions = np.flatnonzero(mask)
+                if not len(positions): return []
+                matrix = self._vector_matrix[positions]
+                norms = np.linalg.norm(matrix, axis=1)
+                scores = np.zeros(len(positions), dtype=np.float32)
+                valid = norms > 0
+                scores[valid] = (matrix[valid] @ query_vector) / (norms[valid] * query_norm)
+                order = np.argsort(-scores, kind="stable")[:limit]
+                ranked = [(int(self._vector_message_ids[positions[i]]), float(scores[i])) for i in order if np.isfinite(scores[i]) and scores[i] > 0]
+            messages = {item.message_id: item for item in self.get_messages_by_ids(message_id for message_id, _score in ranked)}
             results = []
-            for score, row in sorted(
-                top_rows,
-                key=lambda item: item[0],
-                reverse=True,
-            )[:limit]:
-                message = self._row_to_indexed(row)
-                message.semantic_score = score
-                results.append(message)
+            for message_id, score in ranked:
+                message = messages.get(message_id)
+                if message is not None:
+                    message.semantic_score = score; results.append(message)
             return results
         except Exception as exc:
             logger.error("Semantic RAG search failed: %s", exc, exc_info=True)
             return []
+
+    def _search_semantic_sql_compat(self, query_vector: np.ndarray, *, guild_id: Optional[int], channel_id: int, cross_channel: bool, limit: int, exclude_message_ids: Optional[Iterable[int]]) -> list[IndexedMessage]:
+        params: list = []
+        scope = self._scope_clause(guild_id, channel_id, cross_channel, params)
+        exclude = self._exclude_clause(exclude_message_ids or [], params)
+        with self._connection() as conn:
+            rows = conn.execute(f"SELECT m.*,e.embedding_vector,0.0 AS lexical_score,0.0 AS semantic_score FROM message_embeddings e JOIN message_index m ON m.message_id=e.message_id WHERE e.embedding_model=? AND e.embedding_status='done' AND e.embedding_vector IS NOT NULL AND {scope} AND m.hidden=0 AND m.deleted_at IS NULL {exclude}", [self.embedding_model, *params]).fetchall()
+        scored = []
+        for row in rows:
+            vector = np.frombuffer(row["embedding_vector"], dtype=np.float32)
+            if vector.size != query_vector.size: continue
+            score = self._cosine_similarity(vector.tolist(), query_vector.tolist())
+            if score > 0: scored.append((score, row))
+        results = []
+        for score, row in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]:
+            message = self._row_to_indexed(row); message.semantic_score = score; results.append(message)
+        return results
 
     async def search_semantic_async(self, query_embedding: list[float], **kwargs) -> list[IndexedMessage]:
         return await asyncio.to_thread(self.search_semantic, query_embedding, **kwargs)
@@ -1180,6 +1262,13 @@ class MessageIndexService:
         selected_message_ids: list[int],
         fallback_reason: Optional[str],
         latency_ms: int,
+        retrieval_mode: str = "full",
+        recent_candidates: int = 0,
+        lexical_candidates: int = 0,
+        semantic_candidates: int = 0,
+        query_embedding_used: bool = False,
+        reranker_used: bool = False,
+        reranker_reason: Optional[str] = None,
     ) -> None:
         try:
             with self._connection(transaction=True) as conn:
@@ -1187,9 +1276,12 @@ class MessageIndexService:
                     """
                     INSERT INTO message_retrieval_events (
                         created_at, guild_id, channel_id, user_id, query_length,
-                        selected_message_ids, fallback_reason, latency_ms
+                        selected_message_ids, fallback_reason, latency_ms,
+                        retrieval_mode, recent_candidates, lexical_candidates,
+                        semantic_candidates, query_embedding_used, reranker_used,
+                        reranker_reason, selected_count
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         self._now_iso(),
@@ -1200,6 +1292,14 @@ class MessageIndexService:
                         json.dumps(selected_message_ids),
                         fallback_reason,
                         latency_ms,
+                        retrieval_mode,
+                        recent_candidates,
+                        lexical_candidates,
+                        semantic_candidates,
+                        1 if query_embedding_used else 0,
+                        1 if reranker_used else 0,
+                        reranker_reason,
+                        len(selected_message_ids),
                     ),
                 )
         except Exception as exc:
@@ -1242,11 +1342,16 @@ class MessageIndexService:
                 embedded = count_embeddings("done")
                 pending = count_embeddings("pending")
                 failed = count_embeddings("failed")
+                skipped = count_embeddings("skipped")
+            cached_count = self._vector_count if self._vector_loaded else 0
             return {
                 "messages": total,
                 "embedded": embedded,
                 "pending_embeddings": pending,
                 "failed_embeddings": failed,
+                "skipped_embeddings": skipped,
+                "cached_vectors": cached_count,
+                "vector_cache_bytes": cached_count * self.embedding_dimensions * 4,
                 "fts_enabled": self.fts_enabled,
                 "embedding_model": self.embedding_api_model,
                 "embedding_dimensions": self.embedding_dimensions,
@@ -1259,6 +1364,9 @@ class MessageIndexService:
                 "embedded": 0,
                 "pending_embeddings": 0,
                 "failed_embeddings": 0,
+                "skipped_embeddings": 0,
+                "cached_vectors": self._vector_count if self._vector_loaded else 0,
+                "vector_cache_bytes": (self._vector_count if self._vector_loaded else 0) * self.embedding_dimensions * 4,
                 "fts_enabled": self.fts_enabled,
                 "embedding_model": self.embedding_api_model,
                 "embedding_dimensions": self.embedding_dimensions,

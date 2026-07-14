@@ -40,13 +40,18 @@ rag:
   cross_channel_enabled: false          # Keep retrieval scoped to current channel unless explicitly enabled
   index_bot_responses: true             # Store this bot's own replies for future recall
   backfill_limit: 0                     # Per-channel startup/manual scan limit; 0 scans all history from the saved cursor
-  lexical_candidates: 40                # FTS5/BM25 candidate count
-  semantic_candidates: 40               # Embedding candidate count
-  rerank_candidates: 30                 # Top fused candidates offered to router-model reranker
+  gating_enabled: true                   # Self-contained requests use pins only
+  lexical_candidates: 30                # FTS5/BM25 candidate count
+  semantic_candidates: 24               # Embedding candidate count
+  rerank_candidates: 12                 # Maximum ambiguous candidates offered to reranker
+  rerank_min_boundary_margin: 0.15       # Relative boundary gap below which reranking runs
   recency_half_life_hours: 72           # Recency decay half-life for fusion scoring
   max_context_messages_low: 4
-  max_context_messages_medium: 8
-  max_context_messages_high: 12
+  max_context_messages_medium: 6
+  max_context_messages_high: 8
+  embedding_min_words: 2                 # Trivial messages remain in FTS but skip embeddings
+  embedding_min_alphanumeric_chars: 12
+  vector_cache_enabled: true             # Cache completed float32 vectors in process RAM
 
 # --- Response Settings ---
 response:

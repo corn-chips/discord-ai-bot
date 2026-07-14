@@ -133,6 +133,20 @@ The registered slash commands include:
 - Configuration: `/config model`, `/config thinking`, `/config deepsearch`, `/config image-generation`, `/config debug`, and `/config info`
 - Image tools: `/edit-image` and `/image-queue` when image processing is configured
 - Local memory: `/rag status`, `/rag backfill`, `/rag delete`, `/pin`, `/pins`, `/hide`, and `/unhide`. On startup, the bot works through every guild message channel where it can view and read history, including active threads. RAG messages, pending embeddings, pinned memories, and per-channel resume cursors persist in the configured local SQLite database, so an interrupted backlog continues after the last scanned message. `/rag backfill` can start the resumable job for the current channel manually, while `/rag delete` clears either the current channel's RAG data or all channels' RAG data.
+
+Hybrid RAG uses a cost-aware router gate. Self-contained requests can skip recent,
+FTS, semantic, and reranker work while still receiving pinned memories; direct
+Discord replies, live mode, and router failures always use full retrieval. Very
+short messages remain stored and FTS-searchable but are marked as skipped for
+embedding according to `embedding_min_words` and
+`embedding_min_alphanumeric_chars`. The reranker runs only when the local fused
+ranking has an ambiguous selection boundary.
+
+Completed 768-dimensional embeddings are lazily cached as float32 vectors in
+process memory. Vector payload RAM is approximately 3 KiB per cached message
+(about 29 MiB per 10,000 messages), plus small NumPy metadata arrays. `/rag
+status` reports skipped embeddings, cached vector count, and estimated vector
+bytes. Set `vector_cache_enabled: false` to disable the cache.
 - Personalization: `/personality`, `/personality-info`, and the `/preferences` subcommands
 - Reports and administration: `/report`, `/report-status`, `/dev`, and `/clear-cache`
 

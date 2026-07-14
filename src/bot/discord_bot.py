@@ -357,6 +357,9 @@ class DiscordBot(discord.Client):
             config.token_db_path,
             embedding_model=config.rag_embedding_model,
             embedding_dimensions=config.rag_embedding_dimensions,
+            embedding_min_words=config.rag_embedding_min_words,
+            embedding_min_alphanumeric_chars=config.rag_embedding_min_alphanumeric_chars,
+            vector_cache_enabled=config.rag_vector_cache_enabled,
         )
         self._rag_event_coordinator = _get_or_create_rag_event_coordinator(self)
         self.context_pack_builder = ContextPackBuilder()
@@ -402,18 +405,13 @@ class DiscordBot(discord.Client):
         
         # Initialize enhanced command handler
         self.enhanced_command_handler = None
-        if self.image_processing_service:
-            try:
-                self.enhanced_command_handler = EnhancedCommandHandler(
-                    self,
-                    self.image_processing_service,
-                    self.error_manager,
-                    self.gemini_client,
-                )
-                logger.info("✅ Enhanced command handler initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize enhanced command handler: {e}")
-                logger.warning("Enhanced command features will be disabled")
+        try:
+            self.enhanced_command_handler = EnhancedCommandHandler(
+                self, self.image_processing_service, self.error_manager, self.gemini_client,
+            )
+            logger.info("✅ Request router initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize request router: {e}")
         
         self.start_time = datetime.now()
         
@@ -802,12 +800,15 @@ class DiscordBot(discord.Client):
 
             complexity_level = "low"
             routed_intent = "unknown"
+            needs_context = True
             model_override = None
 
             # Try enhanced command handler first if available
             if self.enhanced_command_handler:
-                handled, complexity_level, intent = await self.enhanced_command_handler.handle_message(message)
-                routed_intent = intent.value
+                handled, routing = await self.enhanced_command_handler.handle_message(message)
+                complexity_level = routing.complexity
+                routed_intent = routing.intent.value
+                needs_context = routing.needs_context
                 if handled:
                     context_logger.info("Message handled by enhanced command handler")
                     return
@@ -842,6 +843,7 @@ class DiscordBot(discord.Client):
                 user_prompt,
                 complexity_level=complexity_level,
                 routed_intent=routed_intent,
+                needs_context=needs_context,
                 model_override=model_override,
             )
             
@@ -881,6 +883,7 @@ class DiscordBot(discord.Client):
         user_prompt: str,
         complexity_level: str = "low",
         routed_intent: str = "unknown",
+        needs_context: bool = True,
         *,
         model_override: Optional[str] = None,
         prompt_mode_override: Optional[str] = None,
@@ -909,6 +912,8 @@ class DiscordBot(discord.Client):
                         user_prompt=user_prompt,
                         complexity_level=complexity_level,
                         bot_user_id=self.user.id if self.user else None,
+                        needs_context=needs_context,
+                        force_full_context=bool(message.reference) or routed_intent == "live_mode",
                     )
                     await self._generate_and_send_response(
                         message,

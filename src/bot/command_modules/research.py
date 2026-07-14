@@ -165,6 +165,9 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
         embed.add_field(name="Embedded", value=f"{status['embedded']:,}", inline=True)
         embed.add_field(name="Pending", value=f"{status['pending_embeddings']:,}", inline=True)
         embed.add_field(name="Failed Embeddings", value=f"{status['failed_embeddings']:,}", inline=True)
+        embed.add_field(name="Skipped (Trivial)", value=f"{status.get('skipped_embeddings', 0):,}", inline=True)
+        embed.add_field(name="Cached Vectors", value=f"{status.get('cached_vectors', 0):,}", inline=True)
+        embed.add_field(name="Cache RAM", value=f"{status.get('vector_cache_bytes', 0) / (1024 * 1024):.1f} MiB", inline=True)
 
         retriever = getattr(bot, "hybrid_context_retriever", None)
         pregeneration = (

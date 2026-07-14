@@ -494,6 +494,8 @@ class HybridContextRetriever:
         user_prompt: str,
         complexity_level: str,
         bot_user_id: Optional[int] = None,
+        needs_context: bool = True,
+        force_full_context: bool = False,
     ) -> list[MessageContext]:
         started = time.perf_counter()
         guild_id = message.guild.id if message.guild else None
@@ -501,8 +503,31 @@ class HybridContextRetriever:
         max_messages = self._max_messages_for_complexity(complexity_level)
         exclude_ids = {message.id}
         fallback_reason = None
+        reranker_used = False
+        reranker_reason = "not_evaluated"
+        recent = lexical = semantic = []
+        query_embedding = []
 
         try:
+            pins = await self._load_pins(channel_id)
+            pinned_context = self.pack_builder.build_pinned_context(pins, channel_id=channel_id)
+            if getattr(self.config, "rag_gating_enabled", True) and not needs_context and not force_full_context:
+                packed = self.pack_builder.build_context_pack(
+                    pinned_context=pinned_context,
+                    retrieved_context=[],
+                    max_messages=max_messages,
+                )
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                await self.message_index.record_retrieval_event_async(
+                    guild_id=guild_id, channel_id=channel_id,
+                    user_id=message.author.id if message.author else None,
+                    query_length=len(user_prompt or ""),
+                    selected_message_ids=[ctx.message_id for ctx in packed],
+                    fallback_reason=None, latency_ms=latency_ms,
+                    retrieval_mode="pins_only", reranker_reason="gated_no_context",
+                )
+                return packed
+
             reply_context = await self._load_reply_anchor_context(message)
             reply_ids = {ctx.message_id for ctx in reply_context}
             exclude_ids.update(reply_ids)
@@ -554,12 +579,21 @@ class HybridContextRetriever:
                 for candidate in rerank_pool
             ]
 
-            if (
-                self.config.rag_rerank_candidates > 0
-                and len(retrieved_context) > max_messages
-                and getattr(self.gemini_client, "client", None)
-            ):
+            if len(fused) <= max_messages:
+                reranker_reason = "within_context_limit"
+            elif self.config.rag_rerank_candidates <= 0:
+                reranker_reason = "disabled"
+            elif not getattr(self.gemini_client, "client", None):
+                reranker_reason = "client_unavailable"
+            else:
+                boundary = fused[max_messages - 1].score
+                excluded = fused[max_messages].score
+                boundary_gap = max(0.0, boundary - excluded) / max(abs(boundary), 1e-9)
+                margin = getattr(self.config, "rag_rerank_min_boundary_margin", 0.15)
+                reranker_reason = "ambiguous_boundary" if boundary_gap < margin else "stable_boundary"
+            if reranker_reason == "ambiguous_boundary":
                 try:
+                    reranker_used = True
                     reranked = await self.gemini_client.select_relevant_context(
                         user_prompt,
                         retrieved_context[: self.config.rag_rerank_candidates],
@@ -570,6 +604,7 @@ class HybridContextRetriever:
                         retrieved_context = reranked
                 except Exception as exc:
                     fallback_reason = "rerank_failed"
+                    reranker_reason = "rerank_failed"
                     logger.warning("RAG reranker failed; using fused ranking: %s", exc)
 
             if reply_context:
@@ -578,8 +613,6 @@ class HybridContextRetriever:
                     ctx for ctx in retrieved_context if ctx.message_id not in existing or ctx.message_id not in reply_ids
                 ]
 
-            pins = await self._load_pins(channel_id)
-            pinned_context = self.pack_builder.build_pinned_context(pins, channel_id=channel_id)
             packed = self.pack_builder.build_context_pack(
                 pinned_context=pinned_context,
                 retrieved_context=retrieved_context,
@@ -595,6 +628,10 @@ class HybridContextRetriever:
                 selected_message_ids=[ctx.message_id for ctx in packed],
                 fallback_reason=fallback_reason,
                 latency_ms=latency_ms,
+                retrieval_mode="full",
+                recent_candidates=len(recent), lexical_candidates=len(lexical),
+                semantic_candidates=len(semantic), query_embedding_used=bool(query_embedding),
+                reranker_used=reranker_used, reranker_reason=reranker_reason,
             )
             logger.info(
                 "Hybrid RAG selected %s context item(s): recent=%s lexical=%s semantic=%s pins=%s latency=%sms",
@@ -618,5 +655,9 @@ class HybridContextRetriever:
                 selected_message_ids=[],
                 fallback_reason=type(exc).__name__,
                 latency_ms=latency_ms,
+                retrieval_mode="failed", recent_candidates=len(recent),
+                lexical_candidates=len(lexical), semantic_candidates=len(semantic),
+                query_embedding_used=bool(query_embedding), reranker_used=reranker_used,
+                reranker_reason=reranker_reason,
             )
             raise

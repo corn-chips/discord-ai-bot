@@ -58,13 +58,18 @@ class BotConfig:
     rag_cross_channel_enabled: bool = False
     rag_index_bot_responses: bool = True
     rag_backfill_limit: int = 0
-    rag_lexical_candidates: int = 40
-    rag_semantic_candidates: int = 40
-    rag_rerank_candidates: int = 30
+    rag_gating_enabled: bool = True
+    rag_lexical_candidates: int = 30
+    rag_semantic_candidates: int = 24
+    rag_rerank_candidates: int = 12
+    rag_rerank_min_boundary_margin: float = 0.15
     rag_recency_half_life_hours: int = 72
     rag_max_context_messages_low: int = 4
-    rag_max_context_messages_medium: int = 8
-    rag_max_context_messages_high: int = 12
+    rag_max_context_messages_medium: int = 6
+    rag_max_context_messages_high: int = 8
+    rag_embedding_min_words: int = 2
+    rag_embedding_min_alphanumeric_chars: int = 12
+    rag_vector_cache_enabled: bool = True
 
     # === Response ===
     response_timeout: int = 30

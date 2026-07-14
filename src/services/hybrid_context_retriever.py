@@ -356,6 +356,59 @@ class HybridContextRetriever:
             else None
         )
 
+    async def cancel_background_work(
+        self,
+        *,
+        channel_id: Optional[int] = None,
+    ) -> None:
+        """Stop jobs that could repopulate RAG data while it is being deleted."""
+        tasks = set()
+        if self._all_channels_task is not None and not self._all_channels_task.done():
+            tasks.add(self._all_channels_task)
+
+        if channel_id is None:
+            tasks.update(
+                task
+                for task in (
+                    *self._embedding_tasks.values(),
+                    *self._pregeneration_tasks.values(),
+                )
+                if not task.done()
+            )
+        else:
+            channel_id = int(channel_id)
+            for task in (
+                self._embedding_tasks.get(channel_id),
+                self._pregeneration_tasks.get(channel_id),
+            ):
+                if task is not None and not task.done():
+                    tasks.add(task)
+
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        if channel_id is None:
+            self._embedding_tasks.clear()
+            self._pregeneration_tasks.clear()
+            for status in self._pregeneration_status.values():
+                if status.get("phase") in {"scanning", "embedding"}:
+                    status["phase"] = "cancelled"
+        else:
+            self._embedding_tasks.pop(channel_id, None)
+            self._pregeneration_tasks.pop(channel_id, None)
+            status = self._pregeneration_status.get(channel_id)
+            if status and status.get("phase") in {"scanning", "embedding"}:
+                status["phase"] = "cancelled"
+
+        self._all_channels_task = None
+        if (
+            self._all_channels_status
+            and self._all_channels_status.get("phase") == "running"
+        ):
+            self._all_channels_status["phase"] = "cancelled"
+
     async def close(self) -> None:
         """Cancel background indexing and embedding jobs during bot shutdown."""
         self._closed = True

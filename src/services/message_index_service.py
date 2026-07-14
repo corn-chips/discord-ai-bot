@@ -638,6 +638,97 @@ class MessageIndexService:
             guild_id=guild_id,
         )
 
+    def delete_rag_data(self, *, channel_id: Optional[int] = None) -> dict:
+        """Delete RAG-owned state globally or for one channel.
+
+        The database is shared with other bot services, so this deliberately
+        clears rows from only the message RAG tables.
+        """
+        try:
+            with self._connection(transaction=True) as conn:
+                has_pins = conn.execute(
+                    """
+                    SELECT 1
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'pinned_messages'
+                    """
+                ).fetchone() is not None
+                if channel_id is None:
+                    deleted_messages = conn.execute(
+                        "SELECT COUNT(*) FROM message_index"
+                    ).fetchone()[0]
+                    if self.fts_enabled:
+                        conn.execute("DELETE FROM message_search_fts")
+                    conn.execute("DELETE FROM message_embeddings")
+                    conn.execute("DELETE FROM message_index")
+                    conn.execute("DELETE FROM message_retrieval_events")
+                    conn.execute("DELETE FROM message_backfill_progress")
+                    deleted_pins = (
+                        conn.execute("DELETE FROM pinned_messages").rowcount
+                        if has_pins
+                        else 0
+                    )
+                else:
+                    channel_id = int(channel_id)
+                    deleted_messages = conn.execute(
+                        "SELECT COUNT(*) FROM message_index WHERE channel_id = ?",
+                        (channel_id,),
+                    ).fetchone()[0]
+                    if self.fts_enabled:
+                        conn.execute(
+                            """
+                            DELETE FROM message_search_fts
+                            WHERE rowid IN (
+                                SELECT message_id
+                                FROM message_index
+                                WHERE channel_id = ?
+                            )
+                            """,
+                            (channel_id,),
+                        )
+                    conn.execute(
+                        """
+                        DELETE FROM message_embeddings
+                        WHERE message_id IN (
+                            SELECT message_id
+                            FROM message_index
+                            WHERE channel_id = ?
+                        )
+                        """,
+                        (channel_id,),
+                    )
+                    conn.execute(
+                        "DELETE FROM message_index WHERE channel_id = ?",
+                        (channel_id,),
+                    )
+                    conn.execute(
+                        "DELETE FROM message_retrieval_events WHERE channel_id = ?",
+                        (channel_id,),
+                    )
+                    conn.execute(
+                        "DELETE FROM message_backfill_progress WHERE channel_id = ?",
+                        (channel_id,),
+                    )
+                    deleted_pins = (
+                        conn.execute(
+                            "DELETE FROM pinned_messages WHERE channel_id = ?",
+                            (channel_id,),
+                        ).rowcount
+                        if has_pins
+                        else 0
+                    )
+            return {
+                "messages": int(deleted_messages),
+                "pins": int(deleted_pins),
+            }
+        except Exception as exc:
+            scope = "all channels" if channel_id is None else f"channel {channel_id}"
+            logger.error("Failed to delete RAG data for %s: %s", scope, exc, exc_info=True)
+            raise
+
+    async def delete_rag_data_async(self, *, channel_id: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(self.delete_rag_data, channel_id=channel_id)
+
     def mark_hidden(self, message_id: int, hidden: bool = True) -> bool:
         try:
             with self._connection(transaction=True) as conn:

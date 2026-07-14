@@ -132,7 +132,7 @@ The registered slash commands include:
 - General: `/ping`, `/features`, `/summarize`, `/deepresearch`, `/stats`, `/token-leaderboard`, `/api-usage`, and `/usage-report`
 - Configuration: `/config model`, `/config thinking`, `/config deepsearch`, `/config image-generation`, `/config debug`, and `/config info`
 - Image tools: `/edit-image` and `/image-queue` when image processing is configured
-- Local memory: `/rag status`, `/rag backfill`, `/pin`, `/pins`, `/hide`, and `/unhide`. On startup, the bot works through every guild message channel where it can view and read history, including active threads. RAG messages, pending embeddings, and per-channel resume cursors persist in the configured local SQLite database, so an interrupted backlog continues after the last scanned message. `/rag backfill` can also start the resumable job for the current channel manually.
+- Local memory: `/rag status`, `/rag backfill`, `/rag delete`, `/pin`, `/pins`, `/hide`, and `/unhide`. On startup, the bot works through every guild message channel where it can view and read history, including active threads. RAG messages, pending embeddings, pinned memories, and per-channel resume cursors persist in the configured local SQLite database, so an interrupted backlog continues after the last scanned message. `/rag backfill` can start the resumable job for the current channel manually, while `/rag delete` clears either the current channel's RAG data or all channels' RAG data.
 - Personalization: `/personality`, `/personality-info`, and the `/preferences` subcommands
 - Reports and administration: `/report`, `/report-status`, `/dev`, and `/clear-cache`
 

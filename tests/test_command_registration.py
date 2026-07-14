@@ -45,6 +45,7 @@ EXPECTED_SIGNATURE = [
     ("rag", "Manage local message retrieval memory", "GROUP"),
     ("rag status", "Show local message RAG index status", "rag_status"),
     ("rag backfill", "Pre-generate local RAG data from channel history", "rag_backfill"),
+    ("rag delete", "Delete stored message RAG data", "rag_delete"),
     ("summarize", "Summarize the current conversation", "summarize"),
     ("personality", "Set the bot's personality/tone for this channel", "personality"),
     ("personality-info", "Show the current personality setting for this channel", "personality_info"),
@@ -143,7 +144,7 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self._flatten_signature(bot), EXPECTED_SIGNATURE)
         self.assertEqual(len(bot.tree.get_commands()), 22)
-        self.assertEqual(len(EXPECTED_SIGNATURE), 34)
+        self.assertEqual(len(EXPECTED_SIGNATURE), 35)
 
         report = self._command(bot, "report")
         self.assertEqual(
@@ -162,11 +163,15 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
             self._choices(self._command(bot, "preferences language"), "language"),
             [("English", "english"), ("Auto", "auto")],
         )
+        self.assertEqual(
+            self._choices(self._command(bot, "rag delete"), "scope"),
+            [("Current channel", "channel"), ("All channels", "all")],
+        )
 
         clear_cache = self._command(bot, "clear-cache")
         self.assertTrue(clear_cache.default_permissions.administrator)
 
-        for path in ("rag status", "rag backfill"):
+        for path in ("rag status", "rag backfill", "rag delete"):
             command = self._command(bot, path)
             self.assertEqual(len(command.checks), 1)
             permission_values = [
@@ -184,6 +189,54 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(hasattr(bot, "_pin_service"))
         self.assertTrue(hasattr(bot, "_message_visibility_service"))
+
+    async def test_rag_delete_scopes_deletion_and_stops_background_work(self):
+        bot = await self._register()
+        bot.message_index_service = SimpleNamespace(
+            delete_rag_data_async=AsyncMock(
+                return_value={"messages": 4, "pins": 2}
+            )
+        )
+        bot.hybrid_context_retriever = SimpleNamespace(
+            cancel_background_work=AsyncMock()
+        )
+        interaction = SimpleNamespace(
+            channel_id=20,
+            response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        command = self._command(bot, "rag delete")
+        await command.callback(
+            interaction,
+            app_commands.Choice(name="Current channel", value="channel"),
+        )
+
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+        bot.hybrid_context_retriever.cancel_background_work.assert_awaited_once_with(
+            channel_id=20
+        )
+        bot.message_index_service.delete_rag_data_async.assert_awaited_once_with(
+            channel_id=20
+        )
+        self.assertIn(
+            "Deleted 4 indexed RAG message(s) and 2 pinned memory item(s) for this channel",
+            interaction.followup.send.await_args.args[0],
+        )
+
+        bot.hybrid_context_retriever.cancel_background_work.reset_mock()
+        bot.message_index_service.delete_rag_data_async.reset_mock()
+        await command.callback(
+            interaction,
+            app_commands.Choice(name="All channels", value="all"),
+        )
+
+        bot.hybrid_context_retriever.cancel_background_work.assert_awaited_once_with(
+            channel_id=None
+        )
+        bot.message_index_service.delete_rag_data_async.assert_awaited_once_with(
+            channel_id=None
+        )
 
     async def test_image_commands_keep_conditional_registration_and_metadata(self):
         bot = await self._register(image_processing_service=object())

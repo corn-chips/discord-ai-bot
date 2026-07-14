@@ -238,6 +238,56 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
             ephemeral=True,
         )
 
+    @rag_group.command(name="delete", description="Delete stored message RAG data")
+    @app_commands.describe(scope="Choose whether to delete this channel or every channel")
+    @app_commands.choices(scope=[
+        app_commands.Choice(name="Current channel", value="channel"),
+        app_commands.Choice(name="All channels", value="all"),
+    ])
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def rag_delete(
+        interaction: discord.Interaction,
+        scope: app_commands.Choice[str],
+    ):
+        index_service = getattr(bot, "message_index_service", None)
+        if not index_service:
+            await interaction.response.send_message(
+                "Message RAG index is not available.",
+                ephemeral=True,
+            )
+            return
+        if scope.value == "channel" and interaction.channel_id is None:
+            await interaction.response.send_message(
+                "This command must be run in a channel.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        channel_id = interaction.channel_id if scope.value == "channel" else None
+        retriever = getattr(bot, "hybrid_context_retriever", None)
+        try:
+            if retriever:
+                await retriever.cancel_background_work(channel_id=channel_id)
+            deleted = await index_service.delete_rag_data_async(
+                channel_id=channel_id,
+            )
+        except Exception as exc:
+            logger.error("RAG deletion failed: %s", exc, exc_info=True)
+            await interaction.followup.send(
+                "Failed to delete the stored RAG data. Check the bot logs for details.",
+                ephemeral=True,
+            )
+            return
+
+        deleted_scope = "this channel" if channel_id is not None else "all channels"
+        await interaction.followup.send(
+            f"Deleted {deleted['messages']:,} indexed RAG message(s) and "
+            f"{deleted['pins']:,} pinned memory item(s) for {deleted_scope}. "
+            "New messages can be indexed again automatically.",
+            ephemeral=True,
+        )
+
 
     return rag_group
 

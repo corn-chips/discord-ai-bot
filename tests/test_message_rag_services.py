@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock
 from src.services.context_pack_builder import ContextPackBuilder
 from src.services.hybrid_context_retriever import HybridContextRetriever
 from src.services.message_index_service import MessageIndexService
+from src.services.pin_service import PinService
 from src.models.data_models import MessageContext
 
 
@@ -284,6 +286,88 @@ class MessageIndexServiceTest(unittest.TestCase):
 
         self.assertEqual([message_id for message_id, _text, _hash in pending], [384])
 
+    def test_delete_rag_data_can_be_scoped_to_channel_or_all_channels(self):
+        pins = PinService(self.db_path)
+        self._upsert(391, "Delete channel twenty memory")
+        self.service.upsert_message(
+            message_id=392,
+            guild_id=10,
+            channel_id=21,
+            author_id=422,
+            author_name="Other channel user",
+            is_bot=False,
+            reply_to_message_id=None,
+            created_at=self.now,
+            content_text="Keep channel twenty one memory",
+        )
+        self.service.record_retrieval_event(
+            guild_id=10,
+            channel_id=20,
+            user_id=30,
+            query_length=5,
+            selected_message_ids=[391],
+            fallback_reason=None,
+            latency_ms=1,
+        )
+        self.service.record_retrieval_event(
+            guild_id=10,
+            channel_id=21,
+            user_id=31,
+            query_length=5,
+            selected_message_ids=[392],
+            fallback_reason=None,
+            latency_ms=1,
+        )
+        self.service.advance_backfill_progress(
+            channel_id=20,
+            guild_id=10,
+            last_message_id=391,
+        )
+        self.service.advance_backfill_progress(
+            channel_id=21,
+            guild_id=10,
+            last_message_id=392,
+        )
+        pins.add_pin(20, "Delete channel twenty pin", "Ada", "Grace")
+        pins.add_pin(21, "Keep channel twenty one pin", "Lin", "Margaret")
+        with self.service._connection(transaction=True) as conn:
+            conn.execute("CREATE TABLE unrelated_data (value TEXT)")
+            conn.execute("INSERT INTO unrelated_data (value) VALUES ('preserved')")
+
+        deleted = self.service.delete_rag_data(channel_id=20)
+
+        self.assertEqual(deleted, {"messages": 1, "pins": 1})
+        self.assertEqual(self.service.get_status(channel_id=20)["messages"], 0)
+        self.assertEqual(self.service.get_status(channel_id=21)["messages"], 1)
+        self.assertIsNone(self.service.get_backfill_progress(20))
+        self.assertIsNotNone(self.service.get_backfill_progress(21))
+        self.assertEqual(pins.get_pins(20), [])
+        self.assertEqual(len(pins.get_pins(21)), 1)
+        with self.service._connection() as conn:
+            event_channels = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT channel_id FROM message_retrieval_events ORDER BY channel_id"
+                ).fetchall()
+            ]
+            unrelated = conn.execute("SELECT value FROM unrelated_data").fetchone()[0]
+        self.assertEqual(event_channels, [21])
+        self.assertEqual(unrelated, "preserved")
+
+        deleted = self.service.delete_rag_data()
+
+        self.assertEqual(deleted, {"messages": 1, "pins": 1})
+        self.assertEqual(self.service.get_status()["messages"], 0)
+        self.assertIsNone(self.service.get_backfill_progress(21))
+        self.assertEqual(pins.get_pins(21), [])
+        with self.service._connection() as conn:
+            remaining_events = conn.execute(
+                "SELECT COUNT(*) FROM message_retrieval_events"
+            ).fetchone()[0]
+            unrelated = conn.execute("SELECT value FROM unrelated_data").fetchone()[0]
+        self.assertEqual(remaining_events, 0)
+        self.assertEqual(unrelated, "preserved")
+
 
 class MessageBackfillTest(unittest.IsolatedAsyncioTestCase):
     async def test_none_limit_requests_complete_history_in_oldest_first_order(self):
@@ -401,6 +485,30 @@ class RagPregenerationTest(unittest.IsolatedAsyncioTestCase):
             pack_builder=object(),
         )
         return retriever, gemini_client
+
+    async def test_cancel_background_work_stops_jobs_that_can_repopulate_channel(self):
+        retriever, _gemini_client = self._make_retriever(SimpleNamespace())
+        channel_embedding = asyncio.create_task(asyncio.sleep(60))
+        channel_backfill = asyncio.create_task(asyncio.sleep(60))
+        global_backlog = asyncio.create_task(asyncio.sleep(60))
+        other_embedding = asyncio.create_task(asyncio.sleep(60))
+        retriever._embedding_tasks = {20: channel_embedding, 21: other_embedding}
+        retriever._pregeneration_tasks = {20: channel_backfill}
+        retriever._pregeneration_status = {20: {"phase": "scanning"}}
+        retriever._all_channels_task = global_backlog
+        retriever._all_channels_status = {"phase": "running"}
+
+        await retriever.cancel_background_work(channel_id=20)
+
+        self.assertTrue(channel_embedding.cancelled())
+        self.assertTrue(channel_backfill.cancelled())
+        self.assertTrue(global_backlog.cancelled())
+        self.assertFalse(other_embedding.cancelled())
+        self.assertEqual(retriever._pregeneration_status[20]["phase"], "cancelled")
+        self.assertEqual(retriever._all_channels_status["phase"], "cancelled")
+
+        other_embedding.cancel()
+        await asyncio.gather(other_embedding, return_exceptions=True)
 
     async def test_complete_history_pregeneration_indexes_and_embeds_in_background(self):
         pending = [

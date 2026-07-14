@@ -156,16 +156,47 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
         )
         embed.add_field(name="Enabled", value=str(config.rag_enabled), inline=True)
         embed.add_field(name="FTS5", value="Enabled" if status["fts_enabled"] else "Unavailable", inline=True)
-        embed.add_field(name="Embedding Model", value=status["embedding_model"], inline=False)
+        embed.add_field(
+            name="Embedding Model",
+            value=f"{status['embedding_model']} ({status['embedding_dimensions']} dimensions)",
+            inline=False,
+        )
+        embed.add_field(name="Local Database", value=status["database_path"], inline=False)
         embed.add_field(name="Indexed Messages", value=f"{status['messages']:,}", inline=True)
         embed.add_field(name="Embedded", value=f"{status['embedded']:,}", inline=True)
         embed.add_field(name="Pending", value=f"{status['pending_embeddings']:,}", inline=True)
         embed.add_field(name="Failed Embeddings", value=f"{status['failed_embeddings']:,}", inline=True)
+
+        retriever = getattr(bot, "hybrid_context_retriever", None)
+        pregeneration = (
+            retriever.get_pregeneration_status(interaction.channel_id)
+            if retriever
+            else None
+        )
+        if pregeneration:
+            scope = (
+                "entire accessible history"
+                if pregeneration["limit"] is None
+                else f"up to {pregeneration['limit']:,} messages"
+            )
+            details = [
+                f"Phase: **{pregeneration['phase'].title()}**",
+                f"Scope: {scope}",
+                f"Indexed this run: {pregeneration['indexed']:,}",
+                f"Embedded this run: {pregeneration['embedded']:,}",
+            ]
+            if pregeneration["error"]:
+                details.append(f"Error: {pregeneration['error'][:300]}")
+            embed.add_field(
+                name="Pre-generation Job",
+                value="\n".join(details),
+                inline=False,
+            )
         embed.set_footer(text="Counts are scoped to this channel where applicable.")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @rag_group.command(name="backfill", description="Index recent channel history for local message RAG")
-    @app_commands.describe(limit="Number of recent messages to scan; defaults to rag.backfill_limit")
+    @rag_group.command(name="backfill", description="Pre-generate local RAG data from channel history")
+    @app_commands.describe(limit="Messages to scan; omit or use 0 for the entire accessible history")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def rag_backfill(interaction: discord.Interaction, limit: Optional[int] = None):
         index_service = getattr(bot, "message_index_service", None)
@@ -176,18 +207,34 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
             await interaction.response.send_message("This command must be run in a channel.", ephemeral=True)
             return
 
-        await interaction.response.defer(thinking=True, ephemeral=True)
-        scan_limit = max(0, min(limit or config.rag_backfill_limit, config.channel_history_limit))
-        indexed = await index_service.backfill_channel(
+        retriever = getattr(bot, "hybrid_context_retriever", None)
+        if not retriever:
+            await interaction.response.send_message("Message RAG pre-generation is not available.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        configured_limit = config.rag_backfill_limit if limit is None else limit
+        scan_limit = None if configured_limit <= 0 else configured_limit
+        started = retriever.start_channel_pregeneration(
             interaction.channel,
             limit=scan_limit,
             include_bot_user_id=bot.user.id if config.rag_index_bot_responses and bot.user else None,
         )
-        if getattr(bot, "hybrid_context_retriever", None):
-            bot.hybrid_context_retriever._backfilled_channels.add(interaction.channel.id)
+        if not started:
+            await interaction.followup.send(
+                "A RAG pre-generation job is already running for this channel.",
+                ephemeral=True,
+            )
+            return
 
+        scope = (
+            "the entire accessible channel history"
+            if scan_limit is None
+            else f"up to {scan_limit:,} messages"
+        )
         await interaction.followup.send(
-            f"Backfilled {indexed} message(s) into the local RAG index for this channel.",
+            f"Started RAG pre-generation for {scope}. Data is saved incrementally to "
+            f"`{index_service.db_path}`. Use `/rag status` to monitor it.",
             ephemeral=True,
         )
 

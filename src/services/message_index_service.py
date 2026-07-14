@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
+import numpy as np
+
 from ..models.data_models import MessageContext
 from .context_collector import ContextCollector
 from .sqlite_utils import sqlite_connection, sqlite_transaction
@@ -60,12 +62,26 @@ class IndexedMessage:
         )
 
 
+@dataclass(frozen=True)
+class _HistoryCursor:
+    """Minimal Discord snowflake used to resume history after a message ID."""
+
+    id: int
+
+
 class MessageIndexService:
     """SQLite-backed message index with FTS5 and local embedding storage."""
 
-    def __init__(self, db_path: str = "data/token_usage.db", embedding_model: str = "gemini-embedding-2"):
+    def __init__(
+        self,
+        db_path: str = "data/token_usage.db",
+        embedding_model: str = "gemini-embedding-2",
+        embedding_dimensions: int = 768,
+    ):
         self.db_path = Path(db_path).expanduser()
-        self.embedding_model = embedding_model
+        self.embedding_api_model = embedding_model
+        self.embedding_dimensions = int(embedding_dimensions)
+        self.embedding_model = f"{embedding_model}@{self.embedding_dimensions}"
         self.max_embedding_attempts = 3
         self.fts_enabled = False
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,6 +170,20 @@ class MessageIndexService:
                 )
                 conn.execute(
                     """
+                    UPDATE message_embeddings
+                    SET embedding_model = ?,
+                        embedding_vector = NULL,
+                        embedding_status = 'pending',
+                        embedded_at = NULL,
+                        last_error = NULL,
+                        embedding_attempts = 0,
+                        next_retry_at = NULL
+                    WHERE embedding_model != ?
+                    """,
+                    (self.embedding_model, self.embedding_model),
+                )
+                conn.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_message_embeddings_status
                     ON message_embeddings (embedding_model, embedding_status)
                     """
@@ -170,6 +200,18 @@ class MessageIndexService:
                         selected_message_ids TEXT NOT NULL,
                         fallback_reason TEXT,
                         latency_ms INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS message_backfill_progress (
+                        channel_id INTEGER PRIMARY KEY,
+                        guild_id INTEGER,
+                        last_message_id INTEGER,
+                        scanned_messages INTEGER NOT NULL DEFAULT 0,
+                        completed_at TEXT,
+                        updated_at TEXT NOT NULL
                     )
                     """
                 )
@@ -340,7 +382,6 @@ class MessageIndexService:
                     "SELECT content_hash, hidden, deleted_at FROM message_index WHERE message_id = ?",
                     (message_id,),
                 ).fetchone()
-                content_changed = existing is None or existing["content_hash"] != content_hash
                 resolved_hidden = (
                     bool(existing["hidden"])
                     if hidden is None and existing is not None
@@ -406,35 +447,47 @@ class MessageIndexService:
                     ON CONFLICT(message_id) DO UPDATE SET
                         embedding_model = excluded.embedding_model,
                         embedding_status = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN excluded.embedding_status
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN excluded.embedding_status
                             ELSE message_embeddings.embedding_status
                         END,
                         embedding_vector = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN NULL
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN NULL
                             ELSE message_embeddings.embedding_vector
                         END,
                         content_hash = excluded.content_hash,
                         embedded_at = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN NULL
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN NULL
                             ELSE message_embeddings.embedded_at
                         END,
                         last_error = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN NULL
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN NULL
                             ELSE message_embeddings.last_error
                         END,
                         embedding_attempts = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN 0
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN 0
                             ELSE message_embeddings.embedding_attempts
                         END,
                         next_retry_at = CASE
-                            WHEN message_embeddings.content_hash != excluded.content_hash THEN NULL
+                            WHEN message_embeddings.content_hash != excluded.content_hash
+                              OR message_embeddings.embedding_model != excluded.embedding_model
+                            THEN NULL
                             ELSE message_embeddings.next_retry_at
                         END
                     """,
                     (
                         message_id,
                         self.embedding_model,
-                        "pending" if content_changed and not is_deleted else "done",
+                        "pending" if not is_deleted else "done",
                         content_hash,
                     ),
                 )
@@ -447,20 +500,143 @@ class MessageIndexService:
         self,
         channel,
         *,
-        limit: int,
+        limit: Optional[int],
         include_bot_user_id: Optional[int] = None,
     ) -> int:
+        """Persist channel history, resuming after the durable per-channel cursor."""
         indexed_count = 0
+        scanned_count = 0
+        channel_id = int(channel.id)
+        guild_id = getattr(getattr(channel, "guild", None), "id", None)
         try:
-            async for historical in channel.history(limit=max(0, limit)):
+            history_limit = None if limit is None else max(0, limit)
+            progress = await self.get_backfill_progress_async(channel_id)
+            history_kwargs = {
+                "limit": history_limit,
+                "oldest_first": True,
+            }
+            if progress and progress["last_message_id"] is not None:
+                history_kwargs["after"] = _HistoryCursor(progress["last_message_id"])
+                logger.info(
+                    "Resuming RAG backlog for channel %s after message %s",
+                    channel_id,
+                    progress["last_message_id"],
+                )
+
+            async for historical in channel.history(**history_kwargs):
                 if await self.index_discord_message_async(
                     historical,
                     include_bot_user_id=include_bot_user_id,
                 ):
                     indexed_count += 1
+                scanned_count += 1
+                await self.advance_backfill_progress_async(
+                    channel_id=channel_id,
+                    guild_id=guild_id,
+                    last_message_id=int(historical.id),
+                )
+
+            if history_limit is None or scanned_count < history_limit:
+                await self.mark_backfill_complete_async(
+                    channel_id=channel_id,
+                    guild_id=guild_id,
+                )
         except Exception as exc:
             logger.warning("RAG backfill failed for channel %s: %s", getattr(channel, "id", "unknown"), exc)
+            raise
         return indexed_count
+
+    def get_backfill_progress(self, channel_id: int) -> Optional[dict]:
+        """Return the durable resume cursor and completion state for one channel."""
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT channel_id, guild_id, last_message_id, scanned_messages,
+                       completed_at, updated_at
+                FROM message_backfill_progress
+                WHERE channel_id = ?
+                """,
+                (int(channel_id),),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    async def get_backfill_progress_async(self, channel_id: int) -> Optional[dict]:
+        return await asyncio.to_thread(self.get_backfill_progress, channel_id)
+
+    def advance_backfill_progress(
+        self,
+        *,
+        channel_id: int,
+        guild_id: Optional[int],
+        last_message_id: int,
+    ) -> None:
+        """Advance one channel cursor after a history item has been handled."""
+        now = self._now_iso()
+        with self._connection(transaction=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO message_backfill_progress (
+                    channel_id, guild_id, last_message_id, scanned_messages,
+                    completed_at, updated_at
+                ) VALUES (?, ?, ?, 1, NULL, ?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    guild_id = COALESCE(excluded.guild_id, message_backfill_progress.guild_id),
+                    last_message_id = excluded.last_message_id,
+                    scanned_messages = message_backfill_progress.scanned_messages + 1,
+                    completed_at = NULL,
+                    updated_at = excluded.updated_at
+                """,
+                (int(channel_id), guild_id, int(last_message_id), now),
+            )
+
+    async def advance_backfill_progress_async(
+        self,
+        *,
+        channel_id: int,
+        guild_id: Optional[int],
+        last_message_id: int,
+    ) -> None:
+        await asyncio.to_thread(
+            self.advance_backfill_progress,
+            channel_id=channel_id,
+            guild_id=guild_id,
+            last_message_id=last_message_id,
+        )
+
+    def mark_backfill_complete(
+        self,
+        *,
+        channel_id: int,
+        guild_id: Optional[int],
+    ) -> None:
+        """Mark a channel caught up without discarding its resume cursor."""
+        now = self._now_iso()
+        with self._connection(transaction=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO message_backfill_progress (
+                    channel_id, guild_id, last_message_id, scanned_messages,
+                    completed_at, updated_at
+                ) VALUES (?, ?, NULL, 0, ?, ?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    guild_id = COALESCE(excluded.guild_id, message_backfill_progress.guild_id),
+                    completed_at = excluded.completed_at,
+                    updated_at = excluded.updated_at
+                """,
+                (int(channel_id), guild_id, now, now),
+            )
+
+    async def mark_backfill_complete_async(
+        self,
+        *,
+        channel_id: int,
+        guild_id: Optional[int],
+    ) -> None:
+        await asyncio.to_thread(
+            self.mark_backfill_complete,
+            channel_id=channel_id,
+            guild_id=guild_id,
+        )
 
     def mark_hidden(self, message_id: int, hidden: bool = True) -> bool:
         try:
@@ -644,11 +820,22 @@ class MessageIndexService:
     async def search_lexical_async(self, query: str, **kwargs) -> list[IndexedMessage]:
         return await asyncio.to_thread(self.search_lexical, query, **kwargs)
 
-    def get_pending_embeddings(self, limit: int = 16) -> list[tuple[int, str, str]]:
+    def get_pending_embeddings(
+        self,
+        limit: int = 16,
+        *,
+        channel_id: Optional[int] = None,
+    ) -> list[tuple[int, str, str]]:
         try:
+            channel_clause = ""
+            params: list = [self.embedding_model, self._now_iso()]
+            if channel_id is not None:
+                channel_clause = " AND m.channel_id = ?"
+                params.append(channel_id)
+            params.append(limit)
             with self._connection() as conn:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT m.message_id, m.author_name, m.created_at, m.content_text, e.content_hash
                     FROM message_embeddings e
                     JOIN message_index m ON m.message_id = e.message_id
@@ -657,10 +844,11 @@ class MessageIndexService:
                       AND (e.next_retry_at IS NULL OR e.next_retry_at <= ?)
                       AND m.hidden = 0
                       AND m.deleted_at IS NULL
+                      {channel_clause}
                     ORDER BY m.created_at DESC
                     LIMIT ?
                     """,
-                    (self.embedding_model, self._now_iso(), limit),
+                    params,
                 ).fetchall()
             results = []
             for row in rows:
@@ -674,12 +862,24 @@ class MessageIndexService:
             logger.error("Failed to load pending embeddings: %s", exc, exc_info=True)
             return []
 
-    async def get_pending_embeddings_async(self, limit: int = 16) -> list[tuple[int, str, str]]:
-        return await asyncio.to_thread(self.get_pending_embeddings, limit)
+    async def get_pending_embeddings_async(
+        self,
+        limit: int = 16,
+        *,
+        channel_id: Optional[int] = None,
+    ) -> list[tuple[int, str, str]]:
+        return await asyncio.to_thread(
+            self.get_pending_embeddings,
+            limit,
+            channel_id=channel_id,
+        )
 
     def store_embedding(self, message_id: int, vector: list[float], content_hash: str) -> bool:
         try:
-            vector_json = json.dumps([float(value) for value in vector], separators=(",", ":"))
+            vector_array = np.asarray(vector, dtype=np.float32)
+            if vector_array.ndim != 1 or vector_array.size == 0:
+                return False
+            vector_blob = sqlite3.Binary(vector_array.tobytes())
             with self._connection(transaction=True) as conn:
                 conn.execute(
                     """
@@ -693,7 +893,7 @@ class MessageIndexService:
                     WHERE message_id = ?
                       AND content_hash = ?
                     """,
-                    (vector_json, self._now_iso(), message_id, content_hash),
+                    (vector_blob, self._now_iso(), message_id, content_hash),
                 )
             return True
         except Exception as exc:
@@ -770,8 +970,14 @@ class MessageIndexService:
         scope = self._scope_clause(guild_id, channel_id, cross_channel, params)
         exclude = self._exclude_clause(exclude_message_ids or [], params)
         try:
+            query_vector = np.asarray(query_embedding, dtype=np.float32)
+            query_norm = float(np.linalg.norm(query_vector))
+            if query_vector.ndim != 1 or query_vector.size == 0 or query_norm == 0:
+                return []
+
+            top_rows: list[tuple[float, sqlite3.Row]] = []
             with self._connection() as conn:
-                rows = conn.execute(
+                cursor = conn.execute(
                     f"""
                     SELECT m.*, e.embedding_vector, 0.0 AS lexical_score, 0.0 AS semantic_score
                     FROM message_embeddings e
@@ -785,19 +991,62 @@ class MessageIndexService:
                       {exclude}
                     """,
                     [self.embedding_model, *params],
-                ).fetchall()
-            scored: list[IndexedMessage] = []
-            for row in rows:
-                try:
-                    vector = json.loads(row["embedding_vector"])
-                except (TypeError, json.JSONDecodeError):
-                    continue
+                )
+                while True:
+                    rows = cursor.fetchmany(256)
+                    if not rows:
+                        break
+
+                    vectors = []
+                    vector_rows = []
+                    for row in rows:
+                        raw_vector = row["embedding_vector"]
+                        try:
+                            if isinstance(raw_vector, (bytes, bytearray, memoryview)):
+                                vector = np.frombuffer(raw_vector, dtype=np.float32)
+                            else:
+                                vector = np.asarray(
+                                    json.loads(raw_vector),
+                                    dtype=np.float32,
+                                )
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            continue
+                        if vector.size != query_vector.size:
+                            continue
+                        vectors.append(vector)
+                        vector_rows.append(row)
+
+                    if not vectors:
+                        continue
+                    matrix = np.vstack(vectors)
+                    norms = np.linalg.norm(matrix, axis=1)
+                    valid = norms > 0
+                    scores = np.zeros(len(vectors), dtype=np.float32)
+                    scores[valid] = (
+                        matrix[valid] @ query_vector
+                    ) / (norms[valid] * query_norm)
+                    top_rows.extend(
+                        (float(score), row)
+                        for score, row in zip(scores, vector_rows)
+                        if np.isfinite(score) and score > 0
+                    )
+                    if len(top_rows) > max(256, limit * 8):
+                        top_rows = sorted(
+                            top_rows,
+                            key=lambda item: item[0],
+                            reverse=True,
+                        )[: max(limit * 2, limit)]
+
+            results = []
+            for score, row in sorted(
+                top_rows,
+                key=lambda item: item[0],
+                reverse=True,
+            )[:limit]:
                 message = self._row_to_indexed(row)
-                message.semantic_score = self._cosine_similarity(query_embedding, vector)
-                if message.semantic_score > 0:
-                    scored.append(message)
-            scored.sort(key=lambda item: item.semantic_score, reverse=True)
-            return scored[:limit]
+                message.semantic_score = score
+                results.append(message)
+            return results
         except Exception as exc:
             logger.error("Semantic RAG search failed: %s", exc, exc_info=True)
             return []
@@ -908,7 +1157,9 @@ class MessageIndexService:
                 "pending_embeddings": pending,
                 "failed_embeddings": failed,
                 "fts_enabled": self.fts_enabled,
-                "embedding_model": self.embedding_model,
+                "embedding_model": self.embedding_api_model,
+                "embedding_dimensions": self.embedding_dimensions,
+                "database_path": str(self.db_path.resolve()),
             }
         except Exception as exc:
             logger.error("Failed to load RAG status: %s", exc, exc_info=True)
@@ -918,7 +1169,9 @@ class MessageIndexService:
                 "pending_embeddings": 0,
                 "failed_embeddings": 0,
                 "fts_enabled": self.fts_enabled,
-                "embedding_model": self.embedding_model,
+                "embedding_model": self.embedding_api_model,
+                "embedding_dimensions": self.embedding_dimensions,
+                "database_path": str(self.db_path.resolve()),
             }
 
     async def get_status_async(self, *, channel_id: Optional[int] = None) -> dict:

@@ -38,6 +38,9 @@ class _Candidate:
 class HybridContextRetriever:
     """Retrieves and packs relevant Discord context for the response model."""
 
+    EMBEDDING_BATCH_SIZE = 16
+    BACKGROUND_EMBED_DELAY_SECONDS = 2.0
+
     def __init__(
         self,
         *,
@@ -54,7 +57,13 @@ class HybridContextRetriever:
         self.gemini_client = gemini_client
         self.pack_builder = pack_builder
         self.pin_service = pin_service
-        self._backfilled_channels: set[int] = set()
+        self._embedding_lock = asyncio.Lock()
+        self._embedding_tasks: dict[int, asyncio.Task] = {}
+        self._pregeneration_tasks: dict[int, asyncio.Task] = {}
+        self._pregeneration_status: dict[int, dict] = {}
+        self._all_channels_task: Optional[asyncio.Task] = None
+        self._all_channels_status: Optional[dict] = None
+        self._closed = False
 
     def set_pin_service(self, pin_service) -> None:
         self.pin_service = pin_service
@@ -73,41 +82,300 @@ class HybridContextRetriever:
         age_hours = max(0.0, (now - timestamp).total_seconds() / 3600.0)
         return 0.5 ** (age_hours / max(1, half_life_hours))
 
-    async def _maybe_backfill_channel(self, message, bot_user_id: Optional[int]) -> None:
-        channel_id = int(message.channel.id)
-        if channel_id in self._backfilled_channels:
-            return
-        if self.config.rag_backfill_limit <= 0:
-            self._backfilled_channels.add(channel_id)
-            return
-        indexed = await self.message_index.backfill_channel(
-            message.channel,
-            limit=self.config.rag_backfill_limit,
-            include_bot_user_id=bot_user_id if self.config.rag_index_bot_responses else None,
-        )
-        self._backfilled_channels.add(channel_id)
-        logger.info("RAG backfilled %s message(s) for channel %s", indexed, channel_id)
-
-    async def _embed_pending_documents(self) -> None:
+    async def embed_pending_documents(
+        self,
+        *,
+        channel_id: Optional[int] = None,
+    ) -> tuple[int, int, int]:
+        """Embed one local batch and return processed, stored, and failed counts."""
         if not getattr(self.gemini_client, "client", None):
+            return 0, 0, 0
+
+        async with self._embedding_lock:
+            pending = await self.message_index.get_pending_embeddings_async(
+                limit=min(
+                    self.EMBEDDING_BATCH_SIZE,
+                    max(1, self.config.rag_semantic_candidates),
+                ),
+                channel_id=channel_id,
+            )
+            if not pending:
+                return 0, 0, 0
+
+            texts = [text for _message_id, text, _content_hash in pending]
+            vectors = await self.gemini_client.embed_texts(
+                texts,
+                model_name=self.config.rag_embedding_model,
+                task_type="RETRIEVAL_DOCUMENT",
+            )
+            stored = 0
+            failed = 0
+            for (message_id, _text, content_hash), vector in zip(pending, vectors):
+                if vector:
+                    if await self.message_index.store_embedding_async(
+                        message_id,
+                        vector,
+                        content_hash,
+                    ):
+                        stored += 1
+                else:
+                    failed += 1
+                    await self.message_index.mark_embedding_failed_async(
+                        message_id,
+                        "empty embedding response",
+                    )
+            return len(pending), stored, failed
+
+    async def _drain_pending_documents(
+        self,
+        *,
+        channel_id: int,
+        initial_delay: float = 0.0,
+    ) -> tuple[int, int, int]:
+        if initial_delay > 0:
+            await asyncio.sleep(initial_delay)
+
+        totals = [0, 0, 0]
+        while not self._closed:
+            processed, stored, failed = await self.embed_pending_documents(
+                channel_id=channel_id,
+            )
+            totals[0] += processed
+            totals[1] += stored
+            totals[2] += failed
+            if processed == 0 or (stored == 0 and failed > 0):
+                break
+        return tuple(totals)
+
+    def schedule_pending_embeddings(self, channel_id: int) -> None:
+        """Debounce local document embedding so message handling never awaits it."""
+        if self._closed or not getattr(self.gemini_client, "client", None):
             return
-        pending = await self.message_index.get_pending_embeddings_async(
-            limit=min(16, max(1, self.config.rag_semantic_candidates)),
-        )
-        if not pending:
+        channel_id = int(channel_id)
+        active = self._embedding_tasks.get(channel_id)
+        if active is not None and not active.done():
             return
 
-        texts = [text for _message_id, text, _content_hash in pending]
-        vectors = await self.gemini_client.embed_texts(
-            texts,
-            model_name=self.config.rag_embedding_model,
-            task_type="RETRIEVAL_DOCUMENT",
+        task = asyncio.create_task(
+            self._drain_pending_documents(
+                channel_id=channel_id,
+                initial_delay=self.BACKGROUND_EMBED_DELAY_SECONDS,
+            )
         )
-        for (message_id, _text, content_hash), vector in zip(pending, vectors):
-            if vector:
-                await self.message_index.store_embedding_async(message_id, vector, content_hash)
+        self._embedding_tasks[channel_id] = task
+
+        def cleanup(completed: asyncio.Task) -> None:
+            if self._embedding_tasks.get(channel_id) is completed:
+                self._embedding_tasks.pop(channel_id, None)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                logger.warning(
+                    "Background RAG embedding failed for channel %s: %s",
+                    channel_id,
+                    error,
+                )
+
+        task.add_done_callback(cleanup)
+
+    def start_channel_pregeneration(
+        self,
+        channel,
+        *,
+        limit: Optional[int],
+        include_bot_user_id: Optional[int] = None,
+    ) -> bool:
+        """Start one complete-history indexing and embedding job for a channel."""
+        if self._closed:
+            return False
+        channel_id = int(channel.id)
+        active = self._pregeneration_tasks.get(channel_id)
+        if active is not None and not active.done():
+            return False
+
+        self._pregeneration_status[channel_id] = {
+            "phase": "scanning",
+            "limit": limit,
+            "indexed": 0,
+            "embedded": 0,
+            "failed": 0,
+            "error": None,
+        }
+        task = asyncio.create_task(
+            self._run_channel_pregeneration(
+                channel,
+                limit=limit,
+                include_bot_user_id=include_bot_user_id,
+            )
+        )
+        self._pregeneration_tasks[channel_id] = task
+        return True
+
+    def start_all_channel_pregeneration(
+        self,
+        channels,
+        *,
+        limit: Optional[int],
+        include_bot_user_id: Optional[int] = None,
+    ) -> bool:
+        """Start a sequential resumable backlog pass over accessible channels."""
+        if self._closed:
+            return False
+        active = self._all_channels_task
+        if active is not None and not active.done():
+            return False
+
+        unique_channels = []
+        seen_channel_ids = set()
+        for channel in channels:
+            channel_id = int(channel.id)
+            if channel_id in seen_channel_ids:
+                continue
+            seen_channel_ids.add(channel_id)
+            unique_channels.append(channel)
+        if not unique_channels:
+            return False
+
+        self._all_channels_status = {
+            "phase": "running",
+            "total": len(unique_channels),
+            "processed": 0,
+            "failed": 0,
+        }
+        self._all_channels_task = asyncio.create_task(
+            self._run_all_channel_pregeneration(
+                unique_channels,
+                limit=limit,
+                include_bot_user_id=include_bot_user_id,
+            )
+        )
+        return True
+
+    async def _run_all_channel_pregeneration(
+        self,
+        channels,
+        *,
+        limit: Optional[int],
+        include_bot_user_id: Optional[int],
+    ) -> None:
+        progress = self._all_channels_status
+        try:
+            for channel in channels:
+                if self._closed:
+                    break
+                channel_id = int(channel.id)
+                started = self.start_channel_pregeneration(
+                    channel,
+                    limit=limit,
+                    include_bot_user_id=include_bot_user_id,
+                )
+                task = self._pregeneration_tasks.get(channel_id)
+                if task is not None and not task.done():
+                    await task
+                if not started and task is None:
+                    logger.warning(
+                        "Skipped RAG backlog channel %s because it could not be started",
+                        channel_id,
+                    )
+                channel_status = self._pregeneration_status.get(channel_id, {})
+                progress["processed"] += 1
+                if channel_status.get("phase") == "failed":
+                    progress["failed"] += 1
+            progress["phase"] = "complete"
+            logger.info(
+                "RAG backlog pass complete: processed=%s total=%s failed=%s",
+                progress["processed"],
+                progress["total"],
+                progress["failed"],
+            )
+        except asyncio.CancelledError:
+            progress["phase"] = "cancelled"
+            raise
+        finally:
+            if self._all_channels_task is asyncio.current_task():
+                self._all_channels_task = None
+
+    async def _run_channel_pregeneration(
+        self,
+        channel,
+        *,
+        limit: Optional[int],
+        include_bot_user_id: Optional[int],
+    ) -> None:
+        channel_id = int(channel.id)
+        progress = self._pregeneration_status[channel_id]
+        try:
+            indexed = await self.message_index.backfill_channel(
+                channel,
+                limit=limit,
+                include_bot_user_id=include_bot_user_id,
+            )
+            progress.update(phase="embedding", indexed=indexed)
+            _processed, embedded, failed = await self._drain_pending_documents(
+                channel_id=channel_id,
+            )
+            progress.update(embedded=embedded, failed=failed)
+
+            status = await self.message_index.get_status_async(channel_id=channel_id)
+            if status["pending_embeddings"] or status["failed_embeddings"]:
+                progress["phase"] = "partial"
             else:
-                await self.message_index.mark_embedding_failed_async(message_id, "empty embedding response")
+                progress["phase"] = "complete"
+            logger.info(
+                "RAG pre-generation %s for channel %s: indexed=%s embedded=%s pending=%s failed=%s",
+                progress["phase"],
+                channel_id,
+                indexed,
+                status["embedded"],
+                status["pending_embeddings"],
+                status["failed_embeddings"],
+            )
+        except asyncio.CancelledError:
+            progress["phase"] = "cancelled"
+            raise
+        except Exception as exc:
+            progress.update(phase="failed", error=str(exc))
+            logger.warning(
+                "RAG pre-generation failed for channel %s: %s",
+                channel_id,
+                exc,
+                exc_info=True,
+            )
+        finally:
+            self._pregeneration_tasks.pop(channel_id, None)
+
+    def get_pregeneration_status(self, channel_id: int) -> Optional[dict]:
+        status = self._pregeneration_status.get(int(channel_id))
+        return dict(status) if status is not None else None
+
+    def get_all_channels_pregeneration_status(self) -> Optional[dict]:
+        return (
+            dict(self._all_channels_status)
+            if self._all_channels_status is not None
+            else None
+        )
+
+    async def close(self) -> None:
+        """Cancel background indexing and embedding jobs during bot shutdown."""
+        self._closed = True
+        tasks = {
+            task
+            for task in (
+                *self._embedding_tasks.values(),
+                *self._pregeneration_tasks.values(),
+                self._all_channels_task,
+            )
+            if task is not None
+            if not task.done()
+        }
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._embedding_tasks.clear()
+        self._pregeneration_tasks.clear()
+        self._all_channels_task = None
 
     async def _embed_query(self, query: str) -> list[float]:
         if not getattr(self.gemini_client, "client", None):
@@ -182,9 +450,6 @@ class HybridContextRetriever:
         fallback_reason = None
 
         try:
-            await self._maybe_backfill_channel(message, bot_user_id)
-            await self._embed_pending_documents()
-
             reply_context = await self._load_reply_anchor_context(message)
             reply_ids = {ctx.message_id for ctx in reply_context}
             exclude_ids.update(reply_ids)

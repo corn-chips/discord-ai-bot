@@ -54,9 +54,10 @@ class BotConfig:
     # === Hybrid Message RAG ===
     rag_enabled: bool = True
     rag_embedding_model: str = "gemini-embedding-2"
+    rag_embedding_dimensions: int = 768
     rag_cross_channel_enabled: bool = False
     rag_index_bot_responses: bool = True
-    rag_backfill_limit: int = 500
+    rag_backfill_limit: int = 0
     rag_lexical_candidates: int = 40
     rag_semantic_candidates: int = 40
     rag_rerank_candidates: int = 30

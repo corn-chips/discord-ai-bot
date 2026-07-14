@@ -287,6 +287,9 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
             )
         ).strip()
         or "gemini-embedding-2",
+        "rag_embedding_dimensions": int(
+            get_config_value(config_data, "rag", "embedding_dimensions", 768)
+        ),
         "rag_cross_channel_enabled": get_config_value(
             config_data, "rag", "cross_channel_enabled", False
         ),
@@ -294,7 +297,7 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
             config_data, "rag", "index_bot_responses", True
         ),
         "rag_backfill_limit": int(
-            get_config_value(config_data, "rag", "backfill_limit", 500)
+            get_config_value(config_data, "rag", "backfill_limit", 0)
         ),
         "rag_lexical_candidates": int(
             get_config_value(config_data, "rag", "lexical_candidates", 40)
@@ -504,6 +507,8 @@ def _validate_core_values(config: Any) -> List[str]:
     if config.rag_enabled:
         if not config.rag_embedding_model:
             errors.append("rag.embedding_model must not be empty when rag.enabled is true")
+        if not 128 <= config.rag_embedding_dimensions <= 3072:
+            errors.append("rag.embedding_dimensions must be between 128 and 3072")
         if config.rag_backfill_limit < 0:
             errors.append("rag.backfill_limit must be zero or positive")
         if config.rag_lexical_candidates <= 0 or config.rag_semantic_candidates <= 0:

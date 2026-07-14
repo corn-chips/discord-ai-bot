@@ -99,7 +99,9 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vectors, [[1.0, 2.0], [3.0, 4.0]])
         request = embed_content.await_args.kwargs
         self.assertEqual(request["model"], "gemini-embedding-2")
-        self.assertNotIn("config", request)
+        self.assertEqual(request["config"].output_dimensionality, 768)
+        self.assertIsNone(request["config"].task_type)
+        self.assertIsNone(request["config"].auto_truncate)
         self.assertEqual(len(request["contents"]), 2)
         self.assertTrue(all(isinstance(item, types.Content) for item in request["contents"]))
         self.assertEqual(
@@ -131,7 +133,8 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(vectors, [[0.5, 0.25]])
         request = embed_content.await_args.kwargs
-        self.assertNotIn("config", request)
+        self.assertEqual(request["config"].output_dimensionality, 768)
+        self.assertIsNone(request["config"].task_type)
         self.assertEqual(
             request["contents"][0].parts[0].text,
             "task: search result | query: where is the answer?",
@@ -160,6 +163,7 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         request = embed_content.await_args.kwargs
         self.assertEqual(request["contents"], ["message"])
         self.assertEqual(request["config"].task_type, "RETRIEVAL_DOCUMENT")
+        self.assertEqual(request["config"].output_dimensionality, 768)
         self.assertIsNone(request["config"].auto_truncate)
 
     async def test_request_precedence_and_multimodal_part_order_are_preserved(self):

@@ -44,7 +44,7 @@ EXPECTED_SIGNATURE = [
     ("config info", "View current bot configuration and feature status", "config_info"),
     ("rag", "Manage local message retrieval memory", "GROUP"),
     ("rag status", "Show local message RAG index status", "rag_status"),
-    ("rag backfill", "Index recent channel history for local message RAG", "rag_backfill"),
+    ("rag backfill", "Pre-generate local RAG data from channel history", "rag_backfill"),
     ("summarize", "Summarize the current conversation", "summarize"),
     ("personality", "Set the bot's personality/tone for this channel", "personality"),
     ("personality-info", "Show the current personality setting for this channel", "personality_info"),
@@ -209,6 +209,37 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
             self._command(bot, "image-queue").description,
             "Check the image processing queue status",
         )
+
+    async def test_rag_backfill_defaults_to_complete_history_background_job(self):
+        bot = await self._register()
+        bot.message_index_service = SimpleNamespace(
+            db_path=Path("data/token_usage.db")
+        )
+        bot.hybrid_context_retriever = SimpleNamespace(
+            start_channel_pregeneration=Mock(return_value=True)
+        )
+        channel = SimpleNamespace(id=20)
+        interaction = SimpleNamespace(
+            channel=channel,
+            channel_id=20,
+            response=SimpleNamespace(
+                send_message=AsyncMock(),
+                defer=AsyncMock(),
+            ),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await self._command(bot, "rag backfill").callback(interaction, None)
+
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+        bot.hybrid_context_retriever.start_channel_pregeneration.assert_called_once_with(
+            channel,
+            limit=None,
+            include_bot_user_id=None,
+        )
+        followup_text = interaction.followup.send.await_args.args[0]
+        self.assertIn("entire accessible channel history", followup_text)
+        self.assertIn("/rag status", followup_text)
 
     async def test_edit_image_callback_builds_and_submits_request(self):
         service = SimpleNamespace(

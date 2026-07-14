@@ -36,9 +36,10 @@ context:
 rag:
   enabled: true
   embedding_model: "gemini-embedding-2"
+  embedding_dimensions: 768             # Compact local vectors; Gemini recommends 768, 1536, or 3072
   cross_channel_enabled: false          # Keep retrieval scoped to current channel unless explicitly enabled
   index_bot_responses: true             # Store this bot's own replies for future recall
-  backfill_limit: 500                   # One-time recent history backfill per channel
+  backfill_limit: 0                     # Per-channel startup/manual scan limit; 0 scans all history from the saved cursor
   lexical_candidates: 40                # FTS5/BM25 candidate count
   semantic_candidates: 40               # Embedding candidate count
   rerank_candidates: 30                 # Top fused candidates offered to router-model reranker

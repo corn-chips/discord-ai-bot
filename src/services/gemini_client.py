@@ -816,15 +816,18 @@ Candidate messages:
             else:
                 contents = request_texts
 
-            config_kwargs = {}
+            config_kwargs = {
+                "output_dimensionality": int(
+                    getattr(self.config, "rag_embedding_dimensions", 768)
+                )
+            }
             if task_type and not is_embedding_2:
                 config_kwargs["task_type"] = task_type
             request_kwargs = {
                 "model": target_model,
                 "contents": contents,
             }
-            if config_kwargs:
-                request_kwargs["config"] = types.EmbedContentConfig(**config_kwargs)
+            request_kwargs["config"] = types.EmbedContentConfig(**config_kwargs)
             response = await self.client.aio.models.embed_content(**request_kwargs)
             embeddings = getattr(response, "embeddings", None) or []
             vectors: List[Optional[List[float]]] = []

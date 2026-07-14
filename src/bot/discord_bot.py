@@ -50,6 +50,91 @@ from .response_generation import ResponseGenerationCoordinator
 logger = logging.getLogger(__name__)
 
 
+def _get_accessible_rag_channels(owner: Any) -> List[Any]:
+    """Return cached guild message channels whose history the bot can read."""
+    bot_user = getattr(owner, "user", None)
+    if bot_user is None:
+        return []
+
+    accessible = []
+    seen_channel_ids = set()
+    for guild in getattr(owner, "guilds", []) or []:
+        member = getattr(guild, "me", None)
+        if member is None:
+            get_member = getattr(guild, "get_member", None)
+            member = get_member(bot_user.id) if callable(get_member) else None
+        if member is None:
+            logger.warning(
+                "Cannot determine RAG backlog permissions for guild %s",
+                getattr(guild, "id", "unknown"),
+            )
+            continue
+
+        candidates = [
+            *(getattr(guild, "channels", []) or []),
+            *(getattr(guild, "threads", []) or []),
+        ]
+        for channel in candidates:
+            channel_id = int(channel.id)
+            if channel_id in seen_channel_ids:
+                continue
+            if not callable(getattr(channel, "history", None)):
+                continue
+            try:
+                permissions = channel.permissions_for(member)
+            except Exception as exc:
+                logger.debug(
+                    "Could not inspect RAG backlog permissions for channel %s: %s",
+                    channel_id,
+                    exc,
+                )
+                continue
+            if not (
+                getattr(permissions, "view_channel", False)
+                and getattr(permissions, "read_message_history", False)
+            ):
+                continue
+            seen_channel_ids.add(channel_id)
+            accessible.append(channel)
+    return accessible
+
+
+def _start_automatic_rag_backlog(owner: Any) -> int:
+    """Start a background backlog pass for every accessible guild channel."""
+    config = getattr(owner, "config", None)
+    retriever = getattr(owner, "hybrid_context_retriever", None)
+    if not getattr(config, "rag_enabled", False) or retriever is None:
+        return 0
+
+    channels = _get_accessible_rag_channels(owner)
+    if not channels:
+        logger.info("RAG backlog found no accessible message channels")
+        return 0
+
+    configured_limit = getattr(config, "rag_backfill_limit", 0)
+    scan_limit = None if configured_limit <= 0 else configured_limit
+    bot_user = getattr(owner, "user", None)
+    include_bot_user_id = (
+        bot_user.id
+        if getattr(config, "rag_index_bot_responses", False) and bot_user
+        else None
+    )
+    started = retriever.start_all_channel_pregeneration(
+        channels,
+        limit=scan_limit,
+        include_bot_user_id=include_bot_user_id,
+    )
+    if not started:
+        logger.info("RAG backlog pass is already running")
+        return 0
+
+    logger.info(
+        "Started resumable RAG backlog for %s accessible channel(s)",
+        len(channels),
+    )
+    return len(channels)
+
+
 def _get_or_create_live_coordinator(owner: Any) -> LiveMessageCoordinator:
     """Build the live collaborator lazily for private-wrapper compatibility."""
     coordinator = getattr(owner, "_live_message_coordinator", None)
@@ -271,6 +356,7 @@ class DiscordBot(discord.Client):
         self.message_index_service = MessageIndexService(
             config.token_db_path,
             embedding_model=config.rag_embedding_model,
+            embedding_dimensions=config.rag_embedding_dimensions,
         )
         self._rag_event_coordinator = _get_or_create_rag_event_coordinator(self)
         self.context_pack_builder = ContextPackBuilder()
@@ -430,7 +516,7 @@ class DiscordBot(discord.Client):
             "  - Report Web UI: %s",
             "Active" if self.report_web_server and self.report_web_server.is_running else "Disabled",
         )
-        
+
         # Set bot status
         activity = discord.Activity(
             type=discord.ActivityType.listening,
@@ -452,6 +538,8 @@ class DiscordBot(discord.Client):
             
         except Exception as e:
             logger.error(f"Failed to sync slash commands: {e}", exc_info=True)
+
+        _start_automatic_rag_backlog(self)
         
         logger.info("✅ Bot is ready and listening for mentions!")
     
@@ -564,6 +652,12 @@ class DiscordBot(discord.Client):
                 logger.info("✅ User experience service cleaned up")
             except Exception as e:
                 logger.error(f"Error cleaning up user experience service: {e}")
+
+        rag_retriever = getattr(self, "hybrid_context_retriever", None)
+        close_rag = getattr(rag_retriever, "close", None)
+        if close_rag is not None:
+            await close_rag()
+            logger.info("RAG background workers stopped")
         
         live_coordinator = getattr(self, "_live_message_coordinator", None)
         if live_coordinator is not None:
@@ -670,7 +764,11 @@ class DiscordBot(discord.Client):
 
         if self.config.rag_enabled:
             try:
-                await self.message_index_service.index_discord_message_async(message)
+                indexed = await self.message_index_service.index_discord_message_async(message)
+                if indexed:
+                    self.hybrid_context_retriever.schedule_pending_embeddings(
+                        message.channel.id
+                    )
             except Exception as exc:
                 logger.debug("Failed to index incoming message %s for RAG: %s", message.id, exc)
 
@@ -1271,7 +1369,7 @@ class DiscordBot(discord.Client):
         if not sent_message or not response_content:
             return
         try:
-            await self.message_index_service.index_bot_response_async(
+            indexed = await self.message_index_service.index_bot_response_async(
                 message_id=sent_message.id,
                 channel_id=sent_message.channel.id,
                 guild_id=source_message.guild.id if source_message.guild else None,
@@ -1281,6 +1379,10 @@ class DiscordBot(discord.Client):
                 reply_to_message_id=source_message.id,
                 created_at=getattr(sent_message, "created_at", datetime.now(timezone.utc)),
             )
+            if indexed:
+                self.hybrid_context_retriever.schedule_pending_embeddings(
+                    sent_message.channel.id
+                )
         except Exception as exc:
             logger.debug("Failed to index bot response %s for RAG: %s", getattr(sent_message, "id", None), exc)
 

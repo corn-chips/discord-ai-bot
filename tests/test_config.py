@@ -57,6 +57,7 @@ class BotConfigTest(unittest.TestCase):
         self.assertEqual(config.report_web_port, 8080)
         self.assertTrue(config.rag_enabled)
         self.assertEqual(config.rag_embedding_model, "gemini-embedding-2")
+        self.assertEqual(config.rag_embedding_dimensions, 768)
         self.assertEqual(config.default_model, "")
         self.assertEqual(config.router_model_name, "")
         self.assertEqual(config.available_models, [])
@@ -183,6 +184,7 @@ class BotConfigTest(unittest.TestCase):
         config.reply_context_range = 0
         config.max_context_images = -1
         config.rag_embedding_model = ""
+        config.rag_embedding_dimensions = 64
         config.rag_backfill_limit = -1
         config.rag_lexical_candidates = 0
         config.rag_rerank_candidates = -1
@@ -227,6 +229,7 @@ class BotConfigTest(unittest.TestCase):
                 "context.reply_range must be positive",
                 "context.max_images must be zero or positive",
                 "rag.embedding_model must not be empty when rag.enabled is true",
+                "rag.embedding_dimensions must be between 128 and 3072",
                 "rag.backfill_limit must be zero or positive",
                 "rag.lexical_candidates and rag.semantic_candidates must be positive",
                 "rag.rerank_candidates must be zero or positive",
@@ -268,6 +271,7 @@ class BotConfigTest(unittest.TestCase):
         config = self._valid_config()
         config.rag_enabled = False
         config.rag_embedding_model = ""
+        config.rag_embedding_dimensions = 64
         config.rag_backfill_limit = -1
         config.rag_lexical_candidates = 0
         config.rag_semantic_candidates = 0

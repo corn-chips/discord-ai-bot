@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, Mock
 from src.bot.discord_bot import (
     DiscordBot,
     SplitResponsePaginatorView as CompatibilityPaginatorView,
+    _get_accessible_rag_channels,
+    _start_automatic_rag_backlog,
 )
 from src.bot.live_message_coordinator import LiveMessageCoordinator
 from src.bot.rag_event_coordinator import RagEventCoordinator
@@ -171,6 +173,61 @@ class RagEventCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             [call.args[0] for call in index_service.mark_deleted_async.await_args_list],
             [1, 2, 3],
         )
+
+
+class AutomaticRagBacklogTest(unittest.TestCase):
+    @staticmethod
+    def _channel(channel_id, *, view=True, history=True, messageable=True):
+        channel = SimpleNamespace(id=channel_id)
+        channel.history = Mock() if messageable else None
+        channel.permissions_for = Mock(
+            return_value=SimpleNamespace(
+                view_channel=view,
+                read_message_history=history,
+            )
+        )
+        return channel
+
+    def test_starts_for_every_unique_readable_message_channel(self):
+        readable = self._channel(10)
+        hidden = self._channel(11, view=False)
+        no_history = self._channel(12, history=False)
+        category = self._channel(13, messageable=False)
+        thread = self._channel(20)
+        duplicate_thread = self._channel(10)
+        member = SimpleNamespace(id=99)
+        guild = SimpleNamespace(
+            id=1,
+            me=member,
+            channels=[readable, hidden, no_history, category],
+            threads=[thread, duplicate_thread],
+        )
+        retriever = SimpleNamespace(
+            start_all_channel_pregeneration=Mock(return_value=True)
+        )
+        owner = SimpleNamespace(
+            user=SimpleNamespace(id=99),
+            guilds=[guild],
+            config=SimpleNamespace(
+                rag_enabled=True,
+                rag_backfill_limit=0,
+                rag_index_bot_responses=True,
+            ),
+            hybrid_context_retriever=retriever,
+        )
+
+        self.assertEqual(
+            [channel.id for channel in _get_accessible_rag_channels(owner)],
+            [10, 20],
+        )
+        started_count = _start_automatic_rag_backlog(owner)
+
+        self.assertEqual(started_count, 2)
+        retriever.start_all_channel_pregeneration.assert_called_once()
+        call = retriever.start_all_channel_pregeneration.call_args
+        self.assertEqual([channel.id for channel in call.args[0]], [10, 20])
+        self.assertIsNone(call.kwargs["limit"])
+        self.assertEqual(call.kwargs["include_bot_user_id"], 99)
 
 
 class ResponseDeliveryCoordinatorTest(unittest.IsolatedAsyncioTestCase):

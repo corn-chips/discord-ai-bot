@@ -4,8 +4,9 @@ A Discord bot backed by Google's Gemini API. It responds to mentions and replies
 
 ## Capabilities
 
-- Gemini model routing, configurable thinking levels, and optional Google Search grounding
+- Gemini model routing, configurable thinking levels, and optional Google Search grounding. In the shipped `config.yaml` all three `model_complexity` tiers name the same model, so out of the box routing varies the thinking level but not the model; point the tiers at different models to change that.
 - Image understanding, image generation/editing, PDF conversion, and text-file input
+- Audio transcription of Discord voice messages and supported audio attachments, on the current message and the message it replies to
 - Markdown-aware message splitting, table formatting, and LaTeX rendering
 - Local hybrid message retrieval with lexical and embedding search
 - Per-channel personalities, pinned memories, live mode, and message hide/restore
@@ -20,7 +21,7 @@ The implementation entry point is `main.py`. Discord orchestration lives in `src
 - A Discord bot token with Message Content Intent enabled
 - A Google Gemini API key
 
-Python 3.12 is the supported baseline for the checked-in dependency snapshot. The current `constraints.txt` was generated from the repository's Python 3.12.10 virtual environment and includes packages whose pinned versions require Python 3.12.
+Python 3.12 is the supported baseline for the checked-in dependency snapshot. The current `constraints.txt` was generated from a clean Python 3.12.13 environment and includes packages whose pinned versions require Python 3.12.
 
 This repository does not currently include a `Dockerfile` or Compose configuration. Use the local Python workflow below.
 
@@ -34,6 +35,10 @@ GEMINI_API_KEY=replace_with_your_gemini_api_key
 # Optional; defaults to GEMINI_API_KEY when omitted
 NANO_BANANA_API_KEY=replace_with_a_separate_image_key
 ```
+
+Replace every placeholder above. Only the Discord token placeholder is rejected on startup: startup validation applies a minimum length of 50 characters to `DISCORD_BOT_TOKEN` and 30 to `GEMINI_API_KEY` (`validation.min_token_length_*` in `config.yaml`), and the Gemini placeholder is 32 characters long, so it passes. Fixing only the reported error leaves the bot running with an invalid Gemini key.
+
+The repository ships no `.env.example`, despite the `!.env.example` un-ignore rule in `.gitignore`. The block above is the reference for the file's contents.
 
 Do not commit `.env`; it is ignored by Git. Non-secret settings already live in the tracked `config.yaml`. Review that file before starting the bot, especially the model IDs, context limits, RAG settings, report-server settings, and logging paths.
 
@@ -58,6 +63,8 @@ sh start.sh --rebuild
 ```
 
 For a new or rebuilt environment, Python 3.12 must be available through `py -3.12` or `python` on Windows, or through `python3.12`, `python3`, or `python` on Linux and macOS. An existing Python 3.12 `.venv` can be used without a separate system interpreter. The rebuild option removes `.venv`; environment creation also clears repository `__pycache__` directories, `.pyc` files, `.mypy_cache`, and `.pytest_cache` before installing dependencies.
+
+On a genuinely fresh clone the start scripts are less dependable than they look; treat the manual installation below as the reliable path and fall back to it as soon as a start script misbehaves. `start.sh` is committed non-executable, so run it as `sh start.sh`, not `./start.sh`. If no interpreter reports 3.12 it exits with `Error: Python 3.12 not found` and no guidance on obtaining one, and because it installs dependencies only when `.venv/bin/python` is missing, an install that fails part way leaves a `.venv` that later runs accept and launch with packages missing; only `--rebuild` repairs that. Separately, `grok-prompts/` is committed as a submodule gitlink with no `.gitmodules`, so a fresh clone gets an empty directory it cannot populate and `/deepresearch` silently falls back to a built-in stub prompt.
 
 ### Manual installation
 
@@ -113,6 +120,13 @@ Install or validate the current snapshot with:
 .venv\Scripts\python.exe -m pip check
 ```
 
+```sh
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip check
+```
+
+Both commands require `pip` inside the environment. A `.venv` created by `python -m venv` or by the start scripts has it; one created by another tool may not, and `python -m pip` then fails with `No module named pip`. When the environment lacks `pip`, drive it from an outside Python 3.12 that has one: `python3.12 -m pip --python .venv/bin/python check`.
+
 To refresh dependencies, use a clean Python 3.12 virtual environment rather than an environment containing unrelated packages:
 
 1. Install and upgrade from `requirements.in` without applying the old constraints.
@@ -161,11 +175,19 @@ Some commands require Discord permissions or an optional service. Discord expose
 
 ## Development and verification
 
+Run every command below from the repository root. There is no `tests/__init__.py` and no `sys.path` shim, so `unittest` discovery started from any other directory fails with import errors rather than a useful message.
+
 Run the test suite:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
+
+```sh
+.venv/bin/python -m unittest discover -s tests -p "test_*.py"
+```
+
+Run a single module or test case with, for example, `-m unittest tests.test_config` or `-m unittest tests.test_config.BotConfigTest`.
 
 Compile all Python sources without starting the bot:
 
@@ -173,10 +195,18 @@ Compile all Python sources without starting the bot:
 .venv\Scripts\python.exe -m compileall -q main.py src scripts tests
 ```
 
+```sh
+.venv/bin/python -m compileall -q main.py src scripts tests
+```
+
 Check a configured running environment:
 
 ```powershell
 .venv\Scripts\python.exe scripts/health_check.py
+```
+
+```sh
+.venv/bin/python scripts/health_check.py
 ```
 
 The health check loads `.env` and `config.yaml`, checks local filesystem access and memory use, and calls configured Gemini services. It therefore requires valid credentials and network access for a fully successful result.
@@ -198,10 +228,9 @@ The health check loads `.env` and `config.yaml`, checks local filesystem access 
 |   `-- utils/                 Logging, errors, markdown, images, and token helpers
 |-- tests/                     Standard-library unittest suite
 |-- scripts/                   Health check and cache cleanup utilities
-|-- docs/                      Technical-debt planning and register
-|-- BOT_SYSTEM_REPORT.md       Architecture and message-pipeline report
-|-- pipeline.html              Pipeline diagram
-`-- message-sequence-flowchart.html
+`-- docs/                      Analyses, technical-debt register, and the docs index
 ```
 
-For architecture detail, see `BOT_SYSTEM_REPORT.md`, `pipeline.html`, and `message-sequence-flowchart.html`.
+For architecture detail, see `docs/BOT_SYSTEM_REPORT.md`, reading its staleness banner first. Earlier revisions of this section linked that report at the repository root alongside `pipeline.html` and `message-sequence-flowchart.html`; the report lives in `docs/` and neither diagram exists.
+
+`docs/README.md` indexes everything under `docs/` and marks each document CURRENT, HISTORICAL, or SUPERSEDED, so no document there has to be taken on trust. For the current known-issues worklist, start at `docs/ANALYSIS_BACKLOG.md`, which has one file per actionable item in `docs/analysis-tickets/`.

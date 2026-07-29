@@ -1,3 +1,49 @@
+> # STALE - READ WITH CARE
+>
+> **Reviewed 2026-07-29** at branch `dev`, HEAD `c83f740`, on `.venv/bin/python`
+> (CPython 3.12.13). This report is dated **2026-06-17** and predates the four tech-debt sprints
+> that landed on 2026-07-12 and 2026-07-13. **The body below has not been rewritten.** Its
+> per-module descriptions of surviving modules are largely still accurate, but its architecture
+> narrative describes the pre-sprint shape of the codebase and its verification line is wrong in
+> both halves. It also documents `help_system.py` (at `:112`) and `HelpSystem` (at `:745`), both
+> deleted on 2026-07-29 as verified-dead code; treat every reference to them as historical.
+>
+> **Banner refreshed after `0bf532c` ("Remove verified dead code from the source tree") and
+> `0c9eb91` ("Drop five unused runtime dependencies") landed on `dev`.** Where those commits
+> invalidated a row below, it is re-measured against the new HEAD and says so; every other figure
+> is still as of `c83f740`. The body itself remains untouched.
+>
+> **Known-wrong claims, each re-verified on 2026-07-29:**
+>
+> | Line | Claim as printed | Reality at `c83f740` |
+> |---|---|---|
+> | 16 | "`python -m pytest -q` passed: **9 tests**." | Wrong on both counts. pytest is not configured anywhere (no `pyproject.toml`, `setup.cfg`, `pytest.ini`, or `tox.ini`; pytest appears in neither `requirements.in` nor `constraints.txt`), and async tests would error without `pytest-asyncio`. The suite is **125 stdlib `unittest` tests in 13 files**, run from the repository root with `python -m unittest discover -s tests -p "test_*.py"`. |
+> | 21 | "Most durable application state is stored in **one** SQLite database path from `config.token_db_path`." | There are now **two** databases, `data/token_usage.db` and `data/message_rag.db`, and configuration validation *requires* them to be distinct (`config_helpers.py:513`; the check was at `:525` when this banner was written, and `0bf532c` shifted it). RAG and pin state lives in the second. |
+> | 27, 52 | "`commands.py` registers slash commands and creates several persistence services." | `src/bot/commands.py` is now a **35-line compositor** (`:46-80`; the range was `:57-91` when this banner was written, and `0bf532c` shifted it — the compositor itself is unchanged at 35 lines). Registration lives in the five registrar modules under `src/bot/command_modules/`. |
+> | 71 | `user_experience_service.py` described as providing typing indicators, embeds, reaction feedback, and progress notifications. | The service is dormant, and `0bf532c` deleted the eight unreachable public methods this banner originally listed. The file is now **130 lines** (was 513) with **one** public method left, `cleanup_typing_indicators`, which cleans up a dict that nothing populates; the other three members are the private helpers `_task_error_handler`, `_close_typing_entry` and `_sweep_stale_typing_entries`. |
+> | 83 | Module table lists `pipeline.html` and `message-sequence-flowchart.html` as "existing visual docs". | Neither file exists. `find . -name '*.html'` outside `.venv` returns zero results. |
+> | 462 | `message_retrieval_events` described as retrieval observability. | The table exists and is written to, but **nothing ever reads it**, and it has no pruning or retention policy. |
+> | 48-77 (module table) | 30 modules listed. | **15 of the 44** non-`__init__` production modules under `src/` are never mentioned anywhere in this document (45 when this banner was written; `0bf532c` deleted `services/help_system.py`, which the document *did* mention, so the unmentioned 15 are unchanged): `config_helpers.py`, `services/sqlite_utils.py`, `services/gemini_response_pipeline.py`, `bot/response_generation.py`, `bot/response_delivery.py`, `bot/live_message_coordinator.py`, `bot/rag_event_coordinator.py`, `bot/media_extraction.py`, and all seven `bot/command_modules/*.py`. All were created after this report's date. |
+> | ~462 (table inventory) | 10 SQLite tables named. | **Omits `message_backfill_progress` and `rag_migrations`**, both of which exist today. |
+> | 614 | README "references `.env.example`, `config.yaml.example`, `Dockerfile`, `docker-compose.yml` ... that are not present". | Historical. The README has since been cleaned of all of these, and its project-layout section — which for a time still linked this report at the repository root alongside two deleted HTML files — has been repaired too: `README.md:234` now points at `docs/` and records that neither diagram exists. |
+>
+> The report contains **zero `file:line` citations**, so unlike `AGENTS.md` it carries no stale
+> line-number debt. The only positional claims to maintain are the module and table inventories
+> above.
+>
+> **Still accurate and worth reading:** the executive summary's list of remaining risks (in
+> particular the ungated configuration commands and the unauthenticated report web UI), the
+> per-module descriptions of modules that still exist, the slash-command inventory, and the
+> `compileall` verification on line 17.
+>
+> **Current documents:** [`docs/BUG_ANALYSIS_2026-07-29.md`](BUG_ANALYSIS_2026-07-29.md),
+> [`docs/IMPROVEMENT_ANALYSIS_2026-07-29.md`](IMPROVEMENT_ANALYSIS_2026-07-29.md),
+> [`docs/ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md), and
+> [`docs/tech-debt-register.md`](tech-debt-register.md). Start with
+> [`docs/README.md`](README.md).
+>
+> --- end of staleness banner; original document follows unchanged ---
+
 # Discord AI Bot Codebase Report
 
 Date: 2026-06-17

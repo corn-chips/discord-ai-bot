@@ -1,3 +1,90 @@
+> # SUPERSEDED - HISTORICAL SNAPSHOT, DO NOT ACT ON THIS DOCUMENT
+>
+> **Archived 2026-07-29.** Re-validated at branch `dev`, HEAD `c83f740`, on
+> `.venv/bin/python` (CPython 3.12.13), baseline `Ran 125 tests ... OK`. The body below is
+> preserved verbatim and unedited. Every status field in it is wrong. Read this banner first.
+>
+> **Banner refreshed after `0bf532c` ("Remove verified dead code from the source tree") and
+> `0c9eb91` ("Drop five unused runtime dependencies") landed on `dev`.** Where those commits
+> invalidated a claim below, the entry is re-measured against the new HEAD and says so; every
+> other figure is still as of `c83f740`. The body itself remains untouched.
+>
+> **Superseded by [`docs/BUG_ANALYSIS_2026-07-29.md`](BUG_ANALYSIS_2026-07-29.md).** See also
+> [`docs/ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md) and
+> [`docs/tech-debt-register.md`](tech-debt-register.md).
+>
+> ## 1. The build identifier is fictitious
+>
+> The report cites **Build `8bc80f9`**. That object does not exist in this repository and never
+> did: `git cat-file -t 8bc80f9` returns *fatal: Not a valid object name*, no object among the
+> 824 in the repository matches the prefix, `git fsck --lost-found` is empty, and none of the 69
+> commits across all branches carries it. The code the report describes matches commit
+> **`936ab58`**, so the report was written against `936ab58` and mislabels its build.
+>
+> ## 2. Every "Status: Open" was stale the moment it was committed
+>
+> Commit **`88e330b` "Harden live routing and health checks" (2026-07-12)** added this report,
+> `tests/test_bug_regressions.py`, **and the fixes for all five bugs it describes**, in a single
+> commit. The six `Status: Open` markers (lines 7, 31, 80, 124, 169, 213) describe a state that
+> ended in the same commit that recorded them. Commit `5e45599` (2026-07-13) merely moved the
+> file into `docs/`; a diff against the original blob is empty. **The document has never been
+> edited since it was written.**
+>
+> ## 3. True current status of each bug
+>
+> | Bug | Printed status | True status at `c83f740` | Notes |
+> |---|---|---|---|
+> | **BUG-0001** Main response timeout cancels configured Gemini retries | Open, S2/P1 | **FIXED** | The outer `asyncio.wait_for` was deleted in `88e330b`. Timeout ownership now sits solely in `GeminiClient`. Superseded by a new finding: there is now *no* whole-sequence deadline, so one message can occupy the bot for a measured worst case of 480 s (488.5 s including backoff). The report's own alternative recommendation, "calculate an outer budget that includes every possible attempt and backoff delay", is the remedy that was never taken. Residue: `response.api_timeout_buffer` was dead configuration, parsed and read by nothing; it was **deleted in `0bf532c`** (2026-07-29) at all three sites, so the whole-sequence budget must add a new key rather than reuse it. |
+> | **BUG-0002** Routed messages ignore global and per-user model selections | Open, S3/P2 | **FIXED** | Fixed in `88e330b`. Precedence is resolved once in `DiscordBot._resolve_request_preferences`: request override, then user preference, then runtime or `/config` model, then complexity default. The routed model is now computed for logging only. |
+> | **BUG-0003** Long fenced-code responses can exceed Discord's message limit | Open, S3/P2 | **PARTIALLY FIXED** | The overflow symptom is closed: a post-hoc guard in `MessageSplitter` discards any oversized formatted split and falls back to a lossless fixed-width chunker, and the delivery layer caps at `min(split_length, 2000)`. **The root cause the report diagnosed is untouched.** Continuation markers and reopened fences are still added after the size calculation; the report's own probe still reproduces character-for-character (`[1981, 2030, 1153]`, `integrity=False`). Because the guard fires on nearly every long response, including plain prose that over-runs by one character, `_preserve_code_blocks` is now bypassed in the common case and long code answers are hard-chopped mid-token with unterminated fences. The bug traded "Discord rejects an oversized message" for "Discord renders mangled code". |
+> | **BUG-0004** Paginator edits overwrite complete bot responses in the RAG index | Open, S3/P2 | **FIXED** | Both halves. The guard `if before.content == after.content: return` lives at `src/bot/rag_event_coordinator.py:71-72` (verified verbatim). The related persistence defect is also fixed: `upsert_message` now takes `hidden: Optional[bool] = None` and preserves the row's existing hidden state, and `deleted_at = NULL` was removed from the `ON CONFLICT` clause. |
+> | **BUG-0005** Live-mode attachment batches discard other queued messages | Open, S3/P2 | **FIXED** | For the reported mechanism. `LiveMessageCoordinator.process_messages` requeues everything after the attachment at the head of the pending list and folds every earlier message into the combined prompt, so nothing is discarded. Other live-mode message-loss paths remain open and are tracked separately; they are not regressions of this bug. The largest is that `run_channel_worker` pops a batch and then swallows exceptions without requeueing it. |
+>
+> ## 4. Two problems with the regression tests, found by mutation testing
+>
+> Mutation testing was run on scratch copies of the repository. Both findings below were
+> reproduced independently on 2026-07-29.
+>
+> 1. **The BUG-0002 regression test is insufficient.** `test_request_model_precedence`
+>    (`tests/test_bug_regressions.py:37`) calls the precedence helper directly with a fake bot; it
+>    never exercises `_process_message_with_context`, where the bug actually lived. Reintroducing
+>    the original root cause verbatim, `model_override = routed_model` immediately after
+>    `discord_bot.py:798` (`:826` when this banner was written; `0bf532c` removed dead wrappers
+>    earlier in the file and shifted it), leaves **all 125 tests green**. The user preference and
+>    `/config model` would be silently bypassed again and nothing in the suite would notice.
+> 2. **The BUG-0001 regression test actively obstructs a needed repair.**
+>    `test_main_response_path_does_not_wrap_client_retry_timeout`
+>    (`tests/test_bug_regressions.py:110`) asserts that `asyncio.wait_for` is never called on the
+>    main response path. That guards a call name, not a behaviour: it is blind to the same bug
+>    written with `async with asyncio.timeout(...)`, and it **fails any correct whole-sequence
+>    deadline** implemented with `asyncio.wait_for`. Adding a correct budget of
+>    `per_attempt * (max_retries + 1) + 30` makes this test error out, surfacing as a misleading
+>    `TypeError: object Mock can't be used in 'await' expression` because the coordinator's
+>    blanket `except Exception` swallows the assertion. This test must be rewritten to assert on
+>    the budget, or on retry-count survival, before the missing whole-sequence deadline can be
+>    fixed.
+>
+> ## 5. Other stale details in the body below
+>
+> - "Parsed all 40 Python files" and "inventory helper across all 50 tracked and untracked
+>   workspace files" - the tree now holds **66** git-tracked `.py` files outside `.venv`
+>   (67 at `c83f740`; `0bf532c` deleted `src/services/help_system.py`).
+> - "test collection was blocked because the available Python environment does not have
+>   `google-genai` installed" - `google-genai` is installed and 125 tests run.
+> - "Preserved the pre-existing **untracked** `AGENTS.md`" - `AGENTS.md` is tracked as of
+>   `c83f740`.
+> - `_send_split_response`, `_send_simple_split_response`, and `_run_live_channel_worker` are
+>   named throughout as live code. They had already decayed into unreferenced back-compat
+>   wrappers and were **deleted in `0bf532c`**; the live implementations are on
+>   `ResponseDeliveryCoordinator` and `LiveMessageCoordinator`.
+> - "Verification Requirements: rerun the full `unittest` suite" - done: `Ran 125 tests ... OK`.
+>
+> **What is still worth carrying forward from the body below:** BUG-0003's root-cause analysis,
+> which remains accurate, and BUG-0001's second recommended option, an outer budget covering
+> every attempt and backoff delay, which is the fix the missing whole-sequence deadline needs.
+>
+> --- end of superseding banner; original document follows unchanged ---
+
 # Deep Bug Hunt Report
 
 ## Summary

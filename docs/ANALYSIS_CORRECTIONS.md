@@ -1,0 +1,151 @@
+# Analysis corrections
+
+Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `0c9eb91` | Baseline suite: 125 tests, OK
+
+## What this is
+
+The 2026-07-29 analysis corpus (`BUG_ANALYSIS_2026-07-29.md`, `IMPROVEMENT_ANALYSIS_2026-07-29.md`,
+`ANALYSIS_BACKLOG.md` and the 37 files in `analysis-tickets/`) is strong, and it already carries its
+own refutation section — §7 of the bug analysis knocked down eleven claims and cut back fifteen
+more. This file is the next layer: **claims that survived that pass and were nonetheless refuted
+when an implementer went to act on them.**
+
+Read this before acting on any ticket. Where this file and a ticket disagree, **this file wins** —
+every entry below was established by running something, and the command is given so you can
+re-run it.
+
+The corpus's own warning applies to the corpus: *"When reading any finding below S1, assume the
+mechanism and check the trigger."* Four of the entries below are cases where the mechanism was
+real and the trigger, the blast radius, or the prescribed fix was not.
+
+---
+
+## 1. `DAB-203` does not gate `DAB-194` — the "no test fails" claim is false
+
+**Claimed**, in four places: `analysis-tickets/DAB-203.md`, `analysis-tickets/DAB-194.md`,
+`IMPROVEMENT_ANALYSIS_2026-07-29.md` §13 item 18, and `BUG_ANALYSIS_2026-07-29.md` §7.1 — that a
+reference-counting dead-code pass would delete the live `/image-queue` slash command and **no test
+would fail**, because `test_command_registration._register()` passes
+`image_processing_service=None` and therefore pins a degraded 22-command tree.
+
+**Refuted.** The command is pinned twice, in the *image-enabled* tree, by a test that passes
+`image_processing_service=object()`:
+
+- `tests/test_command_registration.py:239-240` — the positional slice
+  `[command.name for command in bot.tree.get_commands()][5:10]` is asserted equal to
+  `["features", "edit-image", "image-queue", "clear-cache", "dev"]`.
+- `tests/test_command_registration.py:256` — a second, independent assertion on
+  `self._command(bot, "image-queue").description`.
+
+Reproduced by deleting the command registration in a `/tmp` copy of the tree and running the suite:
+`FAILED (failures=1)`, the diff being the `[5:10]` slice.
+
+**Root cause of the error.** The claim was derived from `grep image_queue`, which finds only the
+Python callback name. The test refers to the command by its *Discord* name, `image-queue`, with a
+hyphen. Both spellings have to be searched.
+
+**Consequence.** `DAB-194` was never blocked. It landed as `0bf532c` / `0c9eb91` ahead of
+`DAB-203`, and `/edit-image` and `/image-queue` both survive (`src/bot/command_modules/general.py`).
+`DAB-203` remains worth doing for its other reasons — see item 5 — but it is not a prerequisite for
+anything in the dead-code lane.
+
+## 2. `DAB-128` is already live — fixing `DAB-114` does not create it
+
+**Claimed**, in `ANALYSIS_BACKLOG.md` Tier 3 and in `analysis-tickets/DAB-114.md`: that
+`fig_height` is unbounded but inert, and *"becomes a live DoS the moment `DAB-114` is fixed"*,
+making the two a co-requisite pair.
+
+**Refuted.** The allocation happens *before* the failure, so it is reachable on the unfixed tree:
+
+- `src/services/content_renderer.py:446` — `fig, ax = plt.subplots(figsize=(10, fig_height))`
+- `src/services/content_renderer.py:487-489` — the `axhline(..., transform=ax.transAxes)` call that
+  is `DAB-114`'s actual bug, guarded by `if i < n - 1`
+
+With `n == 1` the separator line is never reached, so a **single** equation reaches `savefig`
+normally. One expression containing 300 `\\` row separators produces `figsize=(10, 135.85)` and a
+measured **2,558 MB peak RSS** — on the tree as shipped, with `DAB-114` unfixed.
+
+The corpus's own severity intuition was also inverted: a 50-equation response is benign (35.4 in,
+0.39 s, 147 KB). The bomb is one pathological expression, not many equations.
+
+**Consequence.** `DAB-128` is an independent, live resource exhaustion bug and needs its own ticket
+and its own commit. It must **not** be scheduled as a rider on `DAB-114`, where it would slip
+whenever `DAB-114` slips. `DAB-114` itself remains a correct one-keyword fix.
+
+## 3. `DAB-141`'s prescribed fix does not work on discord.py 2.7.1
+
+**Claimed**, in `analysis-tickets/DAB-141.md`: apply `@app_commands.default_permissions(...)` to the
+`/rag delete` **subcommand**, and verify with a test asserting the decorator took effect.
+
+**Refuted.** discord.py serialises permissions only at the top level of the command tree. A
+subcommand's `default_permissions` sets the local attribute — so the ticket's own acceptance test
+passes — but is **silently dropped from `to_dict()`**, and the payload Discord receives carries
+`default_member_permissions: None`. The gate looks correct in the test and protects nothing in
+production. This is the most dangerous kind of wrong fix: it closes the ticket while leaving the
+S1 open.
+
+**Consequence.** Gate at the **group** level. A useful side effect: a group-level gate does not
+populate `.checks`, so the assertion at `tests/test_command_registration.py:176`
+(`self.assertEqual(self._command(bot, path).checks, [])` for `rag status`, `rag backfill`,
+`rag delete`) does **not** break, and `DAB-141` needs no test churn at all. An
+`app_commands.check` *would* break it — verified both ways.
+
+## 4. `DAB-065`'s suggested fix contradicts the same document
+
+**Claimed**, in `BUG_ANALYSIS_2026-07-29.md` §3 (the executive summary of the nine S1s): fix the
+tombstone defect by *"adding `deleted_at = NULL` to the `ON CONFLICT` list"*.
+
+**Refuted by §8.2 of the same document**, which records that **removing** that clause *was* the
+BUG-0004 fix — the one that stopped paginator edits from resurrecting deliberately deleted
+messages. Re-adding it reintroduces BUG-0004.
+
+**Consequence.** Take the path `analysis-tickets/DAB-065.md` offers instead: make `upsert_message`
+**raise** on a failed write rather than returning a silent `False`, and have the edit handler
+tombstone only on genuine *content* ineligibility. Optionally add an explicit `restore`
+/`mark_undeleted` method. Do not touch the `ON CONFLICT` clause.
+
+## 5. The deny-filter hazard is real, but not the one that was documented
+
+The corpus warned that a dead-code pass needs a deny-filter because reference counting cannot see
+discord.py's dispatch-by-name, and illustrated that with `/image-queue` — which item 1 shows is
+actually protected.
+
+**The underlying warning is still correct, and the real gap is wider.** Deleting three live gateway
+handlers — `on_disconnect`, `on_resumed`, `on_raw_bulk_message_delete` — in a `/tmp` copy leaves the
+suite at **125 tests, OK**. No test references them. `DAB-203` as specified would not have caught
+that either, because it pins the *command* tree, not the event-handler surface.
+
+**Consequence.** The rule in `AGENTS.md` — verify reachability by execution, not by grep — stands and
+is load-bearing. `0bf532c` was checked specifically against this: it removes no `on_*` handler and
+no command decorator. Any future pass needs the same check, and `DAB-203`'s scope should be widened
+to cover event handlers if it is ever written.
+
+---
+
+## Restated figures
+
+| Claim | As published | Corrected | Why |
+|---|---|---|---|
+| `DAB-077` startup reconcile | "1938 ms -> 0.034 ms (57,000x)" | ~25 ms at 2k rows, ~120 ms at 10k, 1938 ms at 100k | The ratio is against a no-op, so it is unbounded and says nothing about the saving. The 1938 ms reproduces, but only at 100k indexed messages; this deployment is two orders of magnitude smaller. Quote the absolute saving at your corpus size. |
+| `DAB-106` validation gaps | "44-47 of 100 config fields" | **40-43 of 96** | `0bf532c` deleted four dead `BotConfig` fields, three of which were on the unvalidated list. |
+| `DAB-194` dead code | "-2,027 lines, 23,973 -> 21,946" | delivered **2,111 deletions** across 25 files, 23,973 -> 21,895 | Landed as `0bf532c`; the extra came from 96 unused import bindings rather than the predicted 87. |
+| `docs/tech-debt-register.md` TD-004 | "`README.md` still lists `BOT_SYSTEM_REPORT.md`, `pipeline.html` and `message-sequence-flowchart.html` at the repo root" | Already repaired | `README.md:234` now states the report lives in `docs/` and that neither diagram exists. `find . -name '*.html'` returns nothing. The TD-004 retraction was itself stale. |
+
+## A near-miss worth recording
+
+`config.yaml`'s orphaned `system_prompts.thinking_mode_addon` block was described in one working
+note as occupying lines **205-212**. It occupies **206-212**. Line 205 is the `system_prompts:`
+parent key, and deleting it reparents three live prompts (`high_complexity`, `low_complexity`,
+`medium_complexity`) under the preceding `personalities:` mapping. Both ranges parse as valid YAML,
+so nothing would have raised — the bot would simply have lost every system prompt. Caught before it
+landed; `0bf532c` deletes 206-212 only.
+
+The general lesson, which applies to every YAML edit in this repo: a range that parses is not a
+range that is correct. Check the resulting key structure, not just that `yaml.safe_load` succeeds.
+
+## Method
+
+Every entry above was established against the working tree, not by reading. Where a claim concerned
+test behaviour, the repository was copied to `/tmp`, mutated **in the copy**, and the suite re-run
+there; the real tree was never modified. Where a claim concerned resource use, the code path was
+executed and measured. `git status --porcelain` was verified clean before and after.

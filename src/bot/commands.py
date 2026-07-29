@@ -4,25 +4,14 @@ Slash commands for the Discord Grok Bot.
 This module is the stable composition entry point for slash-command registrars.
 """
 
-import asyncio
 import logging
-import os
-from io import BytesIO
-from datetime import datetime, timedelta
 from typing import Optional
-
-import discord
-import jinja2
-from discord import app_commands
 
 from ..config import BotConfig
 from ..services.gemini_client import GeminiClient
 from ..services.token_tracker import TokenTracker
-from ..services.channel_settings_service import ChannelSettingsService
-from ..services.user_preferences_service import UserPreferencesService
-from ..services.pin_service import PinService
-from ..services.message_visibility_service import MessageVisibilityService
-from ..models.data_models import MessageContext
+# Intentional re-exports: these helpers are unused inside this module but are
+# imported from here by tests, which pin them as part of this module's surface.
 from .command_modules.common import (
     _format_report_status,
     _format_timedelta,

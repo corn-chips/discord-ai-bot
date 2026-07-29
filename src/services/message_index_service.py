@@ -1397,9 +1397,6 @@ class MessageIndexService:
             logger.error("Failed to load indexed messages by id: %s", exc, exc_info=True)
             return []
 
-    async def get_messages_by_ids_async(self, message_ids: Iterable[int]) -> list[IndexedMessage]:
-        return await asyncio.to_thread(self.get_messages_by_ids, message_ids)
-
     def record_retrieval_event(
         self,
         *,

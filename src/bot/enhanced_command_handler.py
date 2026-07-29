@@ -15,7 +15,6 @@ from typing import Optional, Tuple
 from enum import Enum
 
 import discord
-from google import genai
 from google.genai import types
 
 from ..models.data_models import ImageEditRequest, EditType, ImageEditResult, TokenUsage

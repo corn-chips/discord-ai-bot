@@ -318,44 +318,6 @@ class MarkdownParser:
                     return False
         
         return True
-    
-    def get_markdown_context(self, text: str, position: int) -> Dict[str, Any]:
-        """
-        Get markdown context information at a specific position.
-        
-        Args:
-            text: The text to analyze
-            position: The position to get context for
-            
-        Returns:
-            Dictionary containing context information
-        """
-        context = {
-            'in_code_block': False,
-            'code_block_language': None,
-            'in_list': False,
-            'list_level': 0,
-            'in_quote': False,
-            'active_formatting': []
-        }
-        
-        blocks = self.parse_markdown(text)
-        
-        for block in blocks:
-            if block.start_pos <= position <= block.end_pos:
-                if block.type == BlockType.CODE_BLOCK:
-                    context['in_code_block'] = True
-                    context['code_block_language'] = block.language
-                elif block.type == BlockType.LIST_ITEM:
-                    context['in_list'] = True
-                    context['list_level'] = block.level or 0
-                elif block.type == BlockType.QUOTE_BLOCK:
-                    context['in_quote'] = True
-                elif block.type in [BlockType.BOLD, BlockType.ITALIC, BlockType.STRIKETHROUGH, 
-                                   BlockType.SPOILER, BlockType.INLINE_CODE]:
-                    context['active_formatting'].append(block.type.value)
-        
-        return context
 
 
 def detect_markdown_elements(text: str) -> List[MarkdownBlock]:

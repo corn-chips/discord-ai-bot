@@ -8,7 +8,7 @@ message relationships across splits.
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Dict, Any
 import logging
 
 from ..constants import DISCORD_MESSAGE_LIMIT
@@ -485,19 +485,3 @@ class MessageSplitter:
                                               for block in part.markdown_blocks)),
             'parts_with_continuation': sum(1 for part in parts if part.has_continuation)
         }
-
-
-def split_long_message(content: str, max_length: int = 2000) -> List[str]:
-    """
-    Convenience function to split a long message into parts.
-    
-    Args:
-        content: The message content to split
-        max_length: Maximum length for each part
-        
-    Returns:
-        List of message content strings
-    """
-    splitter = MessageSplitter(max_length=max_length)
-    parts = splitter.split_message(content)
-    return [part.content for part in parts]

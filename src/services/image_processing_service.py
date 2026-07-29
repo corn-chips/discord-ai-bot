@@ -15,7 +15,7 @@ from enum import Enum
 import uuid
 
 from ..config import BotConfig
-from ..models.data_models import ImageEditRequest, ImageEditResult, EditType, ValidationResult
+from ..models.data_models import ImageEditRequest, ImageEditResult
 from ..utils.image_utils import validate_image, estimate_processing_time
 from .nano_banana_client import NanoBananaClient, ServiceStatus
 
@@ -256,47 +256,6 @@ class ImageProcessingService:
                     return completed_job
 
         return None
-    
-    async def cancel_job(self, job_id: str) -> bool:
-        """
-        Cancel a processing job.
-        
-        Args:
-            job_id: Job identifier
-            
-        Returns:
-            True if job was cancelled, False if not found or already completed
-        """
-        async with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return False
-
-            if job.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED, ProcessingStatus.CANCELLED]:
-                return False
-
-            job.status = ProcessingStatus.CANCELLED
-            job.completed_at = datetime.now()
-            job.completion_event.set()
-
-            # Remove from active jobs if present
-            if job_id in self._active_jobs:
-                del self._active_jobs[job_id]
-
-            # Clean up progress callback
-            if job_id in self._progress_callbacks:
-                del self._progress_callbacks[job_id]
-
-            self._completed_jobs.append(job)
-            if len(self._completed_jobs) > 100:
-                self._completed_jobs.pop(0)
-
-            # Remove terminal job from active lookup map
-            if job_id in self._jobs:
-                del self._jobs[job_id]
-
-        logger.info(f"Cancelled job {job_id}")
-        return True
     
     def get_queue_info(self) -> Dict[str, Any]:
         """

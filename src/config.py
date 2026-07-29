@@ -75,7 +75,6 @@ class BotConfig:
     # === Response ===
     response_timeout: int = 30
     extended_timeout: int = 120
-    api_timeout_buffer: int = 10
     max_retries: int = 3
 
     # === Messages ===
@@ -117,7 +116,6 @@ class BotConfig:
     max_output_tokens_high: int = 65536
     router_temperature: float = 0.1
     router_max_output_tokens: int = 100
-    edit_detection_max_output_tokens: int = 10
 
     # === Safety Settings ===
     safety_harassment: str = "BLOCK_NONE"
@@ -164,7 +162,6 @@ class BotConfig:
     system_prompt_high_complexity: str = ""
     system_prompt_low_complexity: str = ""
     system_prompt_medium_complexity: str = ""
-    system_prompt_thinking_addon: str = ""
 
     # === Validation ===
     min_token_length_discord: int = 50
@@ -177,7 +174,6 @@ class BotConfig:
     leaderboard_limit: int = 10
     channel_history_limit: int = 500
     job_timeout: int = 60
-    progress_update_threshold: float = 0.1
 
     @classmethod
     def from_yaml(cls, config_path: Path = None) -> 'BotConfig':
@@ -232,16 +228,6 @@ class BotConfig:
             'command_suggestions': self.command_suggestion_threshold > 0.0,
             'performance_logging': self.enable_performance_logging
         }
-
-    def get_safety_threshold(self, category: str) -> str:
-        """Get the safety threshold string for a given category."""
-        mapping = {
-            'harassment': self.safety_harassment,
-            'hate_speech': self.safety_hate_speech,
-            'sexually_explicit': self.safety_sexually_explicit,
-            'dangerous_content': self.safety_dangerous_content,
-        }
-        return mapping.get(category, 'BLOCK_NONE')
 
 
 class ConfigurationError(Exception):

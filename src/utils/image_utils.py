@@ -7,8 +7,7 @@ validation, format conversion, compression, and basic image operations.
 
 import io
 import logging
-from typing import Optional, Tuple, List
-from PIL import Image, ImageOps
+from PIL import Image
 try:
     from PIL.ExifTags import ORIENTATION
 except ImportError:
@@ -122,29 +121,6 @@ def validate_image(image_data: bytes, max_size_mb: float = 10.0) -> ValidationRe
             is_valid=False,
             error_message=f"Failed to validate image: {str(e)}"
         )
-
-
-def get_supported_formats() -> List[str]:
-    """
-    Get list of supported image formats.
-    
-    Returns:
-        List of supported format names
-    """
-    return list(SUPPORTED_FORMATS.keys())
-
-
-def get_supported_extensions() -> List[str]:
-    """
-    Get list of supported file extensions.
-    
-    Returns:
-        List of supported file extensions
-    """
-    extensions = []
-    for format_extensions in SUPPORTED_FORMATS.values():
-        extensions.extend(format_extensions)
-    return extensions
 
 
 def estimate_processing_time(image_data: bytes, edit_type: str = "general") -> float:

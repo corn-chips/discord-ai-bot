@@ -241,9 +241,6 @@ def _parse_context_response_values(
         "extended_timeout": get_config_value(
             config_data, "response", "extended_timeout", 120
         ),
-        "api_timeout_buffer": get_config_value(
-            config_data, "response", "api_timeout_buffer", 10
-        ),
         "max_retries": get_config_value(config_data, "response", "max_retries", 3),
     }
 
@@ -361,9 +358,6 @@ def _parse_generation_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
         "router_max_output_tokens": get_config_value(
             config_data, "generation", "router_max_output_tokens", 100
         ),
-        "edit_detection_max_output_tokens": get_config_value(
-            config_data, "generation", "edit_detection_max_output_tokens", 10
-        ),
         "safety_harassment": get_config_value(
             config_data, "safety", "harassment", "BLOCK_NONE"
         ),
@@ -432,9 +426,6 @@ def _parse_content_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
         "system_prompt_medium_complexity": config_data.get(
             "system_prompts", {}
         ).get("medium_complexity", ""),
-        "system_prompt_thinking_addon": config_data.get(
-            "system_prompts", {}
-        ).get("thinking_mode_addon", ""),
     }
 
 
@@ -464,9 +455,6 @@ def _parse_validation_misc_values(
             config_data, "misc", "channel_history_limit", 500
         ),
         "job_timeout": get_config_value(config_data, "misc", "job_timeout", 60),
-        "progress_update_threshold": get_config_value(
-            config_data, "misc", "progress_update_threshold", 0.1
-        ),
     }
 
 

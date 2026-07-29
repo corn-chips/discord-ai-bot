@@ -109,10 +109,6 @@ class ChannelSettingsService:
             logger.error(f"Failed to set personality for channel {channel_id}: {e}")
             return False
 
-    def list_personalities(self) -> dict:
-        """Return a dict of personality name -> description."""
-        return {name: desc for name, desc in self.personalities.items()}
-
     def get_live_enabled(self, channel_id: int) -> bool:
         """Return whether mention-free live mode is enabled for a channel."""
         try:

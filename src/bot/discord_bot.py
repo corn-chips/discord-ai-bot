@@ -21,7 +21,7 @@ from ..constants import (
     SUPPORTED_TEXT_EXTENSIONS,
     RGB_WHITE_BACKGROUND,
 )
-from ..models.data_models import APIResponse, ImageEditRequest, EditType, TokenUsage, MessageContext
+from ..models.data_models import TokenUsage, MessageContext
 from ..services.context_collector import ContextCollector
 from ..services.gemini_client import GeminiClient
 from ..services.message_splitter import MessageSplitter
@@ -37,12 +37,14 @@ from ..services.message_index_service import MessageIndexService
 from ..services.context_pack_builder import ContextPackBuilder
 from ..services.hybrid_context_retriever import HybridContextRetriever
 from ..utils.error_manager import ErrorManager
-from ..utils.logging_config import PerformanceLogger, TimingContext, get_logger_with_context
+from ..utils.logging_config import PerformanceLogger, get_logger_with_context
 from .commands import setup_commands
 from .enhanced_command_handler import EnhancedCommandHandler
 from .live_message_coordinator import LiveMessageCoordinator
 from .media_extraction import MediaExtractionCoordinator
 from .rag_event_coordinator import RagEventCoordinator
+# SplitResponsePaginatorView is an intentional re-export: it is unused in this
+# module but is imported from here by tests, which pin it as part of the surface.
 from .response_delivery import ResponseDeliveryCoordinator, SplitResponsePaginatorView
 from .response_generation import ResponseGenerationCoordinator
 
@@ -375,7 +377,6 @@ class DiscordBot(discord.Client):
             pack_builder=self.context_pack_builder,
             pin_service=self._pin_service,
         )
-        self._message_index_service = self.message_index_service
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
             preserve_formatting=config.preserve_code_blocks,
@@ -698,10 +699,6 @@ class DiscordBot(discord.Client):
         """Compatibility wrapper for the live collaborator's channel lock."""
         return _get_or_create_live_coordinator(self).get_channel_lock(channel_id)
 
-    def _get_live_context_buffer(self, channel_id: int):
-        """Compatibility wrapper for one channel's rolling live context."""
-        return _get_or_create_live_coordinator(self).get_context_buffer(channel_id)
-
     def _is_live_mode_enabled(self, channel_id: int) -> bool:
         """Return whether mention-free live mode is enabled for this channel."""
         if not hasattr(self, "_channel_settings_service") or not self._channel_settings_service:
@@ -715,31 +712,6 @@ class DiscordBot(discord.Client):
     async def _enqueue_live_message(self, message: discord.Message):
         """Compatibility wrapper for live-mode queueing."""
         await _get_or_create_live_coordinator(self).enqueue(message)
-
-    async def _run_live_channel_worker(self, channel_id: int):
-        """Compatibility wrapper for a channel's live worker."""
-        await _get_or_create_live_coordinator(self).run_channel_worker(channel_id)
-
-    def _append_live_context_entry(
-        self,
-        channel_id: int,
-        content: str,
-        author: str,
-        message_id: int,
-        timestamp: datetime,
-        is_reply: bool = False,
-        replied_to_id: Optional[int] = None,
-    ):
-        """Compatibility wrapper for appending live rolling context."""
-        _get_or_create_live_coordinator(self).append_context_entry(
-            channel_id=channel_id,
-            content=content,
-            author=author,
-            message_id=message_id,
-            timestamp=timestamp,
-            is_reply=is_reply,
-            replied_to_id=replied_to_id,
-        )
 
     async def _process_live_messages(self, messages: List[discord.Message]) -> bool:
         """Compatibility wrapper for processing one live-mode batch."""
@@ -1200,23 +1172,6 @@ class DiscordBot(discord.Client):
         return images
 
     @staticmethod
-    def _create_image_context_entry(
-        source_type: str,
-        source_message: discord.Message,
-        attachment_name: str,
-        attachment_index: int,
-        pdf_page_number: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Compatibility wrapper for image-source metadata."""
-        return MediaExtractionCoordinator.create_image_context_entry(
-            source_type,
-            source_message,
-            attachment_name,
-            attachment_index,
-            pdf_page_number,
-        )
-
-    @staticmethod
     def _attach_image_order_metadata(
         image_context: List[Dict[str, Any]],
         context: List[MessageContext],
@@ -1308,21 +1263,6 @@ class DiscordBot(discord.Client):
         
         return False
     
-    async def _update_progress_message(self, message: discord.Message, progress_percent: int):
-        """Compatibility wrapper for progress-message updates."""
-        await ResponseGenerationCoordinator.update_progress_message(
-            message,
-            progress_percent,
-        )
-    
-    async def _add_error_reaction(self, message: discord.Message):
-        """Compatibility wrapper for best-effort error reactions."""
-        await ResponseGenerationCoordinator.add_error_reaction(message)
-    
-    def _get_user_friendly_error_message(self, error_msg: str) -> str:
-        """Compatibility wrapper for user-facing image-editing errors."""
-        return ResponseGenerationCoordinator.get_user_friendly_error_message(error_msg)
-    
     async def _handle_response_error(self, message: discord.Message, api_response):
         """Compatibility wrapper for shared API-response error handling."""
         await _get_or_create_response_generation(self).handle_response_error(
@@ -1403,11 +1343,6 @@ class DiscordBot(discord.Client):
             grounding_sources,
         )
     
-    @staticmethod
-    def _clean_split_part_for_embed(content: str) -> str:
-        """Compatibility wrapper for paginator page cleanup."""
-        return ResponseDeliveryCoordinator.clean_split_part_for_embed(content)
-
     async def _send_paginated_embed(
         self,
         pages: List[str],
@@ -1425,28 +1360,3 @@ class DiscordBot(discord.Client):
             attachments=attachments,
             title=title,
         )
-
-    async def _send_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
-        """Compatibility wrapper for intelligent response splitting."""
-        return await _get_or_create_response_delivery(self).send_split_response(
-            message,
-            response_content,
-            attachments=attachments,
-        )
-    
-    async def _send_simple_split_response(self, message: discord.Message, response_content: str, attachments: list = None) -> discord.Message:
-        """Compatibility wrapper for fixed-size fallback splitting."""
-        return await _get_or_create_response_delivery(self).send_simple_split_response(
-            message,
-            response_content,
-            attachments=attachments,
-        )
-    
-    async def _send_grounding_sources(self, reply_message: discord.Message, grounding_sources: list):
-        """Compatibility wrapper for grounding-source replies."""
-        await _get_or_create_response_delivery(self).send_grounding_sources(
-            reply_message,
-            grounding_sources,
-        )
-    
-

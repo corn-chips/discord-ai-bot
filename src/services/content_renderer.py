@@ -87,10 +87,6 @@ class ContentRenderer:
         r'\\dot', r'\\ddot', r'\\overline', r'\\underline',
         r'\\mathbb', r'\\mathcal', r'\\text', r'\\log',
     ]
-    # Matches a segment containing at least one LaTeX command, not already inside $
-    RAW_LATEX_RE = re.compile(
-        r'(?<!\$)(?:(?:[^$\n]*?)(?:' + '|'.join(RAW_LATEX_COMMANDS) + r')(?:[^$\n]*?))+',
-    )
 
     def __init__(self):
         self._matplotlib_available = False

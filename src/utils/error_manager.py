@@ -7,7 +7,7 @@ throughout the application and generating user-friendly error messages.
 
 import logging
 from enum import Enum
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 from dataclasses import dataclass
 
 import discord
@@ -34,12 +34,9 @@ class ErrorType(Enum):
     
     # Configuration errors
     CONFIGURATION_ERROR = "configuration_error"
-    MISSING_TOKEN = "missing_token"
-    INVALID_TOKEN = "invalid_token"
     
     # Context collection errors
     CONTEXT_COLLECTION_ERROR = "context_collection_error"
-    MESSAGE_HISTORY_ERROR = "message_history_error"
     
     # Image processing errors
     IMAGE_PROCESSING_ERROR = "image_processing_error"
@@ -110,12 +107,9 @@ class ErrorManager:
             
             # Configuration errors
             ErrorType.CONFIGURATION_ERROR: "⚙️ **Configuration Error**\nI'm experiencing a configuration issue. Please try again later!",
-            ErrorType.MISSING_TOKEN: "🔑 **Missing Token**\nI'm not properly configured. Please contact an administrator!",
-            ErrorType.INVALID_TOKEN: "🚫 **Invalid Token**\nMy authentication credentials are invalid. Please contact an administrator!",
             
             # Context collection errors
             ErrorType.CONTEXT_COLLECTION_ERROR: "📚 **Context Collection Error**\nI had trouble reading the conversation history. Please try again!",
-            ErrorType.MESSAGE_HISTORY_ERROR: "📜 **Message History Error**\nI couldn't access the message history. Please try again!",
             
             # Image processing errors
             ErrorType.IMAGE_PROCESSING_ERROR: "🖼️ **Image Processing Error**\nI encountered an issue while processing your image. Please try again with a different image!\n\n💡 **Tip:** Use `/help image_editing` to learn about supported image editing features.",
@@ -149,10 +143,7 @@ class ErrorManager:
             ErrorType.DISCORD_HTTP_ERROR: "Discord HTTP error occurred",
             ErrorType.DISCORD_CONNECTION_ERROR: "Discord connection error",
             ErrorType.CONFIGURATION_ERROR: "Configuration validation failed",
-            ErrorType.MISSING_TOKEN: "Required authentication token missing",
-            ErrorType.INVALID_TOKEN: "Authentication token format invalid",
             ErrorType.CONTEXT_COLLECTION_ERROR: "Failed to collect message context",
-            ErrorType.MESSAGE_HISTORY_ERROR: "Failed to retrieve message history",
             ErrorType.IMAGE_PROCESSING_ERROR: "Image processing operation failed",
             ErrorType.IMAGE_VALIDATION_ERROR: "Image validation failed",
             ErrorType.IMAGE_SIZE_ERROR: "Image exceeds maximum size limit",
@@ -334,21 +325,6 @@ class ErrorManager:
             "I encountered an issue. Please try again! 🤖"
         )
     
-    def get_technical_message(self, error_type: ErrorType) -> str:
-        """
-        Get a technical error message for logging purposes.
-        
-        Args:
-            error_type: The type of error that occurred
-            
-        Returns:
-            Technical error message string
-        """
-        return self._technical_messages.get(
-            error_type,
-            "Unhandled error occurred"
-        )
-    
     def log_error(self, error_context: ErrorContext, additional_info: Optional[str] = None) -> None:
         """
         Log an error with appropriate level and context information.
@@ -477,247 +453,3 @@ class ErrorManager:
         except Exception as unexpected_error:
             logger.error(f"Unexpected error sending error response: {unexpected_error}")
             return False
-    
-    def handle_image_processing_error(
-        self, 
-        error: Exception, 
-        context_info: Optional[str] = None,
-        image_size: Optional[int] = None,
-        image_format: Optional[str] = None
-    ) -> ErrorContext:
-        """
-        Handle image processing errors with specific processing and recovery suggestions.
-        
-        Args:
-            error: The image processing error that occurred
-            context_info: Optional context information
-            image_size: Optional image size in bytes
-            image_format: Optional image format
-            
-        Returns:
-            ErrorContext with image processing-specific handling
-        """
-        error_context = self.create_error_context(error)
-        
-        # Add actionable suggestions based on error type
-        if error_context.error_type == ErrorType.IMAGE_SIZE_ERROR:
-            if image_size:
-                size_mb = image_size / (1024 * 1024)
-                error_context.user_message += f"\n\n💡 **Tip:** Your image is {size_mb:.1f}MB. Try compressing it or using a smaller resolution."
-        
-        elif error_context.error_type == ErrorType.IMAGE_FORMAT_ERROR:
-            if image_format:
-                error_context.user_message += f"\n\n💡 **Tip:** {image_format.upper()} format is not supported. Try converting to JPG or PNG."
-            else:
-                error_context.user_message += f"\n\n💡 **Tip:** Supported formats are JPG, PNG, GIF, and WebP."
-        
-        elif error_context.error_type == ErrorType.NANO_BANANA_API_ERROR:
-            error_context.user_message += f"\n\n💡 **Tip:** The image editing service may be experiencing high load. Try again in a few minutes."
-            # Set retry delay for API errors
-            error_context.retry_after = 120  # 2 minutes
-        
-        elif error_context.error_type == ErrorType.IMAGE_PROCESSING_ERROR:
-            error_context.user_message += f"\n\n💡 **Tip:** Try using a simpler image or different edit instructions."
-        
-        # Log the error with context
-        log_info = f"Image Processing Error"
-        if context_info:
-            log_info += f" ({context_info})"
-        if image_size:
-            log_info += f" - Size: {image_size} bytes"
-        if image_format:
-            log_info += f" - Format: {image_format}"
-        
-        self.log_error(error_context, log_info)
-        
-        return error_context
-    
-    def handle_message_formatting_error(
-        self, 
-        error: Exception, 
-        message_length: Optional[int] = None,
-        context_info: Optional[str] = None
-    ) -> ErrorContext:
-        """
-        Handle message formatting errors with recovery mechanisms.
-        
-        Args:
-            error: The message formatting error that occurred
-            message_length: Optional original message length
-            context_info: Optional context information
-            
-        Returns:
-            ErrorContext with message formatting-specific handling
-        """
-        error_context = self.create_error_context(error)
-        
-        # Add recovery suggestions based on error type
-        if error_context.error_type == ErrorType.MESSAGE_TOO_LONG_ERROR:
-            error_context.user_message += f"\n\n💡 **Tip:** I'll try to break this into smaller messages."
-            if message_length:
-                error_context.user_message += f" (Original length: {message_length:,} characters)"
-        
-        elif error_context.error_type == ErrorType.MESSAGE_SPLIT_ERROR:
-            error_context.user_message += f"\n\n💡 **Tip:** Some formatting may be simplified to ensure delivery."
-        
-        elif error_context.error_type == ErrorType.MARKDOWN_PROCESSING_ERROR:
-            error_context.user_message += f"\n\n💡 **Tip:** The response will be sent as plain text to ensure readability."
-        
-        # Log the error with context
-        log_info = f"Message Formatting Error"
-        if context_info:
-            log_info += f" ({context_info})"
-        if message_length:
-            log_info += f" - Length: {message_length} characters"
-        
-        self.log_error(error_context, log_info)
-        
-        return error_context
-    
-    def suggest_error_resolution(self, error_type: ErrorType, context: dict) -> str:
-        """
-        Suggest specific resolution steps for different error types.
-        
-        Args:
-            error_type: The type of error that occurred
-            context: Additional context information
-            
-        Returns:
-            Actionable resolution suggestion string
-        """
-        suggestions = {
-            ErrorType.IMAGE_SIZE_ERROR: [
-                "Compress your image using an online tool",
-                "Reduce image resolution or dimensions",
-                "Convert to JPG format for smaller file size"
-            ],
-            ErrorType.IMAGE_FORMAT_ERROR: [
-                "Convert image to JPG, PNG, GIF, or WebP format",
-                "Use an online image converter",
-                "Save image in a different format from your editor"
-            ],
-            ErrorType.NANO_BANANA_API_ERROR: [
-                "Wait a few minutes and try again",
-                "Check if the image editing service is operational",
-                "Try with a simpler edit instruction"
-            ],
-            ErrorType.IMAGE_PROCESSING_ERROR: [
-                "Try with a different image",
-                "Use simpler edit instructions",
-                "Ensure image is not corrupted"
-            ],
-            ErrorType.MESSAGE_SPLIT_ERROR: [
-                "Request a shorter response",
-                "Ask for the information in parts",
-                "Use simpler formatting in your request"
-            ],
-            ErrorType.DISCORD_PERMISSION_ERROR: [
-                "Check bot permissions in server settings",
-                "Ensure bot has 'Send Messages' permission",
-                "Contact server administrator for permission help"
-            ]
-        }
-        
-        error_suggestions = suggestions.get(error_type, ["Try again later", "Contact support if issue persists"])
-        
-        suggestion_text = "**Suggested solutions:**\n"
-        for i, suggestion in enumerate(error_suggestions, 1):
-            suggestion_text += f"{i}. {suggestion}\n"
-        
-        return suggestion_text.strip()
-    
-    def log_user_action_error(
-        self, 
-        user_id: str, 
-        action: str, 
-        error: Exception,
-        additional_context: Optional[dict] = None
-    ) -> None:
-        """
-        Log user action errors with context for debugging and monitoring.
-        
-        Args:
-            user_id: ID of the user who triggered the error
-            action: The action that caused the error
-            error: The exception that occurred
-            additional_context: Optional additional context information
-        """
-        error_context = self.create_error_context(error)
-        
-        # Build context information
-        context_parts = [f"User: {user_id}", f"Action: {action}"]
-        
-        if additional_context:
-            for key, value in additional_context.items():
-                context_parts.append(f"{key}: {value}")
-        
-        context_info = " | ".join(context_parts)
-        
-        # Log with appropriate level based on error severity
-        if error_context.error_type in {ErrorType.RATE_LIMIT, ErrorType.TIMEOUT}:
-            log_level = logging.WARNING
-        else:
-            log_level = logging.ERROR
-        
-        logger.log(
-            log_level,
-            f"User action error - {error_context.technical_details}",
-            extra={
-                'user_id': user_id,
-                'action': action,
-                'error_type': error_context.error_type.value,
-                'context': context_info
-            },
-            exc_info=error
-        )
-    
-    async def attempt_error_recovery(
-        self, 
-        error_context: ErrorContext, 
-        recovery_function,
-        max_retries: int = 3,
-        backoff_factor: float = 2.0
-    ) -> Tuple[bool, Optional[Exception]]:
-        """
-        Attempt to recover from transient errors with exponential backoff.
-        
-        Args:
-            error_context: The error context to recover from
-            recovery_function: Async function to call for recovery
-            max_retries: Maximum number of retry attempts
-            backoff_factor: Multiplier for retry delay
-            
-        Returns:
-            Tuple of (success, final_error)
-        """
-        if not error_context.should_retry:
-            return False, error_context.original_error
-        
-        import asyncio
-        
-        retry_count = 0
-        last_error = error_context.original_error
-        
-        while retry_count < max_retries:
-            try:
-                # Calculate delay with exponential backoff
-                delay = (backoff_factor ** retry_count)
-                if error_context.retry_after:
-                    delay = max(delay, error_context.retry_after)
-                
-                if delay > 0:
-                    logger.info(f"Retrying after {delay} seconds (attempt {retry_count + 1}/{max_retries})")
-                    await asyncio.sleep(delay)
-                
-                # Attempt recovery
-                await recovery_function()
-                logger.info(f"Error recovery successful after {retry_count + 1} attempts")
-                return True, None
-                
-            except Exception as retry_error:
-                retry_count += 1
-                last_error = retry_error
-                logger.warning(f"Retry attempt {retry_count} failed: {retry_error}")
-        
-        logger.error(f"Error recovery failed after {max_retries} attempts")
-        return False, last_error

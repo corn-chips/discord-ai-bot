@@ -52,48 +52,6 @@ class ResponseGenerationCoordinator:
         self.send_status_message = send_status_message
         self.deliver_response = deliver_response
 
-    @staticmethod
-    async def update_progress_message(
-        message: discord.Message,
-        progress_percent: int,
-    ) -> None:
-        """Update an image-edit progress message without failing the request."""
-        try:
-            await message.edit(
-                content=f"🎨 Editing your image... {progress_percent}% complete"
-            )
-        except Exception as exc:
-            logger.warning("Failed to update progress message: %s", exc)
-
-    @staticmethod
-    async def add_error_reaction(message: discord.Message) -> None:
-        """Add an error reaction without masking the original error."""
-        try:
-            await message.add_reaction("❌")
-        except Exception as exc:
-            logger.debug("Failed to add error reaction: %s", exc)
-
-    @staticmethod
-    def get_user_friendly_error_message(error_msg: str) -> str:
-        """Convert image-editing failures into user-facing messages."""
-        error_lower = error_msg.lower()
-        if "rate limit" in error_lower:
-            return "You're making requests too quickly. Please wait a moment and try again."
-        if "timeout" in error_lower:
-            return "The image editing service timed out. Please try again with a smaller image."
-        if "invalid" in error_lower and "format" in error_lower:
-            return "The image format is not supported. Please use PNG, JPEG, or GIF."
-        if "too large" in error_lower or "size" in error_lower:
-            return "The image is too large. Please use an image smaller than 10MB."
-        if "service unavailable" in error_lower:
-            return "The image editing service is temporarily unavailable. Please try again later."
-        if "authentication" in error_lower:
-            return (
-                "There's an issue with the image editing service configuration. "
-                "Please contact support."
-            )
-        return f"Image editing failed: {error_msg}"
-
     async def handle_response_error(
         self,
         message: discord.Message,

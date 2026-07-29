@@ -8,7 +8,7 @@ reply context enhancement.
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional, Set
+from typing import List, Set
 import discord
 from ..models.data_models import MessageContext
 from ..utils.logging_config import TimingContext
@@ -306,33 +306,3 @@ class ContextCollector:
         formatted_lines.append("=== END CONTEXT ===")
         
         return "\n".join(formatted_lines)
-    
-    async def collect_full_context(self, message: discord.Message) -> str:
-        """
-        Collect and format complete context for a Discord message.
-        
-        This is the main method that combines all context collection functionality
-        to provide a complete context string for AI processing.
-        
-        Args:
-            message: The Discord message to collect context for
-            
-        Returns:
-            Formatted context string ready for Gemini API
-        """
-        # Get standard channel context
-        standard_context = await self.get_channel_context(message.channel)
-        
-        # Get enhanced reply context if this is a reply
-        reply_context = []
-        if message.reference:
-            reply_context = await self.get_reply_context(message)
-        
-        # Combine contexts, removing duplicates
-        if reply_context:
-            combined_context = self._remove_duplicate_messages(standard_context, reply_context)
-        else:
-            combined_context = standard_context
-        
-        # Format for API consumption
-        return self.format_context(combined_context)

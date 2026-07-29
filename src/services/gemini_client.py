@@ -163,22 +163,6 @@ class GeminiClient:
         )
         return True
 
-    # Backward-compatible wrapper for legacy prompt-mode callers.
-    def get_prompt_mode(self) -> str:
-        """Return legacy prompt mode derived from effective thinking level."""
-        level = self.get_thinking_level(self._current_model_name)
-        return "thinking" if level in {"low", "medium", "high"} else "short"
-
-    # Backward-compatible wrapper for legacy prompt-mode callers.
-    def set_prompt_mode(self, mode: str) -> bool:
-        """Map legacy prompt mode to native thinking levels."""
-        if mode == "thinking":
-            return self.set_thinking_level("high")
-        if mode == "short":
-            return self.set_thinking_level("minimal")
-        logger.error(f"Invalid prompt mode: {mode}. Must be 'short' or 'thinking'")
-        return False
-
     def set_force_search(self, enabled: bool) -> None:
         """
         Enable or disable forced Google Search for all queries.
@@ -188,10 +172,6 @@ class GeminiClient:
         """
         self._force_search = enabled
         logger.info(f"DeepSearch mode set to: {enabled}")
-    
-    def get_force_search(self) -> bool:
-        """Get the current DeepSearch mode state."""
-        return self._force_search
     
     def get_api_usage_info(self) -> dict:
         """
@@ -287,15 +267,6 @@ class GeminiClient:
             logger.info("=" * 80)
             return False
     
-    def get_timeout_for_current_model(self) -> int:
-        """
-        Get the appropriate timeout duration based on current model and thinking level.
-        
-        Returns:
-            Timeout in seconds
-        """
-        return self.get_timeout_for_model(self._current_model_name, None)
-
     def get_timeout_for_model(
         self,
         model_name: str,
@@ -343,40 +314,6 @@ class GeminiClient:
         else:
             return "5-15 seconds"
     
-    def set_model_by_complexity(self, complexity_level: str) -> bool:
-        """
-        Select and switch to the appropriate model based on complexity level.
-        
-        Args:
-            complexity_level: "low", "medium", or "high"
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        logger.info(f"Setting model based on complexity level: {complexity_level}")
-        normalized_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"
-        if complexity_level not in ["low", "medium", "high"]:
-            logger.warning(
-                "Invalid complexity level '%s', defaulting to 'low'",
-                complexity_level,
-            )
-        self._current_complexity_level = normalized_level
-
-        target_model = self._get_model_complexity_entry(normalized_level)["model"]
-        if target_model not in self.config.valid_models:
-            logger.warning(
-                "Configured model '%s' for complexity '%s' is invalid; falling back to default model '%s'",
-                target_model,
-                normalized_level,
-                self.config.default_model,
-            )
-            target_model = self.config.default_model
-
-        success = self.set_model(target_model)
-        if success:
-            self._runtime_model_override = False
-        return success
-
     def get_model_for_complexity(self, complexity_level: str) -> str:
         """Resolve the configured model for a complexity tier without mutating shared state."""
         normalized_level = complexity_level if complexity_level in ["low", "medium", "high"] else "low"

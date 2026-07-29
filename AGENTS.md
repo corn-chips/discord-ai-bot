@@ -47,8 +47,12 @@ Work on the `dev` branch â€” do not target `main`.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 13 test files hold 27 `TestCase` classes, all named `<Subject>Test`).
+ the 15 test files hold 31 `TestCase` classes, all named `<Subject>Test`).
 - `python -m compileall -q main.py src scripts tests` â€” syntax check without booting.
+- `python scripts/mutation_check.py` â€” reintroduces each fixed bug in a scratch copy and
+ reports whether the suite notices. ~7 s with `--jobs 5`; exit 0 only when every mutant
+ matches its declared expectation in `scripts/mutants.toml`. Use it to prove a new
+ regression test actually fails on reintroduction, rather than assuming it does.
 - `python scripts/health_check.py` â€” needs real credentials and network; not an offline check.
 - **pytest is not configured** (no pyproject/setup.cfg/pytest.ini, not in requirements) and
  async tests would error without `pytest-asyncio`. Use `unittest`.
@@ -200,7 +204,9 @@ most of what a fresh sweep would rediscover.
 - `docs/IMPROVEMENT_ANALYSIS_2026-07-29.md`: architecture, data layer, performance, cost
  accounting, config, and testing/DX, with measured before/after figures.
 
-Some tickets deliberately change the test count; each says so. Assume 125 otherwise.
+Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
+now 140** (`0bf532c`..`02b91a7` added `tests/test_repo_hygiene.py` and `tests/test_on_message_flow.py`).
+Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Two commits have
 since landed â€” `0bf532c` (dead-code removal) and `0c9eb91` (five dependencies dropped) â€”
@@ -224,11 +230,14 @@ the line number.
    dead. A 6,076-char fenced-code response splits into 4 pages, every one `hard_split=True`,
    cutting mid-token, page 1 left with an unterminated fence and the last page an orphan
    close.
- - **The BUG-0002 regression test does not reach the buggy site.**
+ - **BUG-0002's original regression test did not reach the buggy site — now closed.**
    `test_request_model_precedence` (`test_bug_regressions.py:37`) unit-tests
-   `_resolve_request_preferences` in isolation. Reinstating `model_override = routed_model`
-   after `discord_bot.py:798` leaves all 125 tests green (verified by mutating a scratch copy
-   of the tree).
+   `_resolve_request_preferences` in isolation, so reinstating `model_override = routed_model`
+   after `discord_bot.py:798` left all 125 tests green. `02b91a7` added
+   `tests/test_on_message_flow.py`, whose
+   `test_router_complexity_never_hardens_into_a_model_override` asserts the contract at the
+   caller. `python scripts/mutation_check.py M-BUG0002` now reports KILLED; the full run is
+   5/5.
  - **`test_main_response_path_does_not_wrap_client_retry_timeout`
    (`test_bug_regressions.py:110`) obstructs a repair the code still needs.** It patches
    `src.bot.discord_bot.asyncio.wait_for` with an `AssertionError` side effect; since that
@@ -241,7 +250,7 @@ the line number.
  Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
 
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (125 stdlib `unittest` tests across 13 files). It now carries a staleness banner listing its
+ (140 stdlib `unittest` tests across 15 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 
 

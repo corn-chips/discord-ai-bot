@@ -48,5 +48,7 @@ HEAD `c83f740`, using `.venv/bin/python` (CPython 3.12.13). Two commits have lan
 57 -> 51 pins). Their findings still hold, but `file:line` evidence pointing into a file either
 commit touched no longer resolves; re-locate the symbol rather than trusting the offset. The test
 baseline is `python -m unittest discover -s tests -p "test_*.py"` run from the repository root:
-**125 tests, OK**, in 13 files, re-run at HEAD `0c9eb91` and still green. pytest is not
-configured in this repository.
+it was **125 tests, OK** in 13 files when the analysis was written, and is **140 tests, OK** in
+15 files at HEAD, after `02b91a7` added `tests/test_repo_hygiene.py` (2) and
+`tests/test_on_message_flow.py` (13). Ticket baselines quote the 125 figure; the gate is 140.
+pytest is not configured in this repository.

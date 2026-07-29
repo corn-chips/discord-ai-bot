@@ -31,8 +31,13 @@ wheels/
 *.egg
 
 # Logs
+# *.log alone misses RotatingFileHandler's backups (bot.log.1, bot.log.2, ...),
+# which hold the OLDER history: user message content, uploaded-file text and
+# unredacted exception text. Ignore the whole logs/ tree, and rotated names
+# anywhere else.
 *.log
-logs/*.log
+*.log.[0-9]*
+logs/
 
 # Local databases
 *.db
@@ -68,11 +73,12 @@ cache/
 *.tmp
 *.bak
 *.swp
+# The services mkdir this on demand, so no tracked placeholder is needed.
+# A "!data/.gitkeep" negation used to sit here and could never fire: git does
+# not descend into an excluded directory, so a rule re-including a child of
+# "data/" is dead.
 data/
-!data/.gitkeep
 
 # Misc
 *.pid
 
-# Project specific
-bot.log

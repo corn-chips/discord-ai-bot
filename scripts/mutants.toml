@@ -1,0 +1,68 @@
+# Mutant catalogue for scripts/mutation_check.py
+#
+# One entry per fixed bug that claims a regression test. Each mutant
+# reintroduces the original defect as a literal source edit. A regression test
+# earns its name only when its mutant is KILLED.
+#
+# expect = "killed"         -> the suite must fail. CI fails if the mutant survives.
+# expect = "known-survivor" -> a documented coverage gap. CI fails if it is
+#                              *unexpectedly* killed, forcing the entry to be
+#                              promoted rather than left to rot.
+
+[[mutant]]
+id = "M-BUG0001"
+bug = "BUG-0001"
+summary = "Outer wait_for reclaims ownership of the Gemini retry budget"
+guard = "test_main_response_path_does_not_wrap_client_retry_timeout"
+file = "src/bot/response_generation.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    api_response = await self.gemini_client.generate_response(\n"
+replace = "                    api_response = await asyncio.wait_for(self.gemini_client.generate_response(\n"
+[[mutant.edit]]
+find = "                        language=user_language,\n                    )\n                    await self._delete_status_message(status_message, \"after response\")\n"
+replace = "                        language=user_language,\n                    ), timeout=30)\n                    await self._delete_status_message(status_message, \"after response\")\n"
+
+[[mutant]]
+id = "M-BUG0002"
+bug = "BUG-0002"
+summary = "Router complexity hardens into model_override, bypassing /config model and /preferences model"
+guard = "test_request_model_precedence"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                routed_model = self.gemini_client.get_model_for_complexity(complexity_level)\n"
+replace = "                model_override = self.gemini_client.get_model_for_complexity(complexity_level)\n                routed_model = model_override\n"
+
+[[mutant]]
+id = "M-BUG0003"
+bug = "BUG-0003"
+summary = "A formatted split is returned even when a part exceeds the Discord limit"
+guard = "test_long_fenced_line_is_lossless_and_within_discord_limit"
+file = "src/services/message_splitter.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if (\n            any(len(part.content) > self.max_length for part in parts)\n            or not self.validate_split_integrity(stripped_content, parts)\n        ):\n"
+replace = "        if False:\n"
+
+[[mutant]]
+id = "M-BUG0004"
+bug = "BUG-0004"
+summary = "Paginator-only edits re-index the emptied bot message over its canonical text"
+guard = "test_paginator_only_edit_keeps_canonical_rag_content"
+file = "src/bot/rag_event_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if before.content == after.content:\n                return\n"
+replace = "            pass\n"
+
+[[mutant]]
+id = "M-BUG0005"
+bug = "BUG-0005"
+summary = "A live-mode attachment batch discards the messages queued behind it"
+guard = "test_attachment_suffix_precedes_messages_queued_during_processing"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    self.pending_messages[channel_id] = remaining_messages + newly_queued\n"
+replace = "                    self.pending_messages[channel_id] = newly_queued\n"

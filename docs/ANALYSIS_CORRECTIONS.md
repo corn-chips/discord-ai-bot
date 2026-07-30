@@ -1,6 +1,6 @@
 # Analysis corrections
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `0c9eb91` | Baseline suite: 125 tests, OK
+Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `28409e4` | Baseline suite: 140 tests, OK
 
 ## What this is
 
@@ -112,7 +112,8 @@ actually protected.
 
 **The underlying warning is still correct, and the real gap is wider.** Deleting three live gateway
 handlers — `on_disconnect`, `on_resumed`, `on_raw_bulk_message_delete` — in a `/tmp` copy leaves the
-suite at **125 tests, OK**. No test references them. `DAB-203` as specified would not have caught
+suite at **140 tests, OK** (re-measured at `28409e4`; it was 125 at `0c9eb91`, and the two test
+files added since change nothing here). No test references them. `DAB-203` as specified would not have caught
 that either, because it pins the *command* tree, not the event-handler surface.
 
 **Consequence.** The rule in `AGENTS.md` — verify reachability by execution, not by grep — stands and

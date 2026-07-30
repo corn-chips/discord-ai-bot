@@ -174,7 +174,7 @@ failures log at `debug`. A broken RAG change looks like "nothing happened" â€
 ## Tests
 
 
-- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 27/27) â€” not `Test<Subject>`. Async
+- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 31/31) â€” not `Test<Subject>`. Async
  tests use `IsolatedAsyncioTestCase` with `asyncSetUp`/`asyncTearDown`.
 - No `conftest.py`, no `tests/__init__.py`, no shared helpers â€” every file is self-contained.
  The idiom is `types.SimpleNamespace` fakes plus `unittest.mock.AsyncMock` (`MagicMock` is
@@ -205,7 +205,8 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 140** (`0bf532c`..`02b91a7` added `tests/test_repo_hygiene.py` and `tests/test_on_message_flow.py`).
+now 140 in 15 files** (`0bf532c`..`28409e4`: `02b91a7` added `tests/test_repo_hygiene.py`, `28409e4`
+added `tests/test_on_message_flow.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Two commits have
@@ -233,7 +234,7 @@ the line number.
  - **BUG-0002's original regression test did not reach the buggy site — now closed.**
    `test_request_model_precedence` (`test_bug_regressions.py:37`) unit-tests
    `_resolve_request_preferences` in isolation, so reinstating `model_override = routed_model`
-   after `discord_bot.py:798` left all 125 tests green. `02b91a7` added
+   after `discord_bot.py:798` left all 125 tests green. `28409e4` added
    `tests/test_on_message_flow.py`, whose
    `test_router_complexity_never_hardens_into_a_model_override` asserts the contract at the
    caller. `python scripts/mutation_check.py M-BUG0002` now reports KILLED; the full run is

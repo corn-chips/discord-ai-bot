@@ -4,10 +4,13 @@
 > `.venv/bin/python` (CPython 3.12.13), baseline `Ran 125 tests ... OK`. The body below is
 > preserved verbatim and unedited. Every status field in it is wrong. Read this banner first.
 >
-> **Banner refreshed after `0bf532c` ("Remove verified dead code from the source tree") and
-> `0c9eb91` ("Drop five unused runtime dependencies") landed on `dev`.** Where those commits
-> invalidated a claim below, the entry is re-measured against the new HEAD and says so; every
-> other figure is still as of `c83f740`. The body itself remains untouched.
+> **Banner refreshed after `0bf532c` ("Remove verified dead code from the source tree"),
+> `0c9eb91` ("Drop five unused runtime dependencies"), `02b91a7` ("Add a mutation harness and stop
+> rotated logs being committable") and `28409e4` ("Pin the on_message hot path and close the
+> BUG-0002 coverage gap") landed on `dev`.** Where those commits invalidated a claim below, the
+> entry is re-measured against the new HEAD and says so; every other figure is still as of
+> `c83f740`. **The current gate is `Ran 140 tests ... OK` in 15 files**, not the 125 in 13 files
+> this banner was first written against. The body itself remains untouched.
 >
 > **Superseded by [`docs/BUG_ANALYSIS_2026-07-29.md`](BUG_ANALYSIS_2026-07-29.md).** See also
 > [`docs/ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md) and
@@ -50,8 +53,12 @@
 >    never exercises `_process_message_with_context`, where the bug actually lived. Reintroducing
 >    the original root cause verbatim, `model_override = routed_model` immediately after
 >    `discord_bot.py:798` (`:826` when this banner was written; `0bf532c` removed dead wrappers
->    earlier in the file and shifted it), leaves **all 125 tests green**. The user preference and
->    `/config model` would be silently bypassed again and nothing in the suite would notice.
+>    earlier in the file and shifted it), left **all 125 tests green** at `c83f740`: the user
+>    preference and `/config model` would be silently bypassed again and nothing in the suite
+>    would notice. **Closed by `28409e4`**, which added `tests/test_on_message_flow.py` and its
+>    `test_router_complexity_never_hardens_into_a_model_override`. Against the current 140-test
+>    gate the mutant is KILLED — `python scripts/mutation_check.py M-BUG0002` now reports 1/1,
+>    and the full catalogue run is 5/5.
 > 2. **The BUG-0001 regression test actively obstructs a needed repair.**
 >    `test_main_response_path_does_not_wrap_client_retry_timeout`
 >    (`tests/test_bug_regressions.py:110`) asserts that `asyncio.wait_for` is never called on the
@@ -70,14 +77,15 @@
 >   workspace files" - the tree now holds **66** git-tracked `.py` files outside `.venv`
 >   (67 at `c83f740`; `0bf532c` deleted `src/services/help_system.py`).
 > - "test collection was blocked because the available Python environment does not have
->   `google-genai` installed" - `google-genai` is installed and 125 tests run.
+>   `google-genai` installed" - `google-genai` is installed and 140 tests run (125 at `c83f740`).
 > - "Preserved the pre-existing **untracked** `AGENTS.md`" - `AGENTS.md` is tracked as of
 >   `c83f740`.
 > - `_send_split_response`, `_send_simple_split_response`, and `_run_live_channel_worker` are
 >   named throughout as live code. They had already decayed into unreferenced back-compat
 >   wrappers and were **deleted in `0bf532c`**; the live implementations are on
 >   `ResponseDeliveryCoordinator` and `LiveMessageCoordinator`.
-> - "Verification Requirements: rerun the full `unittest` suite" - done: `Ran 125 tests ... OK`.
+> - "Verification Requirements: rerun the full `unittest` suite" - done: `Ran 140 tests ... OK` at
+>   HEAD (`Ran 125 tests ... OK` when this banner was written at `c83f740`).
 >
 > **What is still worth carrying forward from the body below:** BUG-0003's root-cause analysis,
 > which remains accurate, and BUG-0001's second recommended option, an outer budget covering

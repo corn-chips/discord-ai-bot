@@ -1,8 +1,10 @@
 ## Analysis Backlog
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `c83f740` | Baseline suite: 125 tests, OK
+Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `28409e4` | Gate: 140 tests, OK
+Findings below were measured at HEAD `c83f740` against a 125-test baseline; the document state
+above is current. Trust the finding, re-locate the line number, and quote the 140 gate.
 
-Tier 0: 20 | Tier 1: 12 | Tier 2: 5 (4 open, 1 done: DAB-194) | Tier 3: 47 (compact, no tickets) | Tickets written: 37 (36 open)
+Tier 0: 20 (19 open, 1 done: DAB-157) | Tier 1: 12 | Tier 2: 5 (4 open, 1 done: DAB-194) | Tier 3: 47 (compact, no tickets) | Tickets written: 37 (35 open)
 
 ### What this is
 
@@ -25,7 +27,8 @@ so an implementation agent can execute it with no other context.
    payoff, a reproduction, acceptance criteria, the exact files to touch, and the regression test
    to add.
 3. Check the **Blocked by** line in the ticket before starting. The dependency graph at the bottom
-   of this document is the authoritative version.
+   of this document supersedes the tickets — but `docs/ANALYSIS_CORRECTIONS.md` supersedes the
+   graph. Two of the edges recorded here were later refuted; read that file first.
 4. Re-run `python -m unittest discover -s tests -p "test_*.py"` **from the repo root** after each
    commit. Several tickets deliberately change the pass count; each says so.
 5. Adding a slash command still means three files (`AGENTS.md`, "Adding a slash command"). Adding a
@@ -89,7 +92,7 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 13 | DAB-165 | A `%` in any log extra silently drops the record | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
 | 14 | DAB-019 | Live batch silently destroyed when `process_messages` raises | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
 | 15 | DAB-198 | PDF resource bomb: 3.6 KB upload -> 107 s CPU, 1.63 GB RSS | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
-| 16 | DAB-157 | Rotated log files are not gitignored | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
+| 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `02b91a7` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | Unguarded `change_presence()` sits before `setup_commands` | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |
 | 18 | DAB-029 | Six never-evicting in-memory containers | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
 | 19 | DAB-083 | `rag_migrations` is not owned by `_ensure_schema` | BUG | S3 | XS | **4.0** | — | [DAB-083](analysis-tickets/DAB-083.md) |
@@ -100,6 +103,11 @@ message) and `DAB-066` (legacy migration discards all rows). Both are real S1 da
 `DAB-065`'s trigger largely disappears once `DAB-095` lands and its correct fix is a write-semantics
 change, and `DAB-066`'s precondition is not reachable from any schema this repository's history has
 ever produced. They sit at the head of Tier 1 with their prerequisites.
+
+Row 16 is retained rather than deleted so that the `#` numbering stays stable across the whole
+document. `DAB-157` shipped as `02b91a7` (`.gitignore` now ignores `logs/` wholesale plus
+`*.log.[0-9]*`, and the dead `!data/.gitkeep` negation is gone), guarded by
+`tests/test_repo_hygiene.py`.
 
 ---
 
@@ -183,7 +191,7 @@ here.
 | DAB-121 | Overlapping block/inline LaTeX spans corrupt the surrounding text | rendering |
 | DAB-122 | Currency amounts are eaten by `INLINE_LATEX_RE` | rendering |
 | DAB-125 | LaTeX and table rewriting are not code-fence-aware | rendering |
-| DAB-128 | `fig_height` is unbounded; becomes a live DoS the moment DAB-114 is fixed | rendering |
+| DAB-128 | `fig_height` is unbounded: an already-live DoS, **not** contingent on DAB-114 — one expression with 300 `\\` row separators measures 2,558 MB peak RSS on the unfixed tree. Needs its own ticket and commit, not a rider on DAB-114. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 2 | rendering |
 | DAB-129 | matplotlib rendering and message splitting both run on the event loop | rendering |
 | DAB-131 | `validate_image` accepts a 144 MP decompression bomb from 449 KB | media |
 | DAB-138 | PIL PNG encoding on the event loop, up to 26 images per request | media |
@@ -219,28 +227,35 @@ implementations of it.
 **Theme:** every defect that is currently losing data, losing money, or freezing the process, plus
 the one-line changes that share a file with them. Seven of the nine S1 findings close here.
 
-`DAB-041` · `DAB-001` · `DAB-115` · `DAB-114` · `DAB-039` · `DAB-141` · `DAB-157` · `DAB-019` ·
-`DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
+`DAB-041` · `DAB-001` · `DAB-115` · `DAB-114` · `DAB-039` · `DAB-141` · `DAB-157` (**DONE**,
+`02b91a7`) · `DAB-019` · `DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
 
-- 12 tickets: 7 XS, 5 S. **Rough total: 3-4 days.**
-- Six are independent one-file diffs and can land in the first hour: `DAB-041`, `DAB-001`,
-  `DAB-114`, `DAB-039`, `DAB-157`, `DAB-197`.
+- 11 tickets remaining of 12: 6 XS, 5 S. **Rough total: 3-4 days.** `DAB-157` has already landed.
+- Five are independent one-file diffs and can land in the first hour: `DAB-041`, `DAB-001`,
+  `DAB-114`, `DAB-039`, `DAB-197`.
 - `DAB-141` needs `DAB-203` (Sprint 2) if the command description changes; land the permission
   gate alone this sprint and defer the copy change, or pull `DAB-203` forward.
 - **Suite count changes here.** `DAB-001` adds `tests/test_context_fallback.py`; `DAB-114` requires
-  an unmocked matplotlib test; `DAB-141` breaks `tests/test_command_registration.py:175-176`, which
-  explicitly asserts `/rag delete` has no checks.
+  an unmocked matplotlib test. `DAB-141` does **not** change the count: gating at the *group* level
+  (the only placement discord.py 2.7.1 actually serialises) leaves `.checks` empty, so the
+  `/rag delete` assertion at `tests/test_command_registration.py:176` still passes and the ticket
+  needs no test churn. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 3.
 
 ### Sprint 2 — Make it observable and safe to change
 
 **Theme:** you cannot verify Sprint 1's work, or safely attempt Sprints 3-4, while the logging
-lever is a no-op, the error taxonomy is string matching, and two regression tests actively
-obstruct correct fixes.
+lever is a no-op, the error taxonomy is string matching, and a regression test actively obstructs
+a correct fix. This theme originally claimed **two** obstructing regression tests; only `DAB-204`'s
+is one. `tests/test_command_registration.py` was cast as the second, and it has since twice been
+shown to be doing its job rather than obstructing — it correctly protected `/image-queue` during
+the `DAB-194` dead-code pass, and it does not break under `DAB-141`'s group-level gate. See
+[`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) items 1 and 3.
 
 `DAB-203` · `DAB-204` · `DAB-165` · `DAB-166` · `DAB-040` · `DAB-042` · `DAB-213` · `DAB-180`
 
 - 8 tickets: 2 XS, 4 S, 2 M. **Rough total: 1 week.**
-- `DAB-203` and `DAB-204` are the unblockers and should land first in the sprint.
+- `DAB-204` is the one real unblocker and should land first in the sprint. `DAB-203` is
+  de-brittling work, not a gate: nothing in this programme is currently blocked on it.
 - `DAB-040` lands in the same function as Sprint 1's `DAB-041`; do it as a follow-up commit, not a
   merge.
 - `DAB-213` (command cooldowns) belongs here rather than in Sprint 1 only because it wants
@@ -285,7 +300,7 @@ should not exist and bound what is unbounded.
 - `DAB-087` must bump the reconcile fingerprint that `DAB-077` introduces in Sprint 3, or every
   existing non-Latin row stays `skipped` forever.
 
-**Programme total: 36 remaining tickets of the 37 written, roughly 4.5 weeks of focused work.**
+**Programme total: 35 remaining tickets of the 37 written, roughly 4.5 weeks of focused work.**
 
 ---
 
@@ -295,14 +310,20 @@ Read `A --> B` as "A must land before B". Items with no inbound edge are indepen
 immediately.
 
 ```
-INDEPENDENT ROOTS (start any of these today)
+INDEPENDENT ROOTS (start any of these today; DAB-157 is DONE -- landed as 02b91a7,
+                   guarded by tests/test_repo_hygiene.py)
   DAB-041   DAB-001   DAB-114   DAB-039   DAB-157   DAB-197   DAB-115
   DAB-019   DAB-212   DAB-078   DAB-165   DAB-166   DAB-203   DAB-204
   DAB-083   DAB-095   DAB-029   DAB-032   DAB-027   DAB-066   DAB-073
   DAB-106   DAB-002
 
-TEST-INFRASTRUCTURE CHAIN  (the two live obstructions)
-  DAB-203 --> DAB-141        the permission gate + description change break :175-176 and :48
+TEST-INFRASTRUCTURE CHAIN  (one live obstruction, not two -- see below)
+  DAB-203 -?> DAB-141        CONDITIONAL, and only on the copy change (:48). The permission
+                             gate itself does NOT break :176: discord.py serialises
+                             default_permissions only at the top level, so the fix must be a
+                             GROUP-level gate, and a group-level gate leaves .checks empty.
+                             DAB-141 needs no test churn. Refuted; see
+                             docs/ANALYSIS_CORRECTIONS.md item 3
       +--> DAB-180           refusing to register /deepresearch changes the tree
       \--> DAB-213           proves the cooldown decorators did not change the tree
       (the DAB-203 --> DAB-194 edge is gone: refuted, and moot now that DAB-194 has

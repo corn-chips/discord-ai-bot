@@ -4,9 +4,9 @@
 > `.venv/bin/python` (CPython 3.12.13), baseline `Ran 125 tests ... OK`. The body below is
 > preserved verbatim and unedited. Every status field in it is wrong. Read this banner first.
 >
-> **Banner refreshed after `0bf532c` ("Remove verified dead code from the source tree"),
-> `0c9eb91` ("Drop five unused runtime dependencies"), `02b91a7` ("Add a mutation harness and stop
-> rotated logs being committable") and `28409e4` ("Pin the on_message hot path and close the
+> **Banner refreshed after `9894bcc` ("Remove verified dead code from the source tree"),
+> `4baa29c` ("Drop five unused runtime dependencies"), `b5851ab` ("Add a mutation harness and stop
+> rotated logs being committable") and `6f1dc79` ("Pin the on_message hot path and close the
 > BUG-0002 coverage gap") landed on `dev`.** Where those commits invalidated a claim below, the
 > entry is re-measured against the new HEAD and says so; every other figure is still as of
 > `c83f740`. **The current gate is `Ran 140 tests ... OK` in 15 files**, not the 125 in 13 files
@@ -37,7 +37,7 @@
 >
 > | Bug | Printed status | True status at `c83f740` | Notes |
 > |---|---|---|---|
-> | **BUG-0001** Main response timeout cancels configured Gemini retries | Open, S2/P1 | **FIXED** | The outer `asyncio.wait_for` was deleted in `88e330b`. Timeout ownership now sits solely in `GeminiClient`. Superseded by a new finding: there is now *no* whole-sequence deadline, so one message can occupy the bot for a measured worst case of 480 s (488.5 s including backoff). The report's own alternative recommendation, "calculate an outer budget that includes every possible attempt and backoff delay", is the remedy that was never taken. Residue: `response.api_timeout_buffer` was dead configuration, parsed and read by nothing; it was **deleted in `0bf532c`** (2026-07-29) at all three sites, so the whole-sequence budget must add a new key rather than reuse it. |
+> | **BUG-0001** Main response timeout cancels configured Gemini retries | Open, S2/P1 | **FIXED** | The outer `asyncio.wait_for` was deleted in `88e330b`. Timeout ownership now sits solely in `GeminiClient`. Superseded by a new finding: there is now *no* whole-sequence deadline, so one message can occupy the bot for a measured worst case of 480 s (488.5 s including backoff). The report's own alternative recommendation, "calculate an outer budget that includes every possible attempt and backoff delay", is the remedy that was never taken. Residue: `response.api_timeout_buffer` was dead configuration, parsed and read by nothing; it was **deleted in `9894bcc`** (2026-07-29) at all three sites, so the whole-sequence budget must add a new key rather than reuse it. |
 > | **BUG-0002** Routed messages ignore global and per-user model selections | Open, S3/P2 | **FIXED** | Fixed in `88e330b`. Precedence is resolved once in `DiscordBot._resolve_request_preferences`: request override, then user preference, then runtime or `/config` model, then complexity default. The routed model is now computed for logging only. |
 > | **BUG-0003** Long fenced-code responses can exceed Discord's message limit | Open, S3/P2 | **PARTIALLY FIXED** | The overflow symptom is closed: a post-hoc guard in `MessageSplitter` discards any oversized formatted split and falls back to a lossless fixed-width chunker, and the delivery layer caps at `min(split_length, 2000)`. **The root cause the report diagnosed is untouched.** Continuation markers and reopened fences are still added after the size calculation; the report's own probe still reproduces character-for-character (`[1981, 2030, 1153]`, `integrity=False`). Because the guard fires on nearly every long response, including plain prose that over-runs by one character, `_preserve_code_blocks` is now bypassed in the common case and long code answers are hard-chopped mid-token with unterminated fences. The bug traded "Discord rejects an oversized message" for "Discord renders mangled code". |
 > | **BUG-0004** Paginator edits overwrite complete bot responses in the RAG index | Open, S3/P2 | **FIXED** | Both halves. The guard `if before.content == after.content: return` lives at `src/bot/rag_event_coordinator.py:71-72` (verified verbatim). The related persistence defect is also fixed: `upsert_message` now takes `hidden: Optional[bool] = None` and preserves the row's existing hidden state, and `deleted_at = NULL` was removed from the `ON CONFLICT` clause. |
@@ -52,10 +52,10 @@
 >    (`tests/test_bug_regressions.py:37`) calls the precedence helper directly with a fake bot; it
 >    never exercises `_process_message_with_context`, where the bug actually lived. Reintroducing
 >    the original root cause verbatim, `model_override = routed_model` immediately after
->    `discord_bot.py:798` (`:826` when this banner was written; `0bf532c` removed dead wrappers
+>    `discord_bot.py:798` (`:826` when this banner was written; `9894bcc` removed dead wrappers
 >    earlier in the file and shifted it), left **all 125 tests green** at `c83f740`: the user
 >    preference and `/config model` would be silently bypassed again and nothing in the suite
->    would notice. **Closed by `28409e4`**, which added `tests/test_on_message_flow.py` and its
+>    would notice. **Closed by `6f1dc79`**, which added `tests/test_on_message_flow.py` and its
 >    `test_router_complexity_never_hardens_into_a_model_override`. Against the current 140-test
 >    gate the mutant is KILLED — `python scripts/mutation_check.py M-BUG0002` now reports 1/1,
 >    and the full catalogue run is 5/5.
@@ -75,14 +75,14 @@
 >
 > - "Parsed all 40 Python files" and "inventory helper across all 50 tracked and untracked
 >   workspace files" - the tree now holds **66** git-tracked `.py` files outside `.venv`
->   (67 at `c83f740`; `0bf532c` deleted `src/services/help_system.py`).
+>   (67 at `c83f740`; `9894bcc` deleted `src/services/help_system.py`).
 > - "test collection was blocked because the available Python environment does not have
 >   `google-genai` installed" - `google-genai` is installed and 140 tests run (125 at `c83f740`).
 > - "Preserved the pre-existing **untracked** `AGENTS.md`" - `AGENTS.md` is tracked as of
 >   `c83f740`.
 > - `_send_split_response`, `_send_simple_split_response`, and `_run_live_channel_worker` are
 >   named throughout as live code. They had already decayed into unreferenced back-compat
->   wrappers and were **deleted in `0bf532c`**; the live implementations are on
+>   wrappers and were **deleted in `9894bcc`**; the live implementations are on
 >   `ResponseDeliveryCoordinator` and `LiveMessageCoordinator`.
 > - "Verification Requirements: rerun the full `unittest` suite" - done: `Ran 140 tests ... OK` at
 >   HEAD (`Ran 125 tests ... OK` when this banner was written at `c83f740`).

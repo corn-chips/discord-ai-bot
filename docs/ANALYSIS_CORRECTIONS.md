@@ -1,6 +1,6 @@
 # Analysis corrections
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `28409e4` | Baseline suite: 140 tests, OK
+Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `6f1dc79` | Baseline suite: 140 tests, OK
 
 ## What this is
 
@@ -44,7 +44,7 @@ Reproduced by deleting the command registration in a `/tmp` copy of the tree and
 Python callback name. The test refers to the command by its *Discord* name, `image-queue`, with a
 hyphen. Both spellings have to be searched.
 
-**Consequence.** `DAB-194` was never blocked. It landed as `0bf532c` / `0c9eb91` ahead of
+**Consequence.** `DAB-194` was never blocked. It landed as `9894bcc` / `4baa29c` ahead of
 `DAB-203`, and `/edit-image` and `/image-queue` both survive (`src/bot/command_modules/general.py`).
 `DAB-203` remains worth doing for its other reasons — see item 5 — but it is not a prerequisite for
 anything in the dead-code lane.
@@ -112,12 +112,12 @@ actually protected.
 
 **The underlying warning is still correct, and the real gap is wider.** Deleting three live gateway
 handlers — `on_disconnect`, `on_resumed`, `on_raw_bulk_message_delete` — in a `/tmp` copy leaves the
-suite at **140 tests, OK** (re-measured at `28409e4`; it was 125 at `0c9eb91`, and the two test
+suite at **140 tests, OK** (re-measured at `6f1dc79`; it was 125 at `4baa29c`, and the two test
 files added since change nothing here). No test references them. `DAB-203` as specified would not have caught
 that either, because it pins the *command* tree, not the event-handler surface.
 
 **Consequence.** The rule in `AGENTS.md` — verify reachability by execution, not by grep — stands and
-is load-bearing. `0bf532c` was checked specifically against this: it removes no `on_*` handler and
+is load-bearing. `9894bcc` was checked specifically against this: it removes no `on_*` handler and
 no command decorator. Any future pass needs the same check, and `DAB-203`'s scope should be widened
 to cover event handlers if it is ever written.
 
@@ -128,8 +128,8 @@ to cover event handlers if it is ever written.
 | Claim | As published | Corrected | Why |
 |---|---|---|---|
 | `DAB-077` startup reconcile | "1938 ms -> 0.034 ms (57,000x)" | ~25 ms at 2k rows, ~120 ms at 10k, 1938 ms at 100k | The ratio is against a no-op, so it is unbounded and says nothing about the saving. The 1938 ms reproduces, but only at 100k indexed messages; this deployment is two orders of magnitude smaller. Quote the absolute saving at your corpus size. |
-| `DAB-106` validation gaps | "44-47 of 100 config fields" | **40-43 of 96** | `0bf532c` deleted four dead `BotConfig` fields, three of which were on the unvalidated list. |
-| `DAB-194` dead code | "-2,027 lines, 23,973 -> 21,946" | delivered **2,111 deletions** across 25 files, 23,973 -> 21,895 | Landed as `0bf532c`; the extra came from 96 unused import bindings rather than the predicted 87. |
+| `DAB-106` validation gaps | "44-47 of 100 config fields" | **40-43 of 96** | `9894bcc` deleted four dead `BotConfig` fields, three of which were on the unvalidated list. |
+| `DAB-194` dead code | "-2,027 lines, 23,973 -> 21,946" | delivered **2,111 deletions** across 25 files, 23,973 -> 21,895 | Landed as `9894bcc`; the extra came from 96 unused import bindings rather than the predicted 87. |
 | `docs/tech-debt-register.md` TD-004 | "`README.md` still lists `BOT_SYSTEM_REPORT.md`, `pipeline.html` and `message-sequence-flowchart.html` at the repo root" | Already repaired | `README.md:234` now states the report lives in `docs/` and that neither diagram exists. `find . -name '*.html'` returns nothing. The TD-004 retraction was itself stale. |
 
 ## A near-miss worth recording
@@ -139,7 +139,7 @@ note as occupying lines **205-212**. It occupies **206-212**. Line 205 is the `s
 parent key, and deleting it reparents three live prompts (`high_complexity`, `low_complexity`,
 `medium_complexity`) under the preceding `personalities:` mapping. Both ranges parse as valid YAML,
 so nothing would have raised — the bot would simply have lost every system prompt. Caught before it
-landed; `0bf532c` deletes 206-212 only.
+landed; `9894bcc` deletes 206-212 only.
 
 The general lesson, which applies to every YAML edit in this repo: a range that parses is not a
 range that is correct. Check the resulting key structure, not just that `yaml.safe_load` succeeds.

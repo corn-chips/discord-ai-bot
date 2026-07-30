@@ -29,7 +29,7 @@ bug = "BUG-0002"
 summary = "Router complexity hardens into model_override, bypassing /config model and /preferences model"
 # NOT test_request_model_precedence. That test calls _resolve_request_preferences
 # directly and never reaches the buggy caller, which is why this mutant survived
-# until tests/test_on_message_flow.py was added in 28409e4.
+# until tests/test_on_message_flow.py was added in 6f1dc79.
 guard = "test_router_complexity_never_hardens_into_a_model_override"
 file = "src/bot/discord_bot.py"
 expect = "killed"

@@ -1,6 +1,6 @@
 ## Analysis Backlog
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `28409e4` | Gate: 140 tests, OK
+Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `6f1dc79` | Gate: 140 tests, OK
 Findings below were measured at HEAD `c83f740` against a 125-test baseline; the document state
 above is current. Trust the finding, re-locate the line number, and quote the 140 gate.
 
@@ -92,7 +92,7 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 13 | DAB-165 | A `%` in any log extra silently drops the record | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
 | 14 | DAB-019 | Live batch silently destroyed when `process_messages` raises | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
 | 15 | DAB-198 | PDF resource bomb: 3.6 KB upload -> 107 s CPU, 1.63 GB RSS | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
-| 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `02b91a7` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
+| 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `b5851ab` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | Unguarded `change_presence()` sits before `setup_commands` | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |
 | 18 | DAB-029 | Six never-evicting in-memory containers | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
 | 19 | DAB-083 | `rag_migrations` is not owned by `_ensure_schema` | BUG | S3 | XS | **4.0** | — | [DAB-083](analysis-tickets/DAB-083.md) |
@@ -105,7 +105,7 @@ change, and `DAB-066`'s precondition is not reachable from any schema this repos
 ever produced. They sit at the head of Tier 1 with their prerequisites.
 
 Row 16 is retained rather than deleted so that the `#` numbering stays stable across the whole
-document. `DAB-157` shipped as `02b91a7` (`.gitignore` now ignores `logs/` wholesale plus
+document. `DAB-157` shipped as `b5851ab` (`.gitignore` now ignores `logs/` wholesale plus
 `*.log.[0-9]*`, and the dead `!data/.gitkeep` negation is gone), guarded by
 `tests/test_repo_hygiene.py`.
 
@@ -143,14 +143,14 @@ review window.
 |---|---|---|---|---|---|---|---|---|
 | 33 | DAB-028 | `search_semantic` copies the whole matrix and recomputes norms | IMPROVEMENT | 2225 ms -> 62 ms (35.8x); 2056 -> 8.4 MiB | M | **3.0** | DAB-027 | [DAB-028](analysis-tickets/DAB-028.md) |
 | 34 | DAB-087 | Hybrid RAG is blind to every non-Latin script | BUG | S2 | S | **3.0** | DAB-077 | [DAB-087](analysis-tickets/DAB-087.md) |
-| 35 | DAB-194 | **DONE** — Dead code: 2,027 removable lines, verified twice. Landed in `0bf532c` / `0c9eb91` | IMPROVEMENT | delivered **-2,111 lines** across 25 files; `constraints.txt` 57 -> 51 pins | S | **3.0** | — (landed ahead of DAB-203) | [DAB-194](analysis-tickets/DAB-194.md) |
+| 35 | DAB-194 | **DONE** — Dead code: 2,027 removable lines, verified twice. Landed in `9894bcc` / `4baa29c` | IMPROVEMENT | delivered **-2,111 lines** across 25 files; `constraints.txt` 57 -> 51 pins | S | **3.0** | — (landed ahead of DAB-203) | [DAB-194](analysis-tickets/DAB-194.md) |
 | 36 | DAB-027 | `_vector_lock` held across CPU-bound numpy scoring | IMPROVEMENT | 244x concurrent throughput | M | **2.0** | — | [DAB-027](analysis-tickets/DAB-027.md) |
 | 37 | DAB-106 | 40-43 of 96 config fields have no validation | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
 
 Row 35 is retained rather than deleted so that the `#` numbering stays stable across the whole
-document. `DAB-194` shipped as `0bf532c` (dead code: `src/services/help_system.py` deleted, four
+document. `DAB-194` shipped as `9894bcc` (dead code: `src/services/help_system.py` deleted, four
 dead `BotConfig` fields removed, `system_prompts.thinking_mode_addon` dropped from `config.yaml`)
-and `0c9eb91` (five unused runtime dependencies). Both left the suite at 125 tests, OK. It also
+and `4baa29c` (five unused runtime dependencies). Both left the suite at 125 tests, OK. It also
 closes `TD-015` in `docs/tech-debt-register.md`.
 
 ---
@@ -228,7 +228,7 @@ implementations of it.
 the one-line changes that share a file with them. Seven of the nine S1 findings close here.
 
 `DAB-041` · `DAB-001` · `DAB-115` · `DAB-114` · `DAB-039` · `DAB-141` · `DAB-157` (**DONE**,
-`02b91a7`) · `DAB-019` · `DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
+`b5851ab`) · `DAB-019` · `DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
 
 - 11 tickets remaining of 12: 6 XS, 5 S. **Rough total: 3-4 days.** `DAB-157` has already landed.
 - Five are independent one-file diffs and can land in the first hour: `DAB-041`, `DAB-001`,
@@ -288,7 +288,7 @@ should not exist and bound what is unbounded.
 
 - 4 tickets: 3 S, 1 M. **Rough total: 1 week.**
 - **`DAB-194` has already landed, and it landed ahead of `DAB-203`, not after it.** It shipped as
-  `0bf532c` / `0c9eb91` (delivered -2,111 lines) while `DAB-203` is still open. The prediction
+  `9894bcc` / `4baa29c` (delivered -2,111 lines) while `DAB-203` is still open. The prediction
   recorded here — that the pass would need `DAB-203` first because a naive scan deletes the live
   `/image-queue` command and no test fails — did not hold: `/edit-image` and `/image-queue` both
   survive, and the `[5:10]` slice guard in `tests/test_command_registration.py` fails if
@@ -310,7 +310,7 @@ Read `A --> B` as "A must land before B". Items with no inbound edge are indepen
 immediately.
 
 ```
-INDEPENDENT ROOTS (start any of these today; DAB-157 is DONE -- landed as 02b91a7,
+INDEPENDENT ROOTS (start any of these today; DAB-157 is DONE -- landed as b5851ab,
                    guarded by tests/test_repo_hygiene.py)
   DAB-041   DAB-001   DAB-114   DAB-039   DAB-157   DAB-197   DAB-115
   DAB-019   DAB-212   DAB-078   DAB-165   DAB-166   DAB-203   DAB-204

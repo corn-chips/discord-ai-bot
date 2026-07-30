@@ -205,12 +205,12 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 140 in 15 files** (`0bf532c`..`28409e4`: `02b91a7` added `tests/test_repo_hygiene.py`, `28409e4`
+now 140 in 15 files** (`9894bcc`..`6f1dc79`: `b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79`
 added `tests/test_on_message_flow.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Two commits have
-since landed â€” `0bf532c` (dead-code removal) and `0c9eb91` (five dependencies dropped) â€”
+since landed â€” `9894bcc` (dead-code removal) and `4baa29c` (five dependencies dropped) â€”
 shifting many of those offsets (for example `src/bot/commands.py:91`, cited in several tickets,
 is past the end of an 80-line file). Trust the finding and re-locate the symbol; do not trust
 the line number.
@@ -234,7 +234,7 @@ the line number.
  - **BUG-0002's original regression test did not reach the buggy site — now closed.**
    `test_request_model_precedence` (`test_bug_regressions.py:37`) unit-tests
    `_resolve_request_preferences` in isolation, so reinstating `model_override = routed_model`
-   after `discord_bot.py:798` left all 125 tests green. `28409e4` added
+   after `discord_bot.py:798` left all 125 tests green. `6f1dc79` added
    `tests/test_on_message_flow.py`, whose
    `test_router_complexity_never_hardens_into_a_model_override` asserts the contract at the
    caller. `python scripts/mutation_check.py M-BUG0002` now reports KILLED; the full run is

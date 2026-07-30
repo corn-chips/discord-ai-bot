@@ -192,6 +192,20 @@ class StructuredApiErrorTest(unittest.TestCase):
                     expected,
                 )
 
+    def test_the_code_outranks_incidental_prose_in_the_details(self):
+        # The string chain checks "timeout" before it checks 5xx, so a 503 whose
+        # details happen to mention a timeout classifies as TIMEOUT without the
+        # structured pass. Both are retryable, so nothing breaks loudly -- which
+        # is exactly why this needs pinning: the SDK told us the code and the
+        # classifier preferred a guess at the prose.
+        manager = make_manager()
+        for code, status in ((503, "UNAVAILABLE"), (500, "INTERNAL")):
+            with self.subTest(code=code):
+                error = genai_error(code, status, "the model timed out upstream")
+                self.assertEqual(
+                    manager.categorize_error(error), ErrorType.SERVICE_UNAVAILABLE
+                )
+
     def test_a_real_429_is_retryable_and_a_real_400_is_not(self):
         manager = make_manager()
         quota = genai_error(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota")
@@ -237,13 +251,24 @@ class NumericSubstringTest(unittest.TestCase):
         "Discarded 400 stale index rows",
         "user 500123456789012345 not found",
         "Retrieved 2400 candidate messages",
+        # The two that start with the digits. A leading code is only a status
+        # code when a reason phrase follows it, so casing is load-bearing here.
+        "500 tokens over budget",
+        "400 stale index rows discarded",
     ]
 
     REAL_STATUS_CODES = {
         "503 Service Unavailable": ErrorType.SERVICE_UNAVAILABLE,
+        "503 UNAVAILABLE. {'error': {'code': 503}}": ErrorType.SERVICE_UNAVAILABLE,
         "HTTP 500 Internal Server Error": ErrorType.SERVICE_UNAVAILABLE,
         "HTTP 400 Bad Request": ErrorType.INVALID_REQUEST,
         "status: 502 upstream closed": ErrorType.SERVICE_UNAVAILABLE,
+        # A stringified SDK error -- one that has been through a log-and-rethrow
+        # or an `Exception(str(e))` wrapper -- has no .code left to dispatch on,
+        # so the string chain has to carry 401/403/404 too.
+        "401 UNAUTHENTICATED. missing credentials": ErrorType.AUTHENTICATION_ERROR,
+        "403 PERMISSION_DENIED. API key not valid": ErrorType.AUTHENTICATION_ERROR,
+        "404 NOT_FOUND. model gemini-9 not found": ErrorType.INVALID_REQUEST,
     }
 
     def test_incidental_digits_are_not_status_codes(self):

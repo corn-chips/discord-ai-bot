@@ -50,17 +50,25 @@ class LoggingHarness(unittest.TestCase):
         saved_handlers = list(root.handlers)
         saved_level = root.level
 
+        perf = logging.getLogger("performance")
+        saved_perf_level = perf.level
+
         def restore():
+            # Close only what setup_logging added. Closing the saved handlers
+            # and then re-attaching them would hand the rest of the suite a set
+            # of closed handlers -- and would do it on the failure path, where
+            # the damage is hardest to attribute.
             for handler in list(root.handlers):
-                handler.close()
+                if handler not in saved_handlers:
+                    handler.close()
             root.handlers.clear()
             root.handlers.extend(saved_handlers)
             root.setLevel(saved_level)
-            perf = logging.getLogger("performance")
             for handler in list(perf.handlers):
                 handler.close()
                 perf.removeHandler(handler)
             perf.propagate = True
+            perf.setLevel(saved_perf_level)
 
         self.addCleanup(restore)
 

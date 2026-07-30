@@ -233,11 +233,15 @@ self.pending_messages[cid] = pending_messages + self.pending_messages.get(cid, [
 **Refuted.** Requeuing the *popped* list rather than the messages still owed an answer is wrong on
 three independent counts, each demonstrated by running the design in a scratch copy:
 
-1. **It duplicates the attachment suffix.** `process_messages` already requeues the post-attachment
-   suffix itself (`live_message_coordinator.py:216-220`) *before* the failure window. Requeuing the
-   popped list queues that suffix a second time — and because the `finally` clause respawns the
-   worker, which re-splits, the duplication compounds each pass. Measured on a three-message batch
-   `[A, B(attachment), C]` with a failing rate limiter: `requeued ids: [1, 2, 3, 3, 3, 3, 3, 3, 3, 3]`.
+1. **It duplicates the attachment suffix.** The batch-answering body — `_answer_batch` after this
+   ticket, `process_messages` before it — already requeues the post-attachment suffix itself
+   *before* the failure window. Requeuing the popped list queues that suffix a second time, and
+   because the `finally` clause respawns a worker that re-splits, the duplication compounds every
+   pass. Measured on a three-message batch `[A, B(attachment), C]` with a failing rate limiter: the
+   suffix `3` is requeued over and over, e.g. `[1, 2, 3, 3, 3, 3, 3, 3, 3, 3]`. The exact sequence
+   depends on how many respawn cycles the harness lets run before it stops — an independent
+   re-measurement produced `[1,2,3,1,2,3,3,1,2,3,3,3,3,3,3,3,3]` — so treat the compounding as the
+   claim and the literal list as illustration.
 2. **It re-debits the rate limiter.** The popped list contains every author's messages, so a retry
    re-runs `check_and_record` for users the limiter already cleared. One user, one message, a
    limiter allowing one request: `charges: [2, 2]`, and the retry is then *refused* — so a transient
@@ -246,7 +250,7 @@ three independent counts, each demonstrated by running the design in a scratch c
 3. **It re-bills Gemini.** The popped list is still requeued when the failure lands *after*
    `generate_response` returned — during `record_token_usage` (a SQLite write, whose ordinary
    failure mode is "database is locked") or `send_response`. Measured: **3 paid generations for one
-   inbound message.** This is DAB-001 reproduced in a second file.
+   inbound message**, reproduced independently. This is DAB-001 in a second file.
 
 **Consequence.** What landed is an explicit receipt. `_answer_batch` maintains an `owed` list — the
 messages this call still has to answer — narrowing it whenever the batch narrows and clearing it
@@ -368,6 +372,50 @@ service. Both are set to `None` in the harness.
 The lesson is discipline 3's, applied to a test rather than to code: a test that swallows the
 exception it provokes cannot tell you where it stopped. `try/except Exception: pass` around the
 subject of a test is a smell worth grepping for.
+
+## 12. Three defects the Phase 3b review found in Phase 3b
+
+Recorded here for the same reason as item 11: the programme's own work gets the same treatment as
+the corpus.
+
+**a. `asyncio.CancelledError` is a `BaseException`, so DAB-019's fix missed the shutdown path.**
+The worker's `except Exception` cannot see a cancellation, and `close()` cancels in-flight workers
+on every shutdown — so the receipt was never requeued, the attempt counter never advanced, and not
+one log line was written. That is DAB-019's exact symptom, reintroduced by the commit that closed
+it. The `finally` now checks the receipt: requeue if the channel is still live, log the discard at
+WARNING if it is not. `M-DAB019F` pins it.
+
+**b. Emptying the receipt after `generate_response` bought the no-duplicate half and dropped the
+liveness half.** A failure in `record_token_usage` or `send_response` left `owed` empty, so
+`_abandon_batch` never fired: Gemini was billed, no reply arrived, and the user was told nothing.
+The post-payment section is now wrapped — it never retries, and it always notifies. `M-DAB019G`
+pins it.
+
+**c. The two tests that were supposed to catch (b) could not.** They asserted only
+`generate.await_count == 1` and an empty queue, which the *original, unfixed* implementation —
+pop, log, drop — satisfies exactly. They were pure no-duplicate tests with no liveness half. This
+is discipline 3 in its purest form: a test written alongside a fix inherits the fix's framing, and
+"did it avoid doing the bad thing" is not the same assertion as "did it do the right thing".
+
+Two smaller ones from the same review, fixed in the same commit:
+
+- **A leading status code is only a status code when a reason phrase follows it.** DAB-040's
+  anchored matcher allowed a bare `^`, so `"500 tokens over budget"` — a message that merely
+  *starts* with the digits — was still classified as a retryable transport failure. The matcher now
+  requires either an introducer (`http`/`status`/`code`/`error`) or a capitalised reason phrase
+  after the code, which is how both HTTP and the SDK word one. That needs the original casing, so
+  it takes `str(error)` rather than the lower-cased copy the rest of the chain matches on.
+- **A stringified 401/403 still fell through.** The structured pass only sees live `google.genai`
+  error objects; anything that has been through a log-and-rethrow or an `Exception(str(e))` wrapper
+  has no `.code` left. 404 had a string path and 401/403 did not, which was an asymmetry with no
+  reason behind it. Both now do.
+
+One consequence worth recording: with the string chain carrying 401/403/404, `M-DAB040B` stopped
+discriminating — deleting the structured pass no longer changed any classification, because
+`APIError.__str__` always leads with the code. It was retargeted at the case only the code can
+settle: a 5xx whose details mention a timeout, where the substring chain reaches `"timeout"` first
+and answers `TIMEOUT` instead of `SERVICE_UNAVAILABLE`. A mutant that stops discriminating is a
+signal, not a nuisance.
 
 ## Restated figures
 

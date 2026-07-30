@@ -185,7 +185,9 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_failure_after_the_model_answered_never_regenerates(self):
         # DAB-001 in a second file: once generate_response has returned, the
         # call has been billed. Anything that fails afterwards must not buy a
-        # duplicate answer and a duplicate charge.
+        # duplicate answer and a duplicate charge -- and must still tell the
+        # user, or the fix has bought the no-duplicate half and left the
+        # silent-loss half open, which is the defect it set out to close.
         failures = {
             "record_token_usage": AsyncMock(side_effect=RuntimeError("database is locked")),
             "send_response": AsyncMock(side_effect=RuntimeError("gateway hung up")),
@@ -193,8 +195,10 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
         for name, broken in failures.items():
             with self.subTest(failing=name):
                 generate = AsyncMock(return_value=ok_response())
+                notify = AsyncMock()
                 coordinator = self.make_coordinator(
                     generate_response=generate,
+                    handle_response_error=notify,
                     **{name: broken},
                 )
 
@@ -205,11 +209,14 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
                     1,
                     "a post-generation failure bought a second Gemini call",
                 )
+                notify.assert_awaited_once()
                 self.assertEqual(coordinator.pending_messages, {})
 
     async def test_an_attachment_turn_is_not_regenerated_either(self):
         # process_message_with_context owns its own generation, billing and
-        # error reporting, so a raise out of it may already have cost a call.
+        # error reporting, so a raise out of it may already have cost a call --
+        # and it has already told the user itself, which is why this path does
+        # not add a second notification.
         process_with_context = AsyncMock(side_effect=RuntimeError("boom"))
         coordinator = self.make_coordinator(
             process_message_with_context=process_with_context,
@@ -222,6 +229,54 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
 
         process_with_context.assert_awaited_once()
         self.assertEqual(coordinator.pending_messages, {})
+
+    async def test_a_cancelled_worker_does_not_lose_its_batch_in_silence(self):
+        # asyncio.CancelledError is a BaseException in 3.12, so the worker's
+        # `except Exception` never sees it. Without a receipt check in the
+        # `finally`, a cancellation mid-generation drops the whole batch with
+        # not even a log line -- DAB-019's exact symptom on the shutdown path.
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        coordinator = self.make_coordinator(generate_response=hang)
+        batch = [make_message(1, "first"), make_message(2, "second")]
+        coordinator.pending_messages[CHANNEL_ID] = list(batch)
+        worker = asyncio.create_task(coordinator.run_channel_worker(CHANNEL_ID))
+        coordinator.tasks[CHANNEL_ID] = worker
+        await asyncio.wait_for(started.wait(), timeout=2)
+
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+        # Live mode is still on, so the batch is recoverable and must be back in
+        # the queue for the next worker rather than gone.
+        self.assertEqual(
+            [message.id for message in coordinator.pending_messages[CHANNEL_ID]],
+            [1, 2],
+        )
+
+    async def test_close_discards_a_cancelled_batch_loudly_rather_than_silently(self):
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        coordinator = self.make_coordinator(generate_response=hang)
+        await coordinator.enqueue(make_message(1, "first"))
+        await asyncio.wait_for(started.wait(), timeout=2)
+
+        with self.assertLogs("src.bot.live_message_coordinator", level="WARNING") as logs:
+            await coordinator.close()
+
+        self.assertEqual(coordinator.pending_messages, {})
+        self.assertTrue(
+            any("unanswered" in line for line in logs.output),
+            logs.output,
+        )
 
     async def test_the_user_is_told_when_the_retry_budget_runs_out(self):
         generate = AsyncMock(side_effect=RuntimeError("permanently broken"))

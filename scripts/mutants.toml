@@ -298,7 +298,7 @@ guard = "test_a_transient_failure_is_retried_and_the_batch_is_answered"
 file = "src/bot/live_message_coordinator.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                    if owed and attempts < self.max_retry_attempts:\n                        async with lock:\n                            queued = self.pending_messages.get(channel_id, [])\n                            self.pending_messages[channel_id] = list(owed) + queued\n                        await asyncio.sleep(self.retry_backoff_seconds * attempts)\n                        continue\n                    if owed:\n                        await self._abandon_batch(channel_id, list(owed))\n                    attempts = 0\n                    charged.clear()\n"
+find = "                    if owed and attempts < self.max_retry_attempts:\n                        async with lock:\n                            queued = self.pending_messages.get(channel_id, [])\n                            self.pending_messages[channel_id] = list(owed) + queued\n                        # The batch now lives in pending_messages, so the receipt\n                        # must be surrendered: leaving it populated would let the\n                        # `finally` below requeue the same messages a second time\n                        # if the worker were cancelled during the backoff.\n                        owed.clear()\n                        await asyncio.sleep(self.retry_backoff_seconds * attempts)\n                        continue\n                    if owed:\n                        await self._abandon_batch(channel_id, list(owed))\n                        owed.clear()\n                    attempts = 0\n                    charged.clear()\n"
 replace = "                    attempts = 0\n                    charged.clear()\n"
 
 [[mutant]]
@@ -323,8 +323,8 @@ guard = "test_a_failure_after_the_model_answered_never_regenerates"
 file = "src/bot/live_message_coordinator.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        # The model has answered and the call has been billed. Nothing after\n        # this line may be retried, because a retry would generate again.\n        owed.clear()\n"
-replace = ""
+find = "        # The model has answered and the call has been billed. Nothing after\n        # this line may be retried, because a retry would generate again.\n        paid_for = list(owed)\n        owed.clear()\n"
+replace = "        paid_for = list(owed)\n"
 
 [[mutant]]
 id = "M-DAB019D"
@@ -472,17 +472,21 @@ guard = "test_incidental_digits_are_not_status_codes"
 file = "src/utils/error_manager.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        elif any(term in error_str for term in [\"service unavailable\", \"server error\"]) or \\\n                _matches_http_status(error_str, \"50[023]\"):\n"
+find = "        elif any(term in error_str for term in [\"service unavailable\", \"server error\"]) or \\\n                _matches_http_status(error_text, \"50[0234]\"):\n"
 replace = "        elif any(term in error_str for term in [\"service unavailable\", \"server error\", \"503\", \"502\", \"500\"]):\n"
 [[mutant.edit]]
-find = "        elif any(term in error_str for term in [\"invalid request\", \"bad request\", \"malformed\"]) or \\\n                _matches_http_status(error_str, \"40[04]\"):\n"
+find = "        elif any(term in error_str for term in [\"invalid request\", \"bad request\", \"malformed\"]) or \\\n                _matches_http_status(error_text, \"40[04]\"):\n"
 replace = "        elif any(term in error_str for term in [\"invalid request\", \"bad request\", \"400\", \"malformed\"]):\n"
 
 [[mutant]]
 id = "M-DAB040B"
 bug = "DAB-040"
-summary = "Structured code/status dispatch removed: a real 401, 403 or 404 falls through to UNKNOWN_ERROR"
-guard = "test_the_code_and_status_decide_the_category"
+# Now that the string chain also carries 401/403/404, deleting the structured
+# pass no longer changes those. What only the code can decide is a 5xx whose
+# details happen to mention a timeout: the substring chain checks "timeout"
+# first and answers TIMEOUT instead of SERVICE_UNAVAILABLE.
+summary = "Structured code/status dispatch removed, so incidental prose in the details outranks the code the SDK reported"
+guard = "test_the_code_outranks_incidental_prose_in_the_details"
 file = "src/utils/error_manager.py"
 expect = "killed"
 [[mutant.edit]]
@@ -505,3 +509,29 @@ replace = ""
 [[mutant.edit]]
 find = "        # Image processing errors (check first for specificity)\n"
 replace = "        status_code, status_name = _api_error_status(error)\n        if status_code == 429 or status_name == \"RESOURCE_EXHAUSTED\":\n            return ErrorType.RATE_LIMIT\n        if status_code in (500, 502, 503, 504) or status_name in {\n            \"UNAVAILABLE\", \"INTERNAL\", \"DEADLINE_EXCEEDED\",\n        }:\n            return ErrorType.SERVICE_UNAVAILABLE\n        if status_code in (401, 403) or status_name in {\n            \"UNAUTHENTICATED\", \"PERMISSION_DENIED\",\n        }:\n            return ErrorType.AUTHENTICATION_ERROR\n        if status_code in (400, 404) or status_name in {\n            \"INVALID_ARGUMENT\", \"NOT_FOUND\", \"FAILED_PRECONDITION\",\n        }:\n            return ErrorType.INVALID_REQUEST\n\n        # Image processing errors (check first for specificity)\n"
+
+[[mutant]]
+id = "M-DAB019F"
+bug = "DAB-019"
+# asyncio.CancelledError is a BaseException in 3.12, so the worker's
+# `except Exception` cannot see it, and close() cancels in-flight workers on
+# every shutdown. Without the receipt check in the `finally` the batch is
+# dropped with not even a log line -- DAB-019's exact symptom.
+summary = "A cancelled worker drops its in-flight batch silently"
+guard = "test_a_cancelled_worker_does_not_lose_its_batch_in_silence"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if owed:\n                    resumable = not self._closing and self.is_enabled(channel_id)\n"
+replace = "                if False:\n                    resumable = not self._closing and self.is_enabled(channel_id)\n"
+
+[[mutant]]
+id = "M-DAB019G"
+bug = "DAB-019"
+summary = "A delivery failure after the model answered tells the user nothing, so the turn is billed and silently lost"
+guard = "test_a_failure_after_the_model_answered_never_regenerates"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            await self._tell_user_the_turn_failed(\n                channel_id, target_message, len(paid_for)\n            )\n            raise\n"
+replace = "            raise\n"

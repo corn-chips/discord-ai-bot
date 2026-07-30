@@ -171,10 +171,16 @@ class LiveMessageCoordinator:
                         async with lock:
                             queued = self.pending_messages.get(channel_id, [])
                             self.pending_messages[channel_id] = list(owed) + queued
+                        # The batch now lives in pending_messages, so the receipt
+                        # must be surrendered: leaving it populated would let the
+                        # `finally` below requeue the same messages a second time
+                        # if the worker were cancelled during the backoff.
+                        owed.clear()
                         await asyncio.sleep(self.retry_backoff_seconds * attempts)
                         continue
                     if owed:
                         await self._abandon_batch(channel_id, list(owed))
+                        owed.clear()
                     attempts = 0
                     charged.clear()
                 else:
@@ -190,10 +196,47 @@ class LiveMessageCoordinator:
                     await asyncio.sleep(self.cooldown_seconds)
         finally:
             async with lock:
+                # A non-empty receipt here means the worker left the loop with a
+                # batch still in flight, and the only way to do that is an
+                # exception the `except Exception` above cannot see:
+                # asyncio.CancelledError is a BaseException in 3.12, and
+                # close() cancels in-flight workers on every shutdown. Without
+                # this the batch is dropped exactly as DAB-019 described, with
+                # not even a log line.
+                if owed:
+                    resumable = not self._closing and self.is_enabled(channel_id)
+                    if resumable:
+                        queued = self.pending_messages.get(channel_id, [])
+                        self.pending_messages[channel_id] = list(owed) + queued
+                    logger.warning(
+                        "Live worker for channel %s exited with %s message(s) "
+                        "unanswered; %s",
+                        channel_id,
+                        len(owed),
+                        "requeued for the next worker" if resumable
+                        else "discarded, because live mode is closing or disabled",
+                    )
+                    owed.clear()
+
                 if self.tasks.get(channel_id) is current_task:
                     self.tasks.pop(channel_id, None)
+
+                # Do not respawn out of a cancellation. The canceller wants this
+                # channel to stop, and `create_task` during loop teardown raises
+                # RuntimeError from inside `finally`, which replaces the
+                # in-flight exception with a confusing one. The queue is intact,
+                # so the next enqueue starts a worker.
+                cancelling = bool(
+                    current_task is not None
+                    and getattr(current_task, "cancelling", lambda: 0)() > 0
+                )
                 has_pending = bool(self.pending_messages.get(channel_id))
-                if not self._closing and has_pending and self.is_enabled(channel_id):
+                if (
+                    not self._closing
+                    and not cancelling
+                    and has_pending
+                    and self.is_enabled(channel_id)
+                ):
                     self.tasks[channel_id] = asyncio.create_task(
                         self.run_channel_worker(channel_id),
                         name=f"live-worker-{channel_id}",
@@ -228,11 +271,20 @@ class LiveMessageCoordinator:
             channel_id,
             self.max_retry_attempts,
         )
+        await self._tell_user_the_turn_failed(channel_id, owed[-1], len(owed))
+
+    async def _tell_user_the_turn_failed(
+        self,
+        channel_id: int,
+        target_message: discord.Message,
+        count: int,
+    ) -> None:
+        """Send the standard error reply for a turn that will not be answered."""
         if self.handle_response_error is None:
             logger.error(
                 "No live error callback is wired, so the %s dropped message(s) in "
                 "channel %s cannot be acknowledged to the user",
-                len(owed),
+                count,
                 channel_id,
             )
             return
@@ -241,7 +293,7 @@ class LiveMessageCoordinator:
         # Discord reply verbatim, and str(exc) leaks paths and SQL (DAB-153).
         try:
             await self.handle_response_error(
-                owed[-1],
+                target_message,
                 APIResponse(success=False, error_type="unknown_error"),
             )
         except Exception as exc:
@@ -481,6 +533,7 @@ class LiveMessageCoordinator:
         )
         # The model has answered and the call has been billed. Nothing after
         # this line may be retried, because a retry would generate again.
+        paid_for = list(owed)
         owed.clear()
 
         if not api_response.success:
@@ -489,15 +542,34 @@ class LiveMessageCoordinator:
             await self.handle_response_error(target_message, api_response)
             return True
 
-        if self.record_token_usage is not None:
-            await self.record_token_usage(target_message, api_response.token_usage)
-        if self.send_response is None:
-            raise RuntimeError("Live response delivery callback is unavailable")
-        sent_message = await self.send_response(
-            target_message,
-            api_response.content,
-            api_response.grounding_sources,
-        )
+        # Everything from here is post-payment: it must not be retried, but the
+        # user must still be told, or a delivery failure is exactly the silent
+        # loss DAB-019 set out to close -- only now with a Gemini charge behind
+        # it. Emptying `owed` alone bought the no-duplicate half and left the
+        # liveness half open.
+        try:
+            if self.record_token_usage is not None:
+                await self.record_token_usage(target_message, api_response.token_usage)
+            if self.send_response is None:
+                raise RuntimeError("Live response delivery callback is unavailable")
+            sent_message = await self.send_response(
+                target_message,
+                api_response.content,
+                api_response.grounding_sources,
+            )
+        except Exception:
+            logger.error(
+                "Live delivery failed in channel %s after the model had already "
+                "answered; %s message(s) will not be retried, because the call has "
+                "been billed",
+                channel_id,
+                len(paid_for),
+                exc_info=True,
+            )
+            await self._tell_user_the_turn_failed(
+                channel_id, target_message, len(paid_for)
+            )
+            raise
 
         for source_message, source_prompt in prompt_entries:
             self.append_context_entry(

@@ -47,7 +47,8 @@ Work on the `dev` branch â€” do not target `main`.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 22 test files hold 51 `TestCase` classes, all named `<Subject>Test`).
+ the 24 test files hold 60 `TestCase` classes, 58 of them named `<Subject>Test`; the two
+ exceptions are the shared harnesses `LoggingHarness` and `OnReadyHarness`).
 - `python -m compileall -q main.py src scripts tests` â€” syntax check without booting.
 - `python scripts/mutation_check.py` â€” reintroduces each fixed bug in a scratch copy and
  reports whether the suite notices. ~7 s with `--jobs 5`; exit 0 only when every mutant
@@ -151,7 +152,10 @@ returns, and before `process_message_with_context` is awaited. A call that *rais
 nothing and is retryable; a call that *returns* has been billed and must never be repeated. `owed`
 is also narrowed when the batch is (attachment split, rate-limit refusal), and `charged` records
 which users the limiter already debited so a retry costs each participant one token per turn, not
-per attempt. `M-DAB019` through `M-DAB019E` pin all five properties. Do not requeue the popped
+per attempt. A cancellation cannot see `except Exception` (`CancelledError` is a
+`BaseException`), so the worker's `finally` checks the receipt too, and a delivery failure
+*after* the model answered notifies the user without regenerating. `M-DAB019` through
+`M-DAB019G` pin all seven properties. Do not requeue the popped
 batch instead of `owed` — that is what the ticket prescribes and it duplicates the attachment
 suffix, re-debits the limiter and re-bills Gemini.
 
@@ -196,7 +200,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 ## Tests
 
 
-- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 31/31) â€” not `Test<Subject>`. Async
+- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 58 of 60; the two exceptions are shared harnesses) â€” not `Test<Subject>`. Async
  tests use `IsolatedAsyncioTestCase` with `asyncSetUp`/`asyncTearDown`.
 - No `conftest.py`, no `tests/__init__.py`, no shared helpers â€” every file is self-contained.
  The idiom is `types.SimpleNamespace` fakes plus `unittest.mock.AsyncMock` (`MagicMock` is
@@ -227,7 +231,7 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 244 in 24 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+now 246 in 24 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
 `tests/test_on_message_flow.py`, Phase 1 added `tests/test_context_fallback.py`,
 `tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`, Phases 2-3
 added `tests/test_command_cooldowns.py`, `tests/test_pin_limits.py`,

@@ -65,23 +65,34 @@ def _api_error_status(error: Exception) -> Tuple[Optional[int], str]:
     return (code if isinstance(code, int) else None), status
 
 
-def _matches_http_status(error_str: str, pattern: str) -> bool:
+_STATUS_INTRODUCER = r"(?:\bhttp[/ ]?[\d.]*\s+|\bstatus[ :=]+|\bcode[ :=]+|\berror[ :=]+)"
+
+
+def _matches_http_status(error_text: str, pattern: str) -> bool:
     """Match an HTTP status code only where it is being used as one.
 
     A bare `"503" in error_str` test fires on any message containing those
     digits: "Backfill stalled after 500 messages", "database is locked after
     5002 ms", "Response was 1500 tokens over budget". Word boundaries alone are
-    not enough -- `\\b500\\b` still matches "after 500 messages" -- so the code
-    must also be at the start of the message or introduced by http/status/code/
-    error, which is how every real transport and SDK error words it.
+    not enough -- `\\b500\\b` still matches "after 500 messages".
+
+    Two forms count, and nothing else:
+
+    - **introduced**, by http / status / code / error, case-insensitively:
+      "HTTP 500 Internal Server Error", "status: 502 upstream closed";
+    - **leading, and followed by a reason phrase** -- a capitalised or all-caps
+      word, which is how both HTTP and the `google.genai` SDK word it:
+      "503 Service Unavailable", "503 UNAVAILABLE. {...}".
+
+    The casing in the second form is load-bearing, and it is why this takes
+    `str(error)` rather than the lower-cased copy the rest of the chain matches
+    on. "500 tokens over budget" opens exactly like a status line and is not
+    one; a bare leading-digit rule classified it as a transport failure and
+    retried it, which is the defect this function exists to remove.
     """
-    return bool(
-        re.search(
-            rf"(?:^|\bhttp[/ ]?[\d.]*\s+|\bstatus[ :=]+|\bcode[ :=]+|\berror[ :=]+)"
-            rf"(?:{pattern})\b",
-            error_str,
-        )
-    )
+    if re.search(_STATUS_INTRODUCER + rf"(?:{pattern})\b", error_text, re.IGNORECASE):
+        return True
+    return bool(re.match(rf"(?:{pattern})\s+[A-Z]", error_text))
 
 
 class ErrorType(Enum):
@@ -236,7 +247,13 @@ class ErrorManager:
         Returns:
             The appropriate ErrorType for the exception
         """
-        error_str = str(error).lower()
+        # Both spellings are kept. The substring chain matches on the lowered
+        # copy; _matches_http_status needs the original, because a leading
+        # status code is only a status code when a capitalised reason phrase
+        # follows it ("503 Service Unavailable" is, "500 tokens over budget"
+        # is not).
+        error_text = str(error)
+        error_str = error_text.lower()
         error_class = type(error).__name__.lower()
         
         # Discord-specific errors
@@ -316,15 +333,16 @@ class ErrorManager:
             return ErrorType.RATE_LIMIT
         elif any(term in error_str for term in ["timeout", "timed out"]):
             return ErrorType.TIMEOUT
-        elif any(term in error_str for term in ["authentication", "unauthorized", "api key", "invalid key"]):
+        elif any(term in error_str for term in ["authentication", "unauthorized", "api key", "invalid key"]) or \
+                _matches_http_status(error_text, "40[13]"):
             return ErrorType.AUTHENTICATION_ERROR
         elif any(term in error_str for term in ["service unavailable", "server error"]) or \
-                _matches_http_status(error_str, "50[023]"):
+                _matches_http_status(error_text, "50[0234]"):
             return ErrorType.SERVICE_UNAVAILABLE
         elif any(term in error_str for term in ["empty response", "no content", "blank response"]):
             return ErrorType.EMPTY_RESPONSE
         elif any(term in error_str for term in ["invalid request", "bad request", "malformed"]) or \
-                _matches_http_status(error_str, "40[04]"):
+                _matches_http_status(error_text, "40[04]"):
             return ErrorType.INVALID_REQUEST
         
         # Configuration errors

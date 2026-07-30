@@ -396,6 +396,12 @@ def _parse_image_rate_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
         "text_rate_limit_per_hour": get_config_value(
             config_data, "rate_limiting", "text_rate_limit_per_hour", 60
         ),
+        "expensive_command_limit_per_minute": get_config_value(
+            config_data, "rate_limiting", "expensive_command_limit_per_minute", 1
+        ),
+        "expensive_command_limit_per_hour": get_config_value(
+            config_data, "rate_limiting", "expensive_command_limit_per_hour", 4
+        ),
         "nano_banana_model": get_config_value(
             config_data, "nano_banana", "model", ""
         ),
@@ -703,6 +709,26 @@ def _validate_feature_values(config: Any) -> List[str]:
         errors.append("nano_banana.model must not be empty")
     if config.text_rate_limit_per_minute <= 0 or config.text_rate_limit_per_hour <= 0:
         errors.append("rate_limiting.text_rate_limit_per_minute/hour must be positive")
+    if (
+        config.expensive_command_limit_per_minute <= 0
+        or config.expensive_command_limit_per_hour <= 0
+    ):
+        errors.append(
+            "rate_limiting.expensive_command_limit_per_minute/hour must be positive"
+        )
+    # Only compare once both values are individually sane. Otherwise a single
+    # mistake -- a negative text_rate_limit_per_hour, say -- reports twice, and
+    # the second message points the reader at the wrong setting.
+    if (
+        config.text_rate_limit_per_hour > 0
+        and config.expensive_command_limit_per_hour > 0
+        and config.expensive_command_limit_per_hour > config.text_rate_limit_per_hour
+    ):
+        errors.append(
+            "rate_limiting.expensive_command_limit_per_hour must not exceed "
+            "text_rate_limit_per_hour; the expensive-command ceiling is meant to be "
+            "tighter than the general one, not looser"
+        )
     if config.text_rate_limit_per_minute > config.text_rate_limit_per_hour:
         errors.append(
             "rate_limiting.text_rate_limit_per_minute cannot exceed "

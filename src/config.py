@@ -133,6 +133,8 @@ class BotConfig:
     max_image_requests_per_minute: int = 30
     text_rate_limit_per_minute: int = 10
     text_rate_limit_per_hour: int = 60
+    expensive_command_limit_per_minute: int = 1
+    expensive_command_limit_per_hour: int = 4
 
     # === Nano Banana ===
     nano_banana_timeout: int = 60

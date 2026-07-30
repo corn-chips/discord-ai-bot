@@ -28,6 +28,8 @@ def register_deepresearch_command(context: CommandContext) -> None:
     @app_commands.describe(topic="The topic to research")
     async def deepresearch(interaction: discord.Interaction, topic: str):
         """Perform deep research on a topic and generate a comprehensive report."""
+        if not await _expensive_command_allowed(bot, interaction):
+            return
         await interaction.response.defer(thinking=True)
 
         try:
@@ -117,6 +119,36 @@ def register_deepresearch_command(context: CommandContext) -> None:
             logger.error(f"Deep research error: {e}", exc_info=True)
             await interaction.followup.send(f"❌ An error occurred during deep research: {str(e)}")
 
+
+
+async def _expensive_command_allowed(bot, interaction: discord.Interaction) -> bool:
+    """
+    Charge one unit against the expensive-command budget, or refuse.
+
+    /deepresearch and /summarize were governed only by the general text limit,
+    which permits 60 invocations an hour. Both fan out well beyond a single
+    ordinary reply -- /deepresearch makes two model calls, one of them on the
+    high-complexity model, and /summarize feeds up to channel_history_limit
+    messages into a single prompt with no per-message truncation -- so the
+    general limit is not a meaningful ceiling on either.
+
+    Returns True when the caller may proceed, and has already told them why not
+    when it returns False.
+    """
+    limiter = getattr(bot, "expensive_command_limiter", None)
+    if limiter is None:
+        # Registered against a bot built without the limiter (test doubles).
+        return True
+
+    allowed, message = await limiter.check_and_record(interaction.user.id)
+    if allowed:
+        return True
+
+    await interaction.response.send_message(
+        message or "This command is rate limited. Please try again later.",
+        ephemeral=True,
+    )
+    return False
 
 
 def _has_rag_admin(interaction: discord.Interaction) -> bool:
@@ -345,6 +377,8 @@ def register_summarize_command(context: CommandContext) -> None:
     @bot.tree.command(name="summarize", description="Summarize the current conversation")
     async def summarize(interaction: discord.Interaction):
         """Summarize the conversation in the current channel."""
+        if not await _expensive_command_allowed(bot, interaction):
+            return
         await interaction.response.defer(thinking=True)
 
         messages = []

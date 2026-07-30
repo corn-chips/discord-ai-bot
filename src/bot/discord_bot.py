@@ -409,6 +409,14 @@ class DiscordBot(discord.Client):
             per_minute=config.text_rate_limit_per_minute,
             per_hour=config.text_rate_limit_per_hour,
         )
+        # A separate, much tighter budget for commands that fan out into many
+        # model calls or feed a whole channel's history into one prompt.
+        # /deepresearch and /summarize were governed only by the general text
+        # limit above, which permits 60 an hour.
+        self.expensive_command_limiter = TextRateLimiter(
+            per_minute=config.expensive_command_limit_per_minute,
+            per_hour=config.expensive_command_limit_per_hour,
+        )
         
         # Initialize enhanced command handler
         self.enhanced_command_handler = None

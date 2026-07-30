@@ -155,6 +155,13 @@ rate_limiting:
   max_image_requests_per_minute: 30    # Global image request rate limit
   text_rate_limit_per_minute: 10       # Per-user text request limit/minute
   text_rate_limit_per_hour: 60         # Per-user text request limit/hour
+  # Separate, much tighter ceiling for the commands that fan out into many
+  # model calls or feed a whole channel's history into one prompt.
+  # /deepresearch and /summarize sit under the general text limit above,
+  # which permits 60 invocations an hour; measured worst case for a single
+  # unprivileged user that is billions of tokens per hour.
+  expensive_command_limit_per_minute: 1   # Per-user limit/minute for /deepresearch, /summarize
+  expensive_command_limit_per_hour: 4     # Per-user limit/hour for the same
 
 # --- Nano Banana (Gemini Image) Client ---
 nano_banana:

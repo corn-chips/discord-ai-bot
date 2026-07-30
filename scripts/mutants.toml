@@ -223,3 +223,14 @@ expect = "killed"
 [[mutant.edit]]
 find = "        include_error_details: bool = False\n"
 replace = "        include_error_details: bool = True\n"
+
+[[mutant]]
+id = "M-DAB213"
+bug = "DAB-213"
+summary = "Expensive-command cooldown removed from /summarize, restoring 60 unbounded-input invocations an hour per user"
+guard = "test_the_hourly_ceiling_is_enforced_per_user"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    limiter = getattr(bot, \"expensive_command_limiter\", None)\n    if limiter is None:\n"
+replace = "    limiter = None\n    if limiter is None:\n"

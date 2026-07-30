@@ -475,5 +475,57 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         client._generate_response_async.assert_not_awaited()
 
 
+class ThoughtPartExtractionTest(unittest.TestCase):
+    """DAB-039: the model's private reasoning must never become the answer.
+
+    Latent at present -- nothing in the repository sets ``include_thoughts``, so
+    the API returns no thought parts. These tests build real SDK ``types.Part``
+    objects with ``thought=True`` so the guard is exercised anyway, because the
+    day someone enables thinking output is not the day to discover this.
+
+    The exposed path is narrow and specific. The SDK's own ``.text`` property
+    already skips thought parts, so the leak lives in the fallback loop in
+    ``_get_response_text`` -- which runs precisely when ``.text`` came back
+    empty, and a thoughts-only response is exactly what produces that.
+    """
+
+    @staticmethod
+    def _response_with_parts(parts):
+        # A real types.Content, so part.thought behaves as the SDK defines it
+        # rather than as a permissive mock would allow.
+        return SimpleNamespace(
+            text=None,
+            candidates=[SimpleNamespace(content=types.Content(parts=parts))],
+        )
+
+    def test_a_thoughts_only_response_yields_no_text_rather_than_the_reasoning(self):
+        client = GeminiClient.__new__(GeminiClient)
+        response = self._response_with_parts(
+            [types.Part(text="The user seems annoyed; I should hedge.", thought=True)]
+        )
+
+        self.assertIsNone(client._get_response_text(response))
+
+    def test_reasoning_preceding_the_answer_is_skipped_not_returned(self):
+        client = GeminiClient.__new__(GeminiClient)
+        response = self._response_with_parts(
+            [
+                types.Part(text="Step 1: recall the formula. Step 2: apply it.", thought=True),
+                types.Part(text="The answer is 42."),
+            ]
+        )
+
+        extracted = client._get_response_text(response)
+
+        self.assertEqual(extracted, "The answer is 42.")
+        self.assertNotIn("Step 1", extracted)
+
+    def test_an_ordinary_answer_is_unaffected_by_the_guard(self):
+        client = GeminiClient.__new__(GeminiClient)
+        response = self._response_with_parts([types.Part(text="Plain answer.")])
+
+        self.assertEqual(client._get_response_text(response), "Plain answer.")
+
+
 if __name__ == "__main__":
     unittest.main()

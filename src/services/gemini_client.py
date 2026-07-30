@@ -1484,6 +1484,20 @@ Candidate messages:
                 if hasattr(candidate, 'content') and candidate.content:
                     if hasattr(candidate.content, 'parts') and candidate.content.parts:
                         for part in candidate.content.parts:
+                            # Skip chain-of-thought parts. The SDK's own .text
+                            # property filters these (types.py: `if
+                            # isinstance(part.thought, bool) and part.thought:
+                            # continue`), but this fallback loop runs precisely
+                            # when .text came back empty -- which is what a
+                            # thoughts-only response produces. Without the skip
+                            # the model's private reasoning is returned as the
+                            # answer and posted to the channel.
+                            #
+                            # Latent today: nothing sets include_thoughts, so the
+                            # API returns no thought parts. It becomes live the
+                            # moment anyone enables thinking output.
+                            if getattr(part, 'thought', False):
+                                continue
                             if hasattr(part, 'text') and part.text:
                                 return part.text
         except Exception as e:

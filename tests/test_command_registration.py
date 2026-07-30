@@ -194,8 +194,16 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         bot.hybrid_context_retriever = SimpleNamespace(
             cancel_background_work=AsyncMock()
         )
+        # DAB-141: /rag delete now requires Manage Server, so the caller must be
+        # a privileged guild member. This fixture previously had no guild and no
+        # user at all -- precisely the caller the gate now rejects.
         interaction = SimpleNamespace(
             channel_id=20,
+            guild=SimpleNamespace(id=3),
+            user=SimpleNamespace(
+                id=1,
+                guild_permissions=SimpleNamespace(manage_guild=True, administrator=False),
+            ),
             response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
@@ -388,6 +396,129 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_truncate_text("abcdef", 5), "ab...")
         self.assertEqual(_format_timedelta(timedelta(hours=1, minutes=2)), "1h 2m")
         self.assertEqual(_get_model_description("model-a", self.config), "First model")
+
+
+class RagPermissionGateTest(unittest.IsolatedAsyncioTestCase):
+    """DAB-141 (S1): /rag delete scope:all let any member wipe every guild.
+
+    Every assertion here reads the SERIALISED to_dict() payload rather than the
+    Python attribute, and that is the entire point. The ticket prescribed
+    @app_commands.default_permissions on the *subcommand*; discord.py serialises
+    permissions only at the top level, so that sets the attribute and is dropped
+    from the payload. A test reading `command.default_permissions` passes while
+    Discord receives `default_member_permissions: null` and enforces nothing --
+    a gate that protects nothing, with a green test to vouch for it.
+    """
+
+    async def asyncSetUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._bots = []
+        self.config = BotConfig(
+            token_db_path=str(Path(self._temp_dir.name) / "commands.db"),
+            rag_database_path=str(Path(self._temp_dir.name) / "message_rag.db"),
+            available_models=[{"name": "Model A", "value": "model-a"}],
+            valid_models=["model-a"],
+            valid_languages=["english", "auto"],
+            model_display_names={"model-a": "Model A"},
+            model_descriptions={"model-a": "First model"},
+        )
+
+    async def asyncTearDown(self):
+        for bot in self._bots:
+            await bot.close()
+        self._temp_dir.cleanup()
+
+    async def _tree_and_group(self):
+        bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
+        bot.config = self.config
+        bot.image_processing_service = None
+        self._bots.append(bot)
+        await setup_commands(bot, self.config, object(), object(), None)
+        group = next(
+            command for command in bot.tree.get_commands() if command.name == "rag"
+        )
+        return bot, group
+
+    async def test_the_rag_group_ships_a_permission_gate_in_its_payload(self):
+        bot, group = await self._tree_and_group()
+        payload = group.to_dict(bot.tree)
+
+        # 32 == Permissions(manage_guild=True). The string form is what Discord
+        # receives. None here means the gate was applied where it does not
+        # serialise, which is the defect this test exists for.
+        self.assertEqual(
+            str(payload.get("default_member_permissions")),
+            str(discord.Permissions(manage_guild=True).value),
+            "the /rag group ships no permission gate to Discord",
+        )
+
+    async def test_the_rag_group_is_unavailable_in_dms(self):
+        # Discord does not evaluate default_member_permissions outside a guild,
+        # so without this the gate simply does not apply in a DM.
+        bot, group = await self._tree_and_group()
+        payload = group.to_dict(bot.tree)
+
+        self.assertFalse(payload.get("dm_permission", True))
+
+    async def test_the_subcommands_carry_no_checks(self):
+        # A group-level gate must not populate .checks; an app_commands.check
+        # would, and would change the command signature this file pins.
+        bot, group = await self._tree_and_group()
+
+        for subcommand in group.commands:
+            with self.subTest(subcommand=subcommand.name):
+                self.assertEqual(subcommand.checks, [])
+
+    async def _invoke_delete_as(self, user):
+        bot, group = await self._tree_and_group()
+        bot.message_index_service = SimpleNamespace(
+            delete_rag_data_async=AsyncMock(return_value={"messages": 0, "pins": 0})
+        )
+        bot.hybrid_context_retriever = SimpleNamespace(cancel_background_work=AsyncMock())
+
+        delete = next(cmd for cmd in group.commands if cmd.name == "delete")
+        interaction = SimpleNamespace(
+            channel_id=20,
+            guild=None if user is None else SimpleNamespace(id=3),
+            user=user,
+            response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await delete.callback(
+            interaction, app_commands.Choice(name="All channels", value="all")
+        )
+        return bot, interaction
+
+    async def test_an_ordinary_member_cannot_delete_every_channels_data(self):
+        # The runtime guard, not the payload. default_member_permissions is a
+        # DEFAULT that a guild admin can re-grant from the integrations UI, so
+        # for an unrecoverable delete it cannot be the only barrier.
+        member = SimpleNamespace(
+            id=99,
+            guild_permissions=SimpleNamespace(manage_guild=False, administrator=False),
+        )
+
+        bot, interaction = await self._invoke_delete_as(member)
+
+        bot.message_index_service.delete_rag_data_async.assert_not_awaited()
+        bot.hybrid_context_retriever.cancel_background_work.assert_not_awaited()
+        interaction.response.defer.assert_not_awaited()
+        interaction.response.send_message.assert_awaited_once()
+        self.assertIn(
+            "Manage Server", interaction.response.send_message.await_args.args[0]
+        )
+
+    async def test_a_privileged_member_can_still_delete(self):
+        admin = SimpleNamespace(
+            id=1,
+            guild_permissions=SimpleNamespace(manage_guild=True, administrator=False),
+        )
+
+        bot, interaction = await self._invoke_delete_as(admin)
+
+        bot.message_index_service.delete_rag_data_async.assert_awaited_once_with(
+            channel_id=None
+        )
 
 
 if __name__ == "__main__":

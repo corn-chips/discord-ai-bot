@@ -99,8 +99,26 @@ S1 open.
 **Consequence.** Gate at the **group** level. A useful side effect: a group-level gate does not
 populate `.checks`, so the assertion at `tests/test_command_registration.py:176`
 (`self.assertEqual(self._command(bot, path).checks, [])` for `rag status`, `rag backfill`,
-`rag delete`) does **not** break, and `DAB-141` needs no test churn at all. An
-`app_commands.check` *would* break it — verified both ways.
+`rag delete`) does **not** break. An `app_commands.check` *would* break it — verified both ways.
+
+**What landed** (Phase 2): `default_permissions=Permissions(manage_guild=True)` and
+`guild_only=True` on the group, serialising to `32` / `dm_permission: false`, **plus** a runtime
+`_has_rag_admin` check inside the `/rag delete` callback. The runtime check is not belt-and-braces:
+`default_member_permissions` is a *default* a guild admin can re-grant from the integrations UI,
+and Discord does not evaluate it outside a guild at all, so an unrecoverable delete cannot rest on
+it alone.
+
+The regression tests assert the **serialised `to_dict()` payload**, never the Python attribute, and
+that distinction is the whole lesson here. Applying the ticket's subcommand-level fix to a scratch
+copy fails the new tests with *"the /rag group ships no permission gate to Discord"*, while an
+attribute-reading assertion passes on exactly the same broken code. `M-DAB141` and `M-DAB141B` pin
+both halves.
+
+One correction to this entry's own earlier wording: it claimed `DAB-141` "needs no test churn at
+all". It needs a little. `test_rag_delete_scopes_deletion_and_stops_background_work` built a fake
+interaction with no `guild` and no `user` — precisely the caller the gate now rejects — so that
+fixture gained a privileged member. No assertion changed; only the fixture, and only because the
+contract did.
 
 ## 4. `DAB-065`'s suggested fix contradicts the same document
 

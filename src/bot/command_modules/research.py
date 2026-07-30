@@ -119,6 +119,27 @@ def register_deepresearch_command(context: CommandContext) -> None:
 
 
 
+def _has_rag_admin(interaction: discord.Interaction) -> bool:
+    """
+    True if the caller may run destructive RAG maintenance.
+
+    Requires Manage Server, evaluated against the caller's live guild
+    permissions rather than the command's declared defaults. The two are not the
+    same thing: `default_member_permissions` is a hint Discord uses to build the
+    default role overwrite, and a guild admin can re-grant the command to any
+    role from the integrations UI. Outside a guild there is nobody to have the
+    permission, so this returns False.
+    """
+    if interaction.guild is None:
+        return False
+
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if permissions is None:
+        return False
+
+    return bool(permissions.manage_guild or permissions.administrator)
+
+
 def create_rag_group(context: CommandContext) -> app_commands.Group:
     bot = context.bot
     config = context.config
@@ -126,7 +147,27 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
     performance_logger = context.performance_logger
     token_tracker = context.token_tracker
 
-    rag_group = app_commands.Group(name="rag", description="Manage local message retrieval memory")
+    # Gate the whole group, not the individual subcommands.
+    #
+    # discord.py serialises permissions only at the top level of the command
+    # tree. A subcommand's @app_commands.default_permissions sets the local
+    # Python attribute but is dropped from to_dict(), so the payload Discord
+    # actually receives carries default_member_permissions: null. A gate applied
+    # there looks correct to any test that reads the attribute, and protects
+    # nothing in production. Verified on discord.py 2.7.1: subcommand -> null,
+    # byte-identical to having no gate at all; group -> 32.
+    #
+    # Gating all three subcommands is deliberate, not collateral damage.
+    # /rag delete is unrecoverable, /rag backfill triggers an unbounded history
+    # scan plus embedding generation billed to the operator's own API key, and
+    # /rag status reports the host database path. None is a member-facing
+    # feature.
+    rag_group = app_commands.Group(
+        name="rag",
+        description="Manage local message retrieval memory",
+        default_permissions=discord.Permissions(manage_guild=True),
+        guild_only=True,
+    )
 
     @rag_group.command(name="status", description="Show local message RAG index status")
     async def rag_status(interaction: discord.Interaction):
@@ -238,6 +279,19 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
         interaction: discord.Interaction,
         scope: app_commands.Choice[str],
     ):
+        # Second line of defence, and for an unrecoverable operation it is the
+        # real one. The group's default_member_permissions is exactly that -- a
+        # DEFAULT. A guild admin can re-grant the command to anyone from the
+        # integrations UI, and Discord does not evaluate it at all outside a
+        # guild. Deleting every indexed message in every channel is not
+        # something to leave to a hint.
+        if not _has_rag_admin(interaction):
+            await interaction.response.send_message(
+                "You need the Manage Server permission to delete stored RAG data.",
+                ephemeral=True,
+            )
+            return
+
         index_service = getattr(bot, "message_index_service", None)
         if not index_service:
             await interaction.response.send_message(

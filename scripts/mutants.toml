@@ -179,3 +179,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                        if pix.colorspace is None or pix.colorspace.n not in (1, 3):\n                            pix = fitz.Pixmap(fitz.csRGB, pix)\n                        if pix.alpha:\n                            mode = \"LA\" if pix.n == 2 else \"RGBA\"\n                        else:\n                            mode = \"L\" if pix.n == 1 else \"RGB\"\n                        image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)\n"
 replace = "                        img_data = pix.tobytes(\"png\")\n                        image = Image.open(io.BytesIO(img_data))\n"
+
+[[mutant]]
+id = "M-DAB141"
+bug = "DAB-141"
+summary = "Permission gate moved from the /rag group to the delete subcommand, where discord.py drops it from to_dict() -- the ticket's own prescribed fix, which protects nothing"
+guard = "test_the_rag_group_ships_a_permission_gate_in_its_payload"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        default_permissions=discord.Permissions(manage_guild=True),\n        guild_only=True,\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB141B"
+bug = "DAB-141"
+summary = "Runtime admin guard removed from /rag delete, leaving only the payload default a guild admin can re-grant"
+guard = "test_an_ordinary_member_cannot_delete_every_channels_data"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not _has_rag_admin(interaction):\n            await interaction.response.send_message(\n                \"You need the Manage Server permission to delete stored RAG data.\",\n                ephemeral=True,\n            )\n            return\n\n"
+replace = ""

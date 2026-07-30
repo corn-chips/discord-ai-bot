@@ -14,6 +14,44 @@ from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
+#: Ceilings on pinned memory per channel (DAB-150).
+#:
+#: Pins are injected verbatim into every prompt for their channel, forever, and
+#: /pin previously accepted any length from any member. A single 100 KB pin was
+#: accepted untruncated and rode in on every subsequent request, so one user
+#: could permanently raise the cost of every conversation in a channel.
+#:
+#: 40,000 characters is roughly 10k tokens -- generous for genuine standing
+#: instructions, and small next to the context budget.
+MAX_PINS_PER_CHANNEL = 25
+MAX_PIN_CHARS_PER_CHANNEL = 40_000
+MAX_PIN_CHARS = 4_000
+
+#: Delimiters the prompt builder uses to fence the context block. A pin
+#: containing one of these can forge the end of the block and inject text that
+#: reads as system-level instruction.
+_PROMPT_DELIMITERS = (
+    "--- End Context ---",
+    "--- Context ---",
+    "--- End Pinned",
+    "--- Pinned",
+)
+
+
+def _sanitise_pin_content(content: str) -> str:
+    """Trim a pin to its per-pin cap and defuse prompt-structure delimiters."""
+    cleaned = (content or "").strip()
+
+    for delimiter in _PROMPT_DELIMITERS:
+        # Zero-width space after the leading dashes: visually identical in
+        # Discord, no longer matches the delimiter the prompt builder emits.
+        cleaned = cleaned.replace(delimiter, delimiter.replace("---", "-\u200b--", 1))
+
+    if len(cleaned) > MAX_PIN_CHARS:
+        cleaned = cleaned[:MAX_PIN_CHARS].rstrip() + " [truncated]"
+
+    return cleaned
+
 
 class PinService:
     """Manages per-channel pinned messages persisted in SQLite."""
@@ -112,8 +150,47 @@ class PinService:
         Returns:
             The pin ID if successful, None otherwise.
         """
+        content = _sanitise_pin_content(content)
+        if not content:
+            logger.info("Refusing to pin empty content for channel %s", channel_id)
+            return None
+
         try:
             with sqlite_transaction(self.db_path) as conn:
+                # Enforce the caps with a SQL aggregate, not by counting rows
+                # from get_pins().
+                #
+                # This is deliberate. get_pins() is the obvious thing to reach
+                # for, and DAB-073 gives it an optional LIMIT; a cap that
+                # counted its rows would then silently admit far more pins than
+                # it advertises -- measured at 6x, with add_pin reporting
+                # success every time. COUNT(*) cannot be defeated that way, so
+                # the two changes stay independent whichever order they land in.
+                existing_count, existing_chars = conn.execute(
+                    """
+                    SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)
+                    FROM pinned_messages
+                    WHERE channel_id = ?
+                    """,
+                    (channel_id,),
+                ).fetchone()
+
+                if existing_count >= MAX_PINS_PER_CHANNEL:
+                    logger.info(
+                        "Refusing to pin for channel %s: already at the %d-pin limit",
+                        channel_id, MAX_PINS_PER_CHANNEL,
+                    )
+                    return None
+
+                if existing_chars + len(content) > MAX_PIN_CHARS_PER_CHANNEL:
+                    logger.info(
+                        "Refusing to pin for channel %s: would take pinned text to %d "
+                        "characters, past the %d limit",
+                        channel_id, existing_chars + len(content),
+                        MAX_PIN_CHARS_PER_CHANNEL,
+                    )
+                    return None
+
                 cursor = conn.execute(
                     """
                     INSERT INTO pinned_messages

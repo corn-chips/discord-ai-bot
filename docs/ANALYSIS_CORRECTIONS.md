@@ -173,6 +173,46 @@ executing, and a dependency direction asserted without a runtime check can be ex
 Verify the edge before trusting the ordering, especially where the "blocked" ticket is a safety
 guard.
 
+## 7. `DAB-073 -> DAB-150` is a weak edge, and the obvious implementation makes it dangerous
+
+**Claimed**, in `ANALYSIS_BACKLOG.md`'s dependency graph: `DAB-073` must land before `DAB-150`.
+
+**Partly upheld, with a trap underneath.** The edge is real in one direction only: `DAB-150`'s own
+acceptance criterion (30 pins at `max_messages=30`, at least 7 retrieved items surviving) cannot be
+met without `DAB-073`'s retrieval floor — measured at 5. So `DAB-150` can be *landed* alone but not
+*closed* alone.
+
+The trap is in the other direction, and it is the same shape as item 6. `DAB-073` adds a `LIMIT` to
+`PinService.get_pins`. The natural way to implement `DAB-150`'s caps is to count the rows
+`get_pins` returns — at which point the caps are silently defeated by whatever limit `DAB-073`
+chose. Measured with an 8-row limit and a 25-pin cap:
+
+| Order | `add_pin` accepted | rows actually stored | caps |
+|---|---|---|---|
+| `DAB-150` alone | 10 | 10 | enforced |
+| `DAB-073` then `DAB-150`, caps via `get_pins` | 60 | 60 | **bypassed 6x** |
+| `DAB-073` then `DAB-150`, caps via SQL `COUNT` | 10 | 10 | enforced |
+
+`add_pin` reports success every time in the bypassed case.
+
+**Consequence.** Unlike item 6 this is not forced by the physics — it is one avoidable
+implementation choice. `DAB-150` landed with its caps computed by
+`SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)` inside the existing transaction, which no
+`get_pins` limit can affect, so the two tickets are order-independent in practice.
+`M-DAB150B` reintroduces the row-counting form and is killed by
+`test_the_caps_survive_a_limited_get_pins`.
+
+Two further corrections for whoever lands `DAB-073`:
+
+- It will break `test_reply_anchor_is_not_starved_by_pins` at the **length** assertion (`:217`),
+  not the pin-count assertion (`:218`) the ticket predicts.
+- It will also break `test_rerank_boundary_uses_slots_remaining_after_pins`
+  (`test_rag_optimization.py:166`), which the ticket does not mention at all: the floor lifts
+  `available_slots` from 1 to 2 and short-circuits `reranker_reason` to `within_context_limit`.
+- Its `get_pins` `LIMIT` should be an **opt-in keyword argument used only by the retriever**.
+  `/pins` (`personalization.py:191`) is the only delete UI, so an unconditional limit makes older
+  pins both invisible and undeletable.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

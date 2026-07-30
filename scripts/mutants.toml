@@ -234,3 +234,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "    limiter = getattr(bot, \"expensive_command_limiter\", None)\n    if limiter is None:\n"
 replace = "    limiter = None\n    if limiter is None:\n"
+
+[[mutant]]
+id = "M-DAB150"
+bug = "DAB-150"
+summary = "Pin count/size caps removed, so one member can inject unbounded text into every prompt for a channel forever"
+guard = "test_the_pin_count_is_capped_per_channel"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if existing_count >= MAX_PINS_PER_CHANNEL:\n"
+replace = "                if False:\n"
+
+[[mutant]]
+id = "M-DAB150B"
+bug = "DAB-150"
+summary = "Pin caps counted from get_pins() instead of SQL COUNT, so a limited get_pins silently defeats them"
+guard = "test_the_caps_survive_a_limited_get_pins"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                existing_count, existing_chars = conn.execute(\n                    \"\"\"\n                    SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)\n                    FROM pinned_messages\n                    WHERE channel_id = ?\n                    \"\"\",\n                    (channel_id,),\n                ).fetchone()\n"
+replace = "                _rows = self.get_pins(channel_id)\n                existing_count = len(_rows)\n                existing_chars = sum(len(r[1]) for r in _rows)\n"

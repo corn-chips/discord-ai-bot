@@ -212,6 +212,26 @@ class MessageIndexServiceTest(unittest.TestCase):
         self.assertEqual(channel_21["embedded"], 0)
         self.assertEqual(channel_21["pending_embeddings"], 1)
 
+    def test_a_healthy_status_carries_no_error_marker(self):
+        self._upsert(373, "Channel twenty message")
+
+        self.assertNotIn("error", self.service.get_status(channel_id=20))
+
+    def test_an_unreadable_index_is_distinguishable_from_an_empty_one(self):
+        # DAB-170: get_status caught every exception and returned all zeros,
+        # which is exactly what a healthy, freshly-created index returns. An
+        # operator running /rag status against a corrupt database saw an
+        # ordinary, apparently healthy report.
+        self._upsert(374, "Channel twenty message")
+        with open(self.db_path, "wb") as handle:
+            handle.write(b"this is not a sqlite database" * 64)
+
+        status = self.service.get_status(channel_id=20)
+
+        self.assertEqual(status["messages"], 0, "precondition: the counts do read as empty")
+        self.assertTrue(status.get("error"), "a read failure must be visible in the payload")
+        self.assertIn("database", status["error"].lower())
+
     def test_index_and_embeddings_persist_across_service_instances(self):
         self._upsert(381, "Persistent local RAG memory")
         pending = {
@@ -509,6 +529,37 @@ class RagPregenerationTest(unittest.IsolatedAsyncioTestCase):
 
         other_embedding.cancel()
         await asyncio.gather(other_embedding, return_exceptions=True)
+
+    async def test_pregeneration_does_not_report_complete_over_an_unreadable_index(self):
+        # A degraded status is all zeros, so `pending or failed` reads as
+        # "nothing outstanding" and the job declared itself complete over a
+        # database it could not open (DAB-170).
+        message_index = SimpleNamespace(
+            backfill_channel=AsyncMock(return_value=2),
+            get_pending_embeddings_async=AsyncMock(return_value=[]),
+            store_embedding_async=AsyncMock(return_value=True),
+            mark_embedding_failed_async=AsyncMock(),
+            get_status_async=AsyncMock(
+                return_value={
+                    "embedded": 0,
+                    "pending_embeddings": 0,
+                    "failed_embeddings": 0,
+                    "error": "DatabaseError: file is not a database",
+                }
+            ),
+        )
+        retriever, _gemini_client = self._make_retriever(message_index)
+
+        retriever.start_channel_pregeneration(
+            SimpleNamespace(id=20),
+            limit=None,
+            include_bot_user_id=99,
+        )
+        await retriever._pregeneration_tasks[20]
+
+        status = retriever.get_pregeneration_status(20)
+        self.assertEqual(status["phase"], "failed")
+        self.assertIn("file is not a database", status["error"])
 
     async def test_complete_history_pregeneration_indexes_and_embeds_in_background(self):
         pending = [

@@ -451,7 +451,16 @@ class LiveMessageCoordinator:
                     seen_context_ids.add(context_entry.message_id)
                     live_context.append(context_entry)
             except Exception as exc:
-                logger.debug("Live-mode RAG retrieval failed; using rolling context: %s", exc)
+                # WARNING, matching the mention path's identical fallback at
+                # discord_bot.py:894-899. At the shipped log_level: INFO this
+                # was the only one of the two that was invisible, so live mode
+                # could run indefinitely on rolling context alone, with the
+                # index never consulted and nothing to see (DAB-168).
+                logger.warning(
+                    "Live-mode RAG retrieval failed; using rolling context: %s",
+                    exc,
+                    exc_info=True,
+                )
 
         personality_prompt = self.reply_style_instruction
         channel_personality = self.get_personality_prompt(channel_id)

@@ -248,6 +248,33 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
         # Two backoffs of 0.05 s and 0.10 s. A spinning retry returns instantly.
         self.assertGreaterEqual(elapsed, 0.1)
 
+    async def test_a_rag_retrieval_failure_is_visible_at_the_default_log_level(self):
+        # DAB-168. This is the one place in the suite where asserting on a log
+        # record is asserting the contract rather than a proxy for it: the
+        # defect *is* the level. At the shipped `log_level: INFO` a live-mode
+        # retrieval failure was DEBUG and therefore invisible, while the
+        # identical mention-path failure was a WARNING, so live mode could run
+        # on rolling context alone with nothing to see. The fallback behaviour
+        # itself is asserted too -- the turn is still answered.
+        retrieve = AsyncMock(side_effect=RuntimeError("index unavailable"))
+        generate = AsyncMock(return_value=ok_response())
+        coordinator = self.make_coordinator(
+            rag_enabled=lambda: True,
+            retrieve_context=retrieve,
+            generate_response=generate,
+        )
+
+        with self.assertLogs(
+            "src.bot.live_message_coordinator", level="WARNING"
+        ) as captured:
+            await self.drive(coordinator, [make_message(1, "hello")])
+
+        self.assertTrue(
+            any("RAG retrieval failed" in line for line in captured.output),
+            captured.output,
+        )
+        generate.assert_awaited_once()
+
     async def test_a_dropped_batch_is_still_dropped_when_no_error_callback_exists(self):
         # handle_response_error is Optional on the constructor. A bot missing it
         # must not leave the worker spinning or raise out of a bare create_task.

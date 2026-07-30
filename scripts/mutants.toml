@@ -397,3 +397,47 @@ expect = "killed"
 [[mutant.edit]]
 find = "        perf_logger.propagate = False\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB168"
+bug = "DAB-168"
+summary = "Live-mode RAG retrieval failure logged at DEBUG again, invisible at the shipped log_level: INFO"
+guard = "test_a_rag_retrieval_failure_is_visible_at_the_default_log_level"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                logger.warning(\n                    \"Live-mode RAG retrieval failed; using rolling context: %s\",\n                    exc,\n                    exc_info=True,\n                )\n"
+replace = "                logger.debug(\"Live-mode RAG retrieval failed; using rolling context: %s\", exc)\n"
+
+[[mutant]]
+id = "M-DAB170"
+bug = "DAB-170"
+summary = "get_status returns an all-zeros dict on a database failure, so /rag status renders a healthy-looking empty index"
+guard = "test_an_unreadable_index_is_distinguishable_from_an_empty_one"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                \"database_path\": str(self.db_path.resolve()),\n                \"error\": f\"{type(exc).__name__}: {exc}\",\n"
+replace = "                \"database_path\": str(self.db_path.resolve()),\n"
+
+[[mutant]]
+id = "M-DAB170B"
+bug = "DAB-170"
+summary = "Pre-generation reads a degraded all-zeros status as 'nothing outstanding' and reports the run complete"
+guard = "test_pregeneration_does_not_report_complete_over_an_unreadable_index"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if status.get(\"error\"):\n                # A degraded status is all zeros, so the test below would read\n                # it as \"nothing pending, nothing failed\" and declare the run\n                # complete over a database it could not open (DAB-170).\n                progress.update(phase=\"failed\", error=status[\"error\"])\n            elif status[\"pending_embeddings\"] or status[\"failed_embeddings\"]:\n"
+replace = "            if status[\"pending_embeddings\"] or status[\"failed_embeddings\"]:\n"
+
+[[mutant]]
+id = "M-DAB170C"
+bug = "DAB-170"
+summary = "/rag status renders its normal healthy embed over a degraded all-zeros status"
+guard = "test_rag_status_says_degraded_instead_of_showing_a_healthy_empty_index"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        status_error = status.get(\"error\")\n        if status_error:\n"
+replace = "        status_error = None\n        if status_error:\n"

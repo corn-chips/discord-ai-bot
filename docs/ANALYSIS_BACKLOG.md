@@ -205,9 +205,9 @@ here.
 | DAB-159 | Indirect prompt injection: retrieved content can forge the RAG context fence | security |
 | DAB-163 | `/pins` breaks permanently at 26 pins (Discord's 25-field embed cap) | security |
 | DAB-167 | `send_error_response` raises out of its own `except` block | observability |
-| DAB-168 | Live-mode RAG retrieval failure is logged at DEBUG | observability |
+| DAB-168 | **DONE** (Phase 3b) — Live-mode RAG retrieval failure is logged at DEBUG. Now WARNING with `exc_info`, matching the mention path | observability |
 | DAB-169 | 39 of 237 `except` handlers are invisible at the default log level | observability |
-| DAB-170 | `get_status` returns all zeros on DB failure; `/rag status` looks healthy | observability |
+| DAB-170 | **DONE** (Phase 3b) — `get_status` returns all zeros on DB failure; `/rag status` looks healthy. The degraded payload now carries an `error` key; `/rag status` renders a red DEGRADED embed and pre-generation no longer reports `complete` over an unreadable index | observability |
 | DAB-181 | A failed first `start.sh` leaves a poisoned `.venv` | ops |
 | DAB-201 | The text-file decode ladder can never fail; binary is mojibaked into the prompt | media |
 | DAB-202 | 52.4 MB of text-file content concatenated into one prompt, no truncation | media |

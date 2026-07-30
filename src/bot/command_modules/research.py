@@ -210,6 +210,25 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
 
         await interaction.response.defer(ephemeral=True)
         status = await index_service.get_status_async(channel_id=interaction.channel_id)
+        status_error = status.get("error")
+        if status_error:
+            # Every count in a degraded status is zero, which reads exactly like
+            # a healthy, freshly-created index. Say so, rather than rendering
+            # the usual embed over numbers that mean nothing (DAB-170).
+            embed = discord.Embed(
+                title="Message RAG Status — DEGRADED",
+                description=(
+                    "The index database could not be read. The counts are "
+                    "unavailable, not zero."
+                ),
+                color=discord.Color.red(),
+                timestamp=datetime.now(),
+            )
+            embed.add_field(name="Error", value=f"```{status_error[:900]}```", inline=False)
+            embed.add_field(name="Local Database", value=status["database_path"], inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
         embed = discord.Embed(
             title="Message RAG Status",
             color=discord.Color.blurple(),

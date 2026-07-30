@@ -240,6 +240,82 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
             channel_id=None
         )
 
+    @staticmethod
+    def _rag_status_payload(**overrides):
+        payload = {
+            "messages": 0,
+            "embedded": 0,
+            "pending_embeddings": 0,
+            "failed_embeddings": 0,
+            "skipped_embeddings": 0,
+            "cached_vectors": 0,
+            "vector_cache_bytes": 0,
+            "fts_enabled": True,
+            "embedding_model": "m",
+            "embedding_dimensions": 8,
+            "database_path": "/tmp/rag.db",
+        }
+        payload.update(overrides)
+        return payload
+
+    @staticmethod
+    def _admin_interaction():
+        return SimpleNamespace(
+            channel_id=20,
+            guild=SimpleNamespace(id=3),
+            user=SimpleNamespace(
+                id=1,
+                guild_permissions=SimpleNamespace(manage_guild=True, administrator=False),
+            ),
+            response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+    async def test_rag_status_says_degraded_instead_of_showing_a_healthy_empty_index(self):
+        # DAB-170: get_status swallows a database failure and returns all
+        # zeros, which is byte-identical to a healthy, freshly-created index.
+        # /rag status rendered its normal blurple embed over those zeros, so an
+        # unreadable database was indistinguishable from "nothing indexed yet".
+        bot = await self._register()
+        bot.message_index_service = SimpleNamespace(
+            get_status_async=AsyncMock(
+                return_value=self._rag_status_payload(
+                    error="DatabaseError: file is not a database"
+                )
+            )
+        )
+        interaction = self._admin_interaction()
+
+        await self._command(bot, "rag status").callback(interaction)
+
+        embed = interaction.followup.send.await_args.kwargs["embed"]
+        self.assertIn("DEGRADED", embed.title)
+        self.assertEqual(embed.colour, discord.Color.red())
+        self.assertIn(
+            "file is not a database",
+            " ".join(field.value for field in embed.fields),
+        )
+        # The meaningless counts are not rendered at all.
+        self.assertNotIn("Indexed Messages", [field.name for field in embed.fields])
+
+    async def test_rag_status_still_renders_the_normal_embed_when_healthy(self):
+        bot = await self._register()
+        bot.message_index_service = SimpleNamespace(
+            get_status_async=AsyncMock(
+                return_value=self._rag_status_payload(messages=3, embedded=3)
+            )
+        )
+        bot.hybrid_context_retriever = SimpleNamespace(
+            get_pregeneration_status=Mock(return_value=None)
+        )
+        interaction = self._admin_interaction()
+
+        await self._command(bot, "rag status").callback(interaction)
+
+        embed = interaction.followup.send.await_args.kwargs["embed"]
+        self.assertNotIn("DEGRADED", embed.title)
+        self.assertIn("Indexed Messages", [field.name for field in embed.fields])
+
     async def test_image_commands_keep_conditional_registration_and_metadata(self):
         bot = await self._register(image_processing_service=object())
 

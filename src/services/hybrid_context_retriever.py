@@ -318,7 +318,12 @@ class HybridContextRetriever:
             progress.update(embedded=embedded, failed=failed)
 
             status = await self.message_index.get_status_async(channel_id=channel_id)
-            if status["pending_embeddings"] or status["failed_embeddings"]:
+            if status.get("error"):
+                # A degraded status is all zeros, so the test below would read
+                # it as "nothing pending, nothing failed" and declare the run
+                # complete over a database it could not open (DAB-170).
+                progress.update(phase="failed", error=status["error"])
+            elif status["pending_embeddings"] or status["failed_embeddings"]:
                 progress["phase"] = "partial"
             else:
                 progress["phase"] = "complete"

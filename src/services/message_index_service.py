@@ -1504,6 +1504,14 @@ class MessageIndexService:
             }
         except Exception as exc:
             logger.error("Failed to load RAG status: %s", exc, exc_info=True)
+            # The counts stay numeric so every caller's formatting keeps
+            # working, and an "error" key marks them as meaningless. Without it
+            # this dict is byte-identical to a healthy, empty index: /rag status
+            # rendered its normal embed reporting 0 indexed messages, which is
+            # exactly what a brand-new deployment looks like, so an unreadable
+            # or corrupt database was indistinguishable from "nothing to do
+            # yet" (DAB-170). Callers test `status.get("error")`; there is no
+            # separate healthy flag, because two sources of truth can disagree.
             return {
                 "messages": 0,
                 "embedded": 0,
@@ -1516,6 +1524,7 @@ class MessageIndexService:
                 "embedding_model": self.embedding_api_model,
                 "embedding_dimensions": self.embedding_dimensions,
                 "database_path": str(self.db_path.resolve()),
+                "error": f"{type(exc).__name__}: {exc}",
             }
 
     async def get_status_async(self, *, channel_id: Optional[int] = None) -> dict:

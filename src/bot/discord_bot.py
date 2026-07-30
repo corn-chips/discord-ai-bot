@@ -8,6 +8,7 @@ message processing, and coordinates with other services to provide AI responses.
 import asyncio
 import io
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple, Callable, Awaitable
@@ -20,6 +21,7 @@ from ..config import BotConfig
 from ..constants import (
     SUPPORTED_TEXT_EXTENSIONS,
     RGB_WHITE_BACKGROUND,
+    MAX_PDF_PAGE_PIXELS,
 )
 from ..models.data_models import TokenUsage, MessageContext
 from ..services.context_collector import ContextCollector
@@ -1133,6 +1135,41 @@ class DiscordBot(discord.Client):
             filename,
         )
 
+    def _pdf_render_scale_for_page(self, page) -> float:
+        """
+        Render scale for one PDF page, reduced if it would rasterise too large.
+
+        The page geometry is taken from the uploaded file, so a small PDF can
+        declare an enormous page and drive an arbitrarily large allocation. This
+        returns the configured scale, or the largest scale that keeps the page
+        under MAX_PDF_PAGE_PIXELS.
+
+        Args:
+            page: The PyMuPDF page about to be rendered
+
+        Returns:
+            The render scale to use, never greater than the configured one
+        """
+        scale = self.config.pdf_render_scale
+        rect = page.rect
+        pixels = (rect.width * scale) * (rect.height * scale)
+
+        if pixels <= MAX_PDF_PAGE_PIXELS or pixels <= 0:
+            return scale
+
+        # Aim slightly under the ceiling. MuPDF rounds each dimension up to a
+        # whole pixel, so landing exactly on the cap overshoots it: an
+        # 8000x8000 pt page came out at 6325x6325 = 40,005,625 against a
+        # 40,000,000 ceiling.
+        reduced = scale * math.sqrt((MAX_PDF_PAGE_PIXELS * 0.99) / pixels)
+        logger.warning(
+            "PDF page is %.0fx%.0f pt; rendering at scale %.3f instead of %.2f to stay "
+            "under %d pixels (would have been %.0f MP)",
+            rect.width, rect.height, reduced, scale,
+            MAX_PDF_PAGE_PIXELS, pixels / 1e6,
+        )
+        return reduced
+
     def _convert_pdf_to_images_sync(self, pdf_bytes: bytes, filename: str) -> List[Image.Image]:
         """Synchronously render PDF pages for the async worker-thread wrapper."""
         images = []
@@ -1158,13 +1195,31 @@ class DiscordBot(discord.Client):
                         
                         page = pdf_document[page_num]
                         
-                        # Render page to pixmap (image) at configured resolution
-                        mat = fitz.Matrix(self.config.pdf_render_scale, self.config.pdf_render_scale)
+                        # Render page to pixmap (image) at configured resolution,
+                        # reducing the scale if this page would rasterise to an
+                        # unreasonable number of pixels.
+                        #
+                        # The page geometry comes from the uploaded file, so the
+                        # render size is attacker-chosen. Clamping has to happen
+                        # BEFORE get_pixmap: that call is where the allocation
+                        # happens (792 MB on the 256 MP case), and it succeeds.
+                        scale = self._pdf_render_scale_for_page(page)
+                        mat = fitz.Matrix(scale, scale)
                         pix = page.get_pixmap(matrix=mat)
                         
-                        # Convert pixmap to PIL Image and ensure RGB mode
-                        img_data = pix.tobytes("png")
-                        image = Image.open(io.BytesIO(img_data))
+                        # Build the PIL image straight from the pixmap buffer.
+                        #
+                        # This used to PNG-encode the pixmap and immediately
+                        # decode it back, though pix.samples is already the raw
+                        # buffer -- pure waste, measured at 4-10x depending on
+                        # the fixture, and pixel-identical either way.
+                        #
+                        # The mode is derived from pix.n rather than hard-coded:
+                        # an alpha-bearing pixmap has 4 samples per pixel, and
+                        # Image.frombytes("RGB", ...) would silently misread that
+                        # buffer rather than raising.
+                        mode = "RGBA" if pix.alpha else ("L" if pix.n == 1 else "RGB")
+                        image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
                         image = self._convert_image_to_rgb(image)
                         
                         images.append(image)

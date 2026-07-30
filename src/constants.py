@@ -41,5 +41,19 @@ RGB_WHITE_BACKGROUND = (255, 255, 255)
 # operator preference, and no legitimate response should approach it.
 MAX_LATEX_FIGURE_HEIGHT_INCHES = 40.0
 
+# Ceiling on the rasterised size of a single PDF page, in pixels.
+#
+# A PDF declares its own page geometry, so the render size is attacker-chosen:
+# a 520-byte file declaring an 8000x8000 pt page rasterises at scale 2.0 to
+# 16000x16000 = 256 MP. Measured on that input: MuPDF allocates 792 MB and
+# succeeds, the PNG encode peaks at 1,525 MB, and only Pillow's decompression
+# bomb check then refuses it -- after ~5 s of CPU, and returning zero images.
+#
+# 40 MP is roughly twenty times an A4 page at the shipped render scale, so no
+# legitimate document comes near it, and it sits well under Pillow's own
+# ~89 MP default so that guard is never the one that fires. Oversized pages are
+# rendered at a reduced scale rather than dropped.
+MAX_PDF_PAGE_PIXELS = 40_000_000
+
 # Logging
 LOG_SEPARATOR = "=" * 80

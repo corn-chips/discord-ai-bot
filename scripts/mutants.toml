@@ -157,3 +157,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "            if fig_height > MAX_LATEX_FIGURE_HEIGHT_INCHES:\n"
 replace = "            if False:\n"
+
+[[mutant]]
+id = "M-DAB198"
+bug = "DAB-198"
+summary = "PDF page render scale no longer clamped, so an uploaded page geometry drives an unbounded rasterisation (256 MP from a 520-byte file)"
+guard = "test_the_resource_bomb_now_yields_a_usable_image"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if pixels <= MAX_PDF_PAGE_PIXELS or pixels <= 0:\n"
+replace = "        if True:\n"
+
+[[mutant]]
+id = "M-DAB197"
+bug = "DAB-197"
+summary = "PNG encode/decode round-trip reintroduced on the PDF hot path"
+guard = "test_the_png_round_trip_is_not_reintroduced"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                        mode = \"RGBA\" if pix.alpha else (\"L\" if pix.n == 1 else \"RGB\")\n                        image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)\n"
+replace = "                        img_data = pix.tobytes(\"png\")\n                        image = Image.open(io.BytesIO(img_data))\n"

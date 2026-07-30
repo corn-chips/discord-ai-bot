@@ -267,3 +267,14 @@ expect = "killed"
 [[mutant.edit]]
 find = "        \"\"\"Toggle DeepSearch to force Google Search on all queries.\"\"\"\n        if not await _require_config_admin(interaction):\n            return\n"
 replace = "        \"\"\"Toggle DeepSearch to force Google Search on all queries.\"\"\"\n"
+
+[[mutant]]
+id = "M-DAB073"
+bug = "DAB-073"
+summary = "Retrieval-slot floor removed, so enough pins drive the pre-retrieval budget to zero and the index is never searched"
+guard = "test_many_pins_no_longer_starve_retrieval_to_zero"
+file = "src/services/context_pack_builder.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        floor = min(MIN_RETRIEVAL_SLOTS, max(0, max_messages - 1))\n        return max(remaining, floor)\n"
+replace = "        return remaining\n"

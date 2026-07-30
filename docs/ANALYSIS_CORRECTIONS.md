@@ -205,10 +205,19 @@ implementation choice. `DAB-150` landed with its caps computed by
 Two further corrections for whoever lands `DAB-073`:
 
 - It will break `test_reply_anchor_is_not_starved_by_pins` at the **length** assertion (`:217`),
-  not the pin-count assertion (`:218`) the ticket predicts.
+  not the pin-count assertion (`:218`) the ticket predicts — **but only if the floor is put in the
+  wrong place.** When `DAB-073` actually landed, that test did not break at all. Putting the floor
+  in `_priority_slot_counts` (the packing arithmetic) breaks it; putting it in
+  `available_retrieval_slots` (the pre-retrieval budget) does not, and the latter is the correct
+  site: the defect is that retrieval is starved *before it runs*, while pin priority *within* an
+  assembled pack was never the problem. One prediction, two placements, different outcomes.
 - It will also break `test_rerank_boundary_uses_slots_remaining_after_pins`
   (`test_rag_optimization.py:166`), which the ticket does not mention at all: the floor lifts
   `available_slots` from 1 to 2 and short-circuits `reranker_reason` to `within_context_limit`.
+  **Confirmed on landing** — this is the only test that broke, and it is a genuine contract
+  change. It had encoded the starvation as intended: three pins against a budget of four left one
+  retrieval slot, so two candidates competing for it forced a paid Gemini rerank to break the tie.
+  Removing that is the point of the fix.
 - Its `get_pins` `LIMIT` should be an **opt-in keyword argument used only by the retriever**.
   `/pins` (`personalization.py:191`) is the only delete UI, so an unconditional limit makes older
   pins both invisible and undeletable.

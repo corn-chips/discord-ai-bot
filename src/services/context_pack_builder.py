@@ -11,6 +11,15 @@ from .message_index_service import IndexedMessage
 
 PIN_MESSAGE_ID_OFFSET = 9_000_000_000_000_000_000
 
+#: Retrieval slots that pinned memory may never consume (DAB-073).
+#:
+#: Pins previously took every slot but one, so a channel with enough pinned
+#: memories drove `available_retrieval_slots` to zero: the index was queried,
+#: scored and discarded, the model answered from pins alone, and the retrieval
+#: was paid for regardless. Two slots is enough that a reply always has some
+#: conversational grounding, and small enough that pins keep clear priority.
+MIN_RETRIEVAL_SLOTS = 2
+
 
 class ContextPackBuilder:
     """Converts retrieval results into MessageContext objects with provenance."""
@@ -114,10 +123,27 @@ class ContextPackBuilder:
         reply_context: list[MessageContext],
         max_messages: int,
     ) -> int:
-        """Return slots left after prioritized pins and reply anchors."""
+        """Return slots left after prioritized pins and reply anchors.
+
+        This is the *pre-retrieval budget*, so it carries a floor (DAB-073).
+        Pins may consume every packing slot -- that is a deliberate priority
+        decision made in `build_context_pack` once the candidates are known --
+        but they must not drive this number to zero, because zero here means the
+        index is never searched at all. A channel with enough pinned memories
+        therefore answered from pins alone, with the conversation invisible to
+        it, and the operator still paid for the embedding call that produced
+        nothing.
+
+        The floor yields at small budgets: with `max_messages` of 1 or 2 there is
+        nothing useful to divide, and pins keep absolute priority.
+        """
+        max_messages = max(1, int(max_messages or 1))
         pin_slots, anchor_slots = self._priority_slot_counts(
             len(pinned_context or []),
             len(reply_context or []),
             max_messages,
         )
-        return max(0, max_messages - pin_slots - anchor_slots)
+        remaining = max(0, max_messages - pin_slots - anchor_slots)
+
+        floor = min(MIN_RETRIEVAL_SLOTS, max(0, max_messages - 1))
+        return max(remaining, floor)

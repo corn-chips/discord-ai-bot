@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import numpy as np
 
-from src.services.context_pack_builder import ContextPackBuilder
+from src.services.context_pack_builder import ContextPackBuilder, MIN_RETRIEVAL_SLOTS
 from src.services.hybrid_context_retriever import HybridContextRetriever
 from src.models.data_models import MessageContext
 from src.services.message_index_service import IndexedMessage, MessageIndexService
@@ -187,13 +187,58 @@ class RetrievalGatingTest(unittest.IsolatedAsyncioTestCase):
 
         result = await retriever.retrieve(message=message, user_prompt="find it", complexity_level="low")
 
-        gemini.select_relevant_context.assert_awaited_once()
-        rerank_call = gemini.select_relevant_context.await_args
-        self.assertLessEqual(len(rerank_call.args[1]), 12)
-        self.assertEqual(rerank_call.kwargs["max_messages"], 1)
-        self.assertEqual(len(result), 4)
+        # DAB-073 changed this contract deliberately. The test previously
+        # asserted max_messages=1 and an "ambiguous_boundary" rerank, which
+        # encoded the starvation as intended behaviour: 3 pins against a budget
+        # of 4 left exactly one retrieval slot, so two candidates competing for
+        # it forced a paid rerank to break the tie.
+        #
+        # available_retrieval_slots now carries a floor, so both candidates fit
+        # and no rerank is needed. That is the point of the fix -- the earlier
+        # behaviour spent a Gemini call to choose between two messages only
+        # because pins had eaten the budget.
+        gemini.select_relevant_context.assert_not_awaited()
+        self.assertEqual(
+            index.record_retrieval_event_async.await_args.kwargs["reranker_reason"],
+            "within_context_limit",
+        )
+        # Pin priority in the pack itself is unchanged: pins still come first.
         self.assertEqual(sum(item.is_pinned_memory for item in result), 3)
-        self.assertEqual(index.record_retrieval_event_async.await_args.kwargs["reranker_reason"], "ambiguous_boundary")
+        await retriever.close()
+
+    async def test_the_rerank_boundary_still_binds_when_candidates_exceed_the_floor(self):
+        # The floor raises the budget; it does not remove reranking. With more
+        # candidates than slots the tie-break still runs, which is what keeps
+        # the previous test from being a claim that reranking never happens.
+        candidates = [self._candidate(30 + offset) for offset in range(6)]
+        index = SimpleNamespace(
+            search_recent_async=AsyncMock(return_value=candidates),
+            search_lexical_async=AsyncMock(return_value=list(reversed(candidates))),
+            search_semantic_async=AsyncMock(return_value=candidates),
+            record_retrieval_event_async=AsyncMock(),
+        )
+        gemini = SimpleNamespace(
+            client=object(), embed_texts=AsyncMock(return_value=[[1, 0, 0]]),
+            select_relevant_context=AsyncMock(return_value=[]),
+        )
+        pins = SimpleNamespace(get_pins=lambda channel_id: [
+            (pin_id, f"pin {pin_id}", "Ada", "Ray", datetime.now(timezone.utc).isoformat())
+            for pin_id in range(1, 4)
+        ])
+        retriever = HybridContextRetriever(
+            config=self._config(), message_index=index, context_collector=object(),
+            gemini_client=gemini, pack_builder=ContextPackBuilder(), pin_service=pins,
+        )
+        message = SimpleNamespace(id=1, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=2), author=SimpleNamespace(id=3), reference=None)
+
+        await retriever.retrieve(message=message, user_prompt="find it", complexity_level="low")
+
+        # The boundary is evaluated rather than short-circuited. Whether it then
+        # reranks depends on how close the scores are (ambiguous vs stable), and
+        # asserting a particular verdict would pin the fusion arithmetic rather
+        # than the gating behaviour this test is about.
+        reason = index.record_retrieval_event_async.await_args.kwargs["reranker_reason"]
+        self.assertIn(reason, {"ambiguous_boundary", "stable_boundary"})
         await retriever.close()
 
 
@@ -277,3 +322,63 @@ class RagDatabaseIsolationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetrievalFloorTest(unittest.TestCase):
+    """DAB-073: pins must not drive the pre-retrieval budget to zero.
+
+    Pins were allowed every packing slot but one, and the same arithmetic fed
+    `available_retrieval_slots`. A channel with enough pinned memories therefore
+    reported zero slots, the index was never searched, and the model answered
+    from pins alone with the conversation invisible to it -- while the operator
+    still paid for the embedding call that produced nothing usable.
+
+    The floor lives in `available_retrieval_slots`, not in the packing. Pins keep
+    absolute priority when the pack is assembled; what changes is that retrieval
+    is always given a budget to compete for.
+    """
+
+    @staticmethod
+    def _pins(count, channel_id=2):
+        return ContextPackBuilder().build_pinned_context(
+            [
+                (pin_id, f"pin {pin_id}", "Ada", "Ray", datetime.now(timezone.utc).isoformat())
+                for pin_id in range(1, count + 1)
+            ],
+            channel_id=channel_id,
+        )
+
+    def test_many_pins_no_longer_starve_retrieval_to_zero(self):
+        builder = ContextPackBuilder()
+
+        for max_messages in (4, 6, 8):
+            with self.subTest(max_messages=max_messages):
+                slots = builder.available_retrieval_slots(
+                    pinned_context=self._pins(max_messages * 3),
+                    reply_context=[],
+                    max_messages=max_messages,
+                )
+                self.assertGreaterEqual(slots, MIN_RETRIEVAL_SLOTS)
+
+    def test_the_floor_yields_at_budgets_too_small_to_divide(self):
+        builder = ContextPackBuilder()
+
+        self.assertEqual(
+            builder.available_retrieval_slots(
+                pinned_context=self._pins(5), reply_context=[], max_messages=1
+            ),
+            0,
+        )
+
+    def test_pins_still_take_priority_when_the_pack_is_assembled(self):
+        # The floor is a retrieval budget, not a packing quota. With no
+        # retrieved candidates to spend it on, pins fill the pack as before.
+        builder = ContextPackBuilder()
+        pins = self._pins(8)
+
+        packed = builder.build_context_pack(
+            pinned_context=pins, retrieved_context=[], max_messages=4
+        )
+
+        self.assertEqual(len(packed), 4)
+        self.assertTrue(all(item.is_pinned_memory for item in packed))

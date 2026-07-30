@@ -20,8 +20,11 @@ reclassified as a network fault and retried forever.
 import asyncio
 import socket
 import unittest
+from types import SimpleNamespace
 
+import discord
 from PIL import UnidentifiedImageError
+from google.genai import errors as genai_errors
 
 from src.utils.error_manager import ErrorManager, ErrorType
 
@@ -140,6 +143,127 @@ class ClassificationOrderingTest(unittest.TestCase):
             "image size exceeds maximum size": ErrorType.IMAGE_SIZE_ERROR,
         }
         for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(manager.categorize_error(Exception(message)), expected)
+
+
+def genai_error(code, status, message):
+    """Build a real `google.genai` APIError, worded the way the SDK words them."""
+    body = {"error": {"code": code, "message": message, "status": status}}
+    cls = genai_errors.ServerError if code >= 500 else genai_errors.ClientError
+    return cls(code, body)
+
+
+class StructuredApiErrorTest(unittest.TestCase):
+    """DAB-040: classify a Gemini failure from its code, not from its prose.
+
+    `google.genai.errors.APIError.__str__` is `f"{code} {status}. {details}"`.
+    Matching that string was guesswork in both directions -- a real 403 and a
+    real 404 fell through to UNKNOWN_ERROR and were never retried, while
+    "Response was 1500 tokens over budget" was classified SERVICE_UNAVAILABLE
+    and retried four times.
+    """
+
+    CASES = [
+        (429, "RESOURCE_EXHAUSTED",
+         "You exceeded your current quota, please check your plan and billing "
+         "details. For more information on this error, head to: "
+         "https://ai.google.dev/gemini-api/docs/rate-limits.",
+         ErrorType.RATE_LIMIT),
+        (429, "RESOURCE_EXHAUSTED", "Quota exceeded for metric", ErrorType.RATE_LIMIT),
+        (503, "UNAVAILABLE", "The model is overloaded", ErrorType.SERVICE_UNAVAILABLE),
+        (500, "INTERNAL", "internal error", ErrorType.SERVICE_UNAVAILABLE),
+        (401, "UNAUTHENTICATED", "missing credentials", ErrorType.AUTHENTICATION_ERROR),
+        (403, "PERMISSION_DENIED", "API key not valid", ErrorType.AUTHENTICATION_ERROR),
+        (404, "NOT_FOUND", "models/foo is not found", ErrorType.INVALID_REQUEST),
+        (400, "INVALID_ARGUMENT", "Unsupported mimeType", ErrorType.INVALID_REQUEST),
+        # The one that used to be retried four times: a permanent 400 whose
+        # message happens to contain "1500".
+        (400, "INVALID_ARGUMENT", "The prompt is 1500 tokens too long",
+         ErrorType.INVALID_REQUEST),
+    ]
+
+    def test_the_code_and_status_decide_the_category(self):
+        manager = make_manager()
+        for code, status, message, expected in self.CASES:
+            with self.subTest(code=code, status=status):
+                self.assertEqual(
+                    manager.categorize_error(genai_error(code, status, message)),
+                    expected,
+                )
+
+    def test_a_real_429_is_retryable_and_a_real_400_is_not(self):
+        manager = make_manager()
+        quota = genai_error(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota")
+        permanent = genai_error(400, "INVALID_ARGUMENT", "The prompt is 1500 tokens too long")
+
+        self.assertIn(manager.categorize_error(quota), RETRYABLE)
+        self.assertNotIn(manager.categorize_error(permanent), RETRYABLE)
+
+    def test_the_structured_pass_does_not_outrank_the_image_block(self):
+        # Hoisting the code dispatch to the top of categorize_error is tidier
+        # and would move a Gemini upload rejection out of the image bucket that
+        # the image handling depends on.
+        manager = make_manager()
+        error = genai_error(400, "INVALID_ARGUMENT", "invalid image supplied")
+
+        self.assertEqual(
+            manager.categorize_error(error), ErrorType.IMAGE_VALIDATION_ERROR
+        )
+
+    def test_a_discord_http_exception_is_not_read_as_an_http_status(self):
+        # discord.HTTPException.code is a *Discord* error number -- 50013 for
+        # "Missing Permissions", not 403 -- so a duck-typed
+        # getattr(error, "code") pass would bucket the Discord surface by
+        # coincidence. The dispatch is restricted to google.genai's hierarchy.
+        manager = make_manager()
+        response = SimpleNamespace(status=403, reason="Forbidden")
+        error = discord.HTTPException(
+            response, {"code": 50013, "message": "Missing Permissions"}
+        )
+
+        self.assertEqual(manager.categorize_error(error), ErrorType.DISCORD_HTTP_ERROR)
+
+
+class NumericSubstringTest(unittest.TestCase):
+    """DAB-040: a status code counts only where it is being used as one."""
+
+    NOT_STATUS_CODES = [
+        "Message exceeds 4000 characters",
+        "Response was 1500 tokens over budget",
+        "Backfill stalled after 500 messages",
+        "Embedding dimension mismatch: expected 1500, got 768",
+        "sqlite3.OperationalError: database is locked after 5002 ms",
+        "Discarded 400 stale index rows",
+        "user 500123456789012345 not found",
+        "Retrieved 2400 candidate messages",
+    ]
+
+    REAL_STATUS_CODES = {
+        "503 Service Unavailable": ErrorType.SERVICE_UNAVAILABLE,
+        "HTTP 500 Internal Server Error": ErrorType.SERVICE_UNAVAILABLE,
+        "HTTP 400 Bad Request": ErrorType.INVALID_REQUEST,
+        "status: 502 upstream closed": ErrorType.SERVICE_UNAVAILABLE,
+    }
+
+    def test_incidental_digits_are_not_status_codes(self):
+        manager = make_manager()
+        for message in self.NOT_STATUS_CODES:
+            with self.subTest(message=message):
+                category = manager.categorize_error(Exception(message))
+                self.assertEqual(category, ErrorType.UNKNOWN_ERROR)
+                self.assertNotIn(
+                    category,
+                    RETRYABLE,
+                    "a permanent local fault must not be retried four times",
+                )
+
+    def test_real_status_codes_still_classify(self):
+        # Word boundaries alone would not achieve this: `\b500\b` matches
+        # "after 500 messages" too. The code also has to start the message or
+        # be introduced by http/status/code/error.
+        manager = make_manager()
+        for message, expected in self.REAL_STATUS_CODES.items():
             with self.subTest(message=message):
                 self.assertEqual(manager.categorize_error(Exception(message)), expected)
 

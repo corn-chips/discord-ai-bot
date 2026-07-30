@@ -7,9 +7,10 @@ throughout the application and generating user-friendly error messages.
 
 import asyncio
 import logging
+import re
 import socket
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 
 import discord
@@ -32,6 +33,55 @@ except ImportError:  # pragma: no cover
 def _is_transport_error(error: Exception) -> bool:
     """True for a network-transport failure raised by the HTTP client."""
     return bool(_TRANSPORT_ERRORS) and isinstance(error, _TRANSPORT_ERRORS)
+
+
+# google.genai's APIError hierarchy carries the HTTP code and the canonical
+# status name as attributes. Reading them is exact where matching on the
+# stringified message is guesswork -- and the message really is guesswork: a
+# real Gemini quota refusal reads "429 RESOURCE_EXHAUSTED. {... 'You exceeded
+# your current quota ...'}", whose help URL says "rate-limits" and which does
+# not contain the substring "quota exceeded" anywhere. Imported defensively,
+# like httpx above.
+try:  # pragma: no cover - exercised by whichever branch the environment takes
+    from google.genai import errors as _genai_errors
+
+    _API_ERRORS: tuple = (_genai_errors.APIError,)
+except Exception:  # pragma: no cover
+    _API_ERRORS = ()
+
+
+def _api_error_status(error: Exception) -> Tuple[Optional[int], str]:
+    """Return `(http_code, canonical_status)` for a structured API error.
+
+    Restricted to `google.genai`'s own error hierarchy on purpose. A duck-typed
+    `getattr(error, "code", ...)` would also capture `discord.HTTPException`,
+    whose `.code` is a *Discord* error number (50013, not 403) — and would
+    reclassify half the Discord surface into HTTP buckets by coincidence.
+    """
+    if not _API_ERRORS or not isinstance(error, _API_ERRORS):
+        return None, ""
+    code = getattr(error, "code", None)
+    status = str(getattr(error, "status", "") or "").upper()
+    return (code if isinstance(code, int) else None), status
+
+
+def _matches_http_status(error_str: str, pattern: str) -> bool:
+    """Match an HTTP status code only where it is being used as one.
+
+    A bare `"503" in error_str` test fires on any message containing those
+    digits: "Backfill stalled after 500 messages", "database is locked after
+    5002 ms", "Response was 1500 tokens over budget". Word boundaries alone are
+    not enough -- `\\b500\\b` still matches "after 500 messages" -- so the code
+    must also be at the start of the message or introduced by http/status/code/
+    error, which is how every real transport and SDK error words it.
+    """
+    return bool(
+        re.search(
+            rf"(?:^|\bhttp[/ ]?[\d.]*\s+|\bstatus[ :=]+|\bcode[ :=]+|\berror[ :=]+)"
+            rf"(?:{pattern})\b",
+            error_str,
+        )
+    )
 
 
 class ErrorType(Enum):
@@ -220,7 +270,32 @@ class ErrorManager:
             return ErrorType.MARKDOWN_PROCESSING_ERROR
         elif any(term in error_str for term in ["message too long", "exceeds character limit"]):
             return ErrorType.MESSAGE_TOO_LONG_ERROR
-        
+
+        # Structured dispatch on the SDK's own code and status fields, ahead of
+        # the message-content chain below and deliberately BEHIND the image and
+        # message-formatting blocks above.
+        #
+        # Placement is the whole design here. Hoisted to the top of the function
+        # it is tidier and wrong: a Gemini 400 raised while validating an upload
+        # stringifies with image wording, and the image block exists to catch
+        # exactly that. Running after it costs nothing -- those branches all
+        # return -- and preserves every classification the image tests pin.
+        status_code, status_name = _api_error_status(error)
+        if status_code == 429 or status_name == "RESOURCE_EXHAUSTED":
+            return ErrorType.RATE_LIMIT
+        if status_code in (500, 502, 503, 504) or status_name in {
+            "UNAVAILABLE", "INTERNAL", "DEADLINE_EXCEEDED",
+        }:
+            return ErrorType.SERVICE_UNAVAILABLE
+        if status_code in (401, 403) or status_name in {
+            "UNAUTHENTICATED", "PERMISSION_DENIED",
+        }:
+            return ErrorType.AUTHENTICATION_ERROR
+        if status_code in (400, 404) or status_name in {
+            "INVALID_ARGUMENT", "NOT_FOUND", "FAILED_PRECONDITION",
+        }:
+            return ErrorType.INVALID_REQUEST
+
         # API-related errors (check error message content).
         #
         # "resource_exhausted" and "exceeded your current quota" are how Gemini
@@ -243,11 +318,13 @@ class ErrorManager:
             return ErrorType.TIMEOUT
         elif any(term in error_str for term in ["authentication", "unauthorized", "api key", "invalid key"]):
             return ErrorType.AUTHENTICATION_ERROR
-        elif any(term in error_str for term in ["service unavailable", "server error", "503", "502", "500"]):
+        elif any(term in error_str for term in ["service unavailable", "server error"]) or \
+                _matches_http_status(error_str, "50[023]"):
             return ErrorType.SERVICE_UNAVAILABLE
         elif any(term in error_str for term in ["empty response", "no content", "blank response"]):
             return ErrorType.EMPTY_RESPONSE
-        elif any(term in error_str for term in ["invalid request", "bad request", "400", "malformed"]):
+        elif any(term in error_str for term in ["invalid request", "bad request", "malformed"]) or \
+                _matches_http_status(error_str, "40[04]"):
             return ErrorType.INVALID_REQUEST
         
         # Configuration errors

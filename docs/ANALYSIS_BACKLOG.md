@@ -118,7 +118,7 @@ an afternoon or that need a Tier-0 item first.
 
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
 |---|---|---|---|---|---|---|---|---|
-| 21 | DAB-040 | Retry classification is substring matching on `str(error)` | BUG | S2 | S | **9.0** | DAB-041 | [DAB-040](analysis-tickets/DAB-040.md) |
+| 21 | DAB-040 | **DONE** (Phase 3b) — Retry classification is substring matching on `str(error)`. Measured 11 flips, all corrections, zero regressions over a 29-case corpus. The ticket's placement (structured pass first) and its anchored regex are both wrong; see the inline correction | BUG | S2 | S | **9.0** | DAB-041 | [DAB-040](analysis-tickets/DAB-040.md) |
 | 22 | DAB-180 | `grok-prompts` is a dangling gitlink; `/deepresearch` silently degrades | BUG | S2 | S | **8.0** | DAB-203 | [DAB-180](analysis-tickets/DAB-180.md) |
 | 23 | DAB-213 | No cooldown on any slash command | IMPROVEMENT | worst case $3,247/h -> ~$0.90/h | S | **8.0** | DAB-203 | [DAB-213](analysis-tickets/DAB-213.md) |
 | 24 | DAB-096 | Synchronous SQLite on the asyncio event loop (13 call sites) | IMPROVEMENT | 4997 ms -> 3.1 ms max loop stall | M | **6.0** | DAB-095 | [DAB-096](analysis-tickets/DAB-096.md) |

@@ -463,3 +463,45 @@ expect = "killed"
 [[mutant.edit]]
 find = "        try:\n            _start_automatic_rag_backlog(self)\n        except Exception as e:\n            logger.warning(\n                \"Could not start the automatic RAG backlog: %s. Commands are \"\n                \"registered; retrieval will fall back to live indexing.\",\n                e,\n                exc_info=True,\n            )\n"
 replace = "        _start_automatic_rag_backlog(self)\n"
+
+[[mutant]]
+id = "M-DAB040"
+bug = "DAB-040"
+summary = "Bare 5xx/400 substrings again: any message containing those digits is classified as a transport failure and retried"
+guard = "test_incidental_digits_are_not_status_codes"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        elif any(term in error_str for term in [\"service unavailable\", \"server error\"]) or \\\n                _matches_http_status(error_str, \"50[023]\"):\n"
+replace = "        elif any(term in error_str for term in [\"service unavailable\", \"server error\", \"503\", \"502\", \"500\"]):\n"
+[[mutant.edit]]
+find = "        elif any(term in error_str for term in [\"invalid request\", \"bad request\", \"malformed\"]) or \\\n                _matches_http_status(error_str, \"40[04]\"):\n"
+replace = "        elif any(term in error_str for term in [\"invalid request\", \"bad request\", \"400\", \"malformed\"]):\n"
+
+[[mutant]]
+id = "M-DAB040B"
+bug = "DAB-040"
+summary = "Structured code/status dispatch removed: a real 401, 403 or 404 falls through to UNKNOWN_ERROR"
+guard = "test_the_code_and_status_decide_the_category"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        status_code, status_name = _api_error_status(error)\n        if status_code == 429 or status_name == \"RESOURCE_EXHAUSTED\":\n            return ErrorType.RATE_LIMIT\n        if status_code in (500, 502, 503, 504) or status_name in {\n            \"UNAVAILABLE\", \"INTERNAL\", \"DEADLINE_EXCEEDED\",\n        }:\n            return ErrorType.SERVICE_UNAVAILABLE\n        if status_code in (401, 403) or status_name in {\n            \"UNAUTHENTICATED\", \"PERMISSION_DENIED\",\n        }:\n            return ErrorType.AUTHENTICATION_ERROR\n        if status_code in (400, 404) or status_name in {\n            \"INVALID_ARGUMENT\", \"NOT_FOUND\", \"FAILED_PRECONDITION\",\n        }:\n            return ErrorType.INVALID_REQUEST\n\n"
+replace = "        if False:\n            return ErrorType.UNKNOWN_ERROR\n\n"
+
+[[mutant]]
+id = "M-DAB040C"
+bug = "DAB-040"
+# The tidier arrangement, and the wrong one: a Gemini 400 raised while
+# validating an upload stringifies with image wording, and the image block
+# exists to catch exactly that.
+summary = "Structured dispatch hoisted above the image block, reclassifying a Gemini upload rejection out of the image bucket"
+guard = "test_the_structured_pass_does_not_outrank_the_image_block"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        status_code, status_name = _api_error_status(error)\n        if status_code == 429 or status_name == \"RESOURCE_EXHAUSTED\":\n            return ErrorType.RATE_LIMIT\n        if status_code in (500, 502, 503, 504) or status_name in {\n            \"UNAVAILABLE\", \"INTERNAL\", \"DEADLINE_EXCEEDED\",\n        }:\n            return ErrorType.SERVICE_UNAVAILABLE\n        if status_code in (401, 403) or status_name in {\n            \"UNAUTHENTICATED\", \"PERMISSION_DENIED\",\n        }:\n            return ErrorType.AUTHENTICATION_ERROR\n        if status_code in (400, 404) or status_name in {\n            \"INVALID_ARGUMENT\", \"NOT_FOUND\", \"FAILED_PRECONDITION\",\n        }:\n            return ErrorType.INVALID_REQUEST\n\n"
+replace = ""
+[[mutant.edit]]
+find = "        # Image processing errors (check first for specificity)\n"
+replace = "        status_code, status_name = _api_error_status(error)\n        if status_code == 429 or status_name == \"RESOURCE_EXHAUSTED\":\n            return ErrorType.RATE_LIMIT\n        if status_code in (500, 502, 503, 504) or status_name in {\n            \"UNAVAILABLE\", \"INTERNAL\", \"DEADLINE_EXCEEDED\",\n        }:\n            return ErrorType.SERVICE_UNAVAILABLE\n        if status_code in (401, 403) or status_name in {\n            \"UNAUTHENTICATED\", \"PERMISSION_DENIED\",\n        }:\n            return ErrorType.AUTHENTICATION_ERROR\n        if status_code in (400, 404) or status_name in {\n            \"INVALID_ARGUMENT\", \"NOT_FOUND\", \"FAILED_PRECONDITION\",\n        }:\n            return ErrorType.INVALID_REQUEST\n\n        # Image processing errors (check first for specificity)\n"

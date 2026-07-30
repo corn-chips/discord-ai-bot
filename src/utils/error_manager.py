@@ -290,7 +290,7 @@ class ErrorManager:
         error: Exception, 
         custom_message: Optional[str] = None,
         retry_after: Optional[int] = None,
-        include_error_details: bool = True
+        include_error_details: bool = False
     ) -> ErrorContext:
         """
         Create an ErrorContext object from an exception.
@@ -299,7 +299,12 @@ class ErrorManager:
             error: The exception that occurred
             custom_message: Optional custom user message
             retry_after: Optional retry delay in seconds
-            include_error_details: Whether to include technical error details in user message
+            include_error_details: Append the raw exception text to the user
+                message. Defaults to False: str(exc) routinely carries absolute
+                filesystem paths including the OS username, SQL fragments and
+                internal table names, and this string is posted to a Discord
+                channel. Operators who want detail already have a strict
+                superset via dev_mode_enabled, which adds the full stack trace.
             
         Returns:
             ErrorContext object with categorized error information

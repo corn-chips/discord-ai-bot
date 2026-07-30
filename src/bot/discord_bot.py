@@ -1047,8 +1047,14 @@ class DiscordBot(discord.Client):
             await self.error_manager.send_error_response(message, error_context)
             
         except Exception as e:
-            # Categorize the error for more specific handling
-            error_context = self.error_manager.create_error_context(e, include_error_details=True)
+            # Categorize the error for more specific handling.
+            #
+            # No include_error_details=True here. This is the highest-traffic
+            # error path in the bot, and str(exc) routinely carries absolute
+            # paths with the OS username in them. The operator still gets the
+            # full text -- with a stack trace -- through dev_mode_enabled; a
+            # passer-by in the channel should not.
+            error_context = self.error_manager.create_error_context(e)
             
             self.error_manager.log_error(error_context, f"Unexpected error in channel {message.channel.id}")
             await self.error_manager.send_error_response(message, error_context)

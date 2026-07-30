@@ -144,5 +144,59 @@ class ClassificationOrderingTest(unittest.TestCase):
                 self.assertEqual(manager.categorize_error(Exception(message)), expected)
 
 
+class ErrorDetailDisclosureTest(unittest.TestCase):
+    """DAB-153: raw exception text reached the channel by default.
+
+    `str(exc)` routinely carries absolute filesystem paths -- including the OS
+    username -- SQL fragments and internal table names, and that string was
+    appended to the message posted back to Discord. The operator loses nothing
+    by turning it off: `dev_mode_enabled` already yields a strict superset, the
+    same text plus a full stack trace.
+    """
+
+    @staticmethod
+    def _manager(dev_mode=False):
+        from types import SimpleNamespace
+
+        return ErrorManager(config=SimpleNamespace(dev_mode_enabled=dev_mode))
+
+    def test_raw_exception_text_is_withheld_by_default(self):
+        manager = self._manager()
+        leaky = FileNotFoundError(
+            "/home/someuser/discord-ai-bot/data/token_usage.db"
+        )
+
+        message = manager.create_error_context(leaky).user_message
+
+        self.assertNotIn("/home/someuser", message)
+        self.assertNotIn("token_usage.db", message)
+        self.assertNotIn("Details:", message)
+
+    def test_internal_database_wording_is_withheld_by_default(self):
+        manager = self._manager()
+        message = manager.create_error_context(
+            Exception("no such table: message_index")
+        ).user_message
+
+        self.assertNotIn("message_index", message)
+
+    def test_an_explicit_opt_in_still_works_for_callers_that_want_it(self):
+        manager = self._manager()
+        message = manager.create_error_context(
+            Exception("boom"), include_error_details=True
+        ).user_message
+
+        self.assertIn("boom", message)
+
+    def test_dev_mode_still_gives_the_operator_everything(self):
+        manager = self._manager(dev_mode=True)
+        try:
+            raise ValueError("diagnostic detail")
+        except ValueError as exc:
+            message = manager.create_error_context(exc).user_message
+
+        self.assertIn("diagnostic detail", message)
+
+
 if __name__ == "__main__":
     unittest.main()

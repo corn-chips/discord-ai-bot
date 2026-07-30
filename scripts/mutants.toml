@@ -201,3 +201,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "        if not _has_rag_admin(interaction):\n            await interaction.response.send_message(\n                \"You need the Manage Server permission to delete stored RAG data.\",\n                ephemeral=True,\n            )\n            return\n\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB142"
+bug = "DAB-142"
+summary = "/dev permission decorator commented out again, letting any member flip a process-global flag that posts stack traces to channels"
+guard = "test_dev_mode_is_gated_in_the_payload_and_at_runtime"
+file = "src/bot/command_modules/configuration.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    @app_commands.default_permissions(administrator=True)\n    @app_commands.guild_only()\n    async def dev_mode(interaction: discord.Interaction):\n"
+replace = "    async def dev_mode(interaction: discord.Interaction):\n"
+
+[[mutant]]
+id = "M-DAB153"
+bug = "DAB-153"
+summary = "include_error_details defaults back to True, echoing absolute paths and SQL fragments to the channel"
+guard = "test_raw_exception_text_is_withheld_by_default"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        include_error_details: bool = False\n"
+replace = "        include_error_details: bool = True\n"

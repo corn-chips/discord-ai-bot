@@ -520,6 +520,46 @@ class RagPermissionGateTest(unittest.IsolatedAsyncioTestCase):
             channel_id=None
         )
 
+    async def test_dev_mode_is_gated_in_the_payload_and_at_runtime(self):
+        """DAB-142: /dev flips a process-global flag that turns stack traces
+        -- absolute paths, OS username -- into channel messages for every guild.
+        Its permission decorator was commented out while its docstring claimed
+        "admin only"."""
+        bot, _ = await self._tree_and_group()
+        dev = next(cmd for cmd in bot.tree.get_commands() if cmd.name == "dev")
+        payload = dev.to_dict(bot.tree)
+
+        # /dev is top-level, so unlike the /rag subcommands this one does
+        # serialise -- 8 is Permissions(administrator=True).
+        self.assertEqual(
+            str(payload.get("default_member_permissions")),
+            str(discord.Permissions(administrator=True).value),
+        )
+        # Without guild_only, anyone sharing a guild could DM /dev instead:
+        # Discord does not evaluate default_member_permissions in a DM.
+        self.assertFalse(payload.get("dm_permission", True))
+
+        # And the runtime guard, since the payload value is only a default.
+        member = SimpleNamespace(
+            id=99, guild_permissions=SimpleNamespace(administrator=False)
+        )
+        interaction = SimpleNamespace(
+            guild=SimpleNamespace(id=3),
+            user=member,
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        before = bot.config.dev_mode_enabled
+
+        await dev.callback(interaction)
+
+        self.assertEqual(
+            bot.config.dev_mode_enabled, before, "an ordinary member toggled dev mode"
+        )
+        interaction.response.send_message.assert_awaited_once()
+        self.assertIn(
+            "Administrator", interaction.response.send_message.await_args.args[0]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

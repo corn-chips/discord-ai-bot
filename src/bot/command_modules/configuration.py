@@ -335,9 +335,30 @@ def register_admin_commands(context: CommandContext) -> None:
 
 
     @bot.tree.command(name="dev", description="Toggle developer mode for detailed error output")
-    #@app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
     async def dev_mode(interaction: discord.Interaction):
         """Toggle developer mode for detailed error messages (admin only)."""
+        # The docstring claimed "admin only" while the decorator sat commented
+        # out, so any member could flip a process-global flag that turns stack
+        # traces -- absolute paths, OS username -- into channel messages for
+        # every guild the bot serves.
+        #
+        # guild_only matters as much as the permission. This is a top-level
+        # command so default_permissions does serialise, but Discord does not
+        # evaluate it in a DM; without guild_only anyone sharing a guild with
+        # the bot could DM /dev and flip the flag regardless.
+        #
+        # The runtime check matters more than either, because
+        # default_member_permissions is a default a guild admin can re-grant.
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if interaction.guild is None or permissions is None or not permissions.administrator:
+            await interaction.response.send_message(
+                "You need the Administrator permission to toggle developer mode.",
+                ephemeral=True,
+            )
+            return
+
         try:
             # Toggle dev mode
             config.dev_mode_enabled = not config.dev_mode_enabled

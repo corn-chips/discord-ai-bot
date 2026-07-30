@@ -278,6 +278,24 @@ class MessageIndexService:
                     )
                     """
                 )
+                # The one-shot-migration ledger belongs to the schema, not to
+                # the migrations that read it (DAB-083). It used to be created
+                # inside _migrate_legacy_database, so whether it existed on a
+                # fresh install depended on which service constructed first --
+                # reproduced both ways: absent for MessageIndexService alone,
+                # present when TokenTracker ran first as it does in
+                # DiscordBot.__init__. Any future ledger read added here, or to
+                # any caller that runs before a migration, would otherwise raise
+                # `no such table: rag_migrations` from inside a synchronous
+                # constructor, which is fatal (DAB-067).
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS rag_migrations (
+                        name TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL
+                    )
+                    """
+                )
                 try:
                     conn.execute(
                         """
@@ -644,14 +662,11 @@ class MessageIndexService:
         )
         try:
             with self._connection(transaction=True) as conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS rag_migrations (
-                        name TEXT PRIMARY KEY,
-                        completed_at TEXT NOT NULL
-                    )
-                    """
-                )
+                # The ledger table itself is created by _ensure_schema, which
+                # has already run. It used to be created here, which made its
+                # existence on a fresh install an accident of which service
+                # constructed first (DAB-083): TokenTracker first and it was
+                # there, MessageIndexService alone and it was not.
                 if conn.execute(
                     "SELECT 1 FROM rag_migrations WHERE name = ?",
                     (migration_name,),
@@ -659,6 +674,7 @@ class MessageIndexService:
                     return
 
                 conn.execute("ATTACH DATABASE ? AS legacy", (str(legacy_path),))
+                legacy_tables_found = 0
                 for table_name in tables:
                     legacy_exists = conn.execute(
                         "SELECT 1 FROM legacy.sqlite_master WHERE type='table' AND name=?",
@@ -666,6 +682,7 @@ class MessageIndexService:
                     ).fetchone()
                     if not legacy_exists:
                         continue
+                    legacy_tables_found += 1
                     target_columns = {
                         row[1] for row in conn.execute(
                             f"PRAGMA main.table_info({table_name})"
@@ -709,6 +726,21 @@ class MessageIndexService:
                         WHERE hidden = 0 AND deleted_at IS NULL
                         """
                     )
+                if not legacy_tables_found:
+                    # A fresh install always has a token_usage.db -- TokenTracker
+                    # builds it -- and it has never held RAG tables. Recording
+                    # the migration as completed here burned the one shot, and
+                    # logged "Copied legacy message RAG data" over a copy of
+                    # nothing (DAB-083). Leaving the ledger unwritten costs one
+                    # cheap ATTACH per boot and keeps the migration available
+                    # for a database that really does hold legacy data.
+                    logger.debug(
+                        "No legacy message RAG tables in %s; nothing to migrate "
+                        "and the migration is left unrecorded",
+                        legacy_path,
+                    )
+                    return
+
                 conn.execute(
                     "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
                     (migration_name, self._now_iso()),

@@ -95,7 +95,7 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `b5851ab` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | **DONE** (Phase 3b) — Unguarded `change_presence()` sits before `setup_commands`. Reproduced: with presence raising, `setup_commands` was awaited 0 times. `_start_automatic_rag_backlog` is guarded in the same change. The `DAB-002` edge was discharged, not exercised: DAB-002's presence-badge half never landed | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |
 | 18 | DAB-029 | Six never-evicting in-memory containers | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
-| 19 | DAB-083 | `rag_migrations` is not owned by `_ensure_schema` | BUG | S3 | XS | **4.0** | — | [DAB-083](analysis-tickets/DAB-083.md) |
+| 19 | DAB-083 | **DONE** (Phase 4) — `rag_migrations` is not owned by `_ensure_schema`. Both halves landed: the DDL moved into the schema, and a fresh install no longer records a migration that copied nothing. `DAB-077` is unblocked but was not in Phase 4's scope | BUG | S3 | XS | **4.0** | — | [DAB-083](analysis-tickets/DAB-083.md) |
 | 20 | DAB-032 | Rate limiter rebuilds every user's history on every call | IMPROVEMENT | p95 22.1 ms -> 0.003 ms (6320x) | S | **4.0** | — | [DAB-032](analysis-tickets/DAB-032.md) |
 
 Two S1 defects are deliberately **not** in Tier 0: `DAB-065` (transient DB error tombstones a

@@ -226,3 +226,81 @@ class QueryPlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MigrationLedgerTest(unittest.TestCase):
+    """DAB-083: `rag_migrations` must be owned by the schema, not by a migration.
+
+    The ledger's `CREATE TABLE IF NOT EXISTS` lived inside
+    `_migrate_legacy_database`, so whether it existed on a fresh install was an
+    accident of construction order -- absent for `MessageIndexService` alone,
+    present when `TokenTracker` ran first as it does in `DiscordBot.__init__`.
+    Any ledger read added anywhere earlier raises `no such table` from a
+    synchronous constructor, which aborts `DiscordBot.__init__` (DAB-067).
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.db_path = str(Path(self._dir.name) / "rag.db")
+
+    def test_the_ledger_exists_on_a_fresh_database_with_no_migration(self):
+        MessageIndexService(self.db_path, embedding_model="test-embedding")
+
+        with sqlite3.connect(self.db_path) as conn:
+            # The observable end state is that a ledger read WORKS, not that a
+            # row appears in sqlite_master: the failure this prevents is an
+            # OperationalError out of a constructor.
+            rows = conn.execute("SELECT name FROM rag_migrations").fetchall()
+        self.assertEqual(rows, [])
+
+    def test_a_fresh_install_does_not_record_a_migration_it_never_ran(self):
+        # token_usage.db always exists -- TokenTracker creates it -- and has
+        # never held RAG tables. Recording the migration against it burned the
+        # one shot and logged a successful copy of nothing.
+        legacy_path = Path(self._dir.name) / "token_usage.db"
+        with sqlite3.connect(legacy_path) as legacy:
+            legacy.execute("CREATE TABLE token_usage (id INTEGER PRIMARY KEY)")
+            legacy.commit()
+
+        MessageIndexService(
+            self.db_path,
+            embedding_model="test-embedding",
+            legacy_db_path=str(legacy_path),
+        )
+
+        with sqlite3.connect(self.db_path) as conn:
+            recorded = conn.execute("SELECT name FROM rag_migrations").fetchall()
+        self.assertEqual(
+            recorded, [], "a migration that copied nothing was recorded as done"
+        )
+
+    def test_a_real_legacy_database_still_migrates_and_is_recorded(self):
+        legacy_path = Path(self._dir.name) / "legacy.db"
+        legacy_service = MessageIndexService(
+            str(legacy_path), embedding_model="test-embedding"
+        )
+        legacy_service.upsert_message(
+            message_id=555,
+            guild_id=10,
+            channel_id=20,
+            author_id=5,
+            author_name="Ada",
+            is_bot=False,
+            reply_to_message_id=None,
+            created_at=datetime.now(timezone.utc),
+            content_text="a legacy message worth carrying across",
+        )
+
+        migrated = MessageIndexService(
+            self.db_path,
+            embedding_model="test-embedding",
+            legacy_db_path=str(legacy_path),
+        )
+
+        self.assertEqual(migrated.get_status()["messages"], 1)
+        with sqlite3.connect(self.db_path) as conn:
+            recorded = [
+                row[0] for row in conn.execute("SELECT name FROM rag_migrations")
+            ]
+        self.assertEqual(recorded, ["legacy_shared_rag_v1"])

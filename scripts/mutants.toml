@@ -576,3 +576,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                      {channel_clause}\n                    ORDER BY m.created_at DESC\n                    LIMIT ?\n"
 replace = "                      {channel_clause}\n                    ORDER BY e.message_id DESC\n                    LIMIT ?\n"
+
+[[mutant]]
+id = "M-DAB083"
+bug = "DAB-083"
+summary = "Ledger table created by the migration again, so its existence on a fresh install depends on service construction order"
+guard = "test_the_ledger_exists_on_a_fresh_database_with_no_migration"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                conn.execute(\n                    \"\"\"\n                    CREATE TABLE IF NOT EXISTS rag_migrations (\n                        name TEXT PRIMARY KEY,\n                        completed_at TEXT NOT NULL\n                    )\n                    \"\"\"\n                )\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB083B"
+bug = "DAB-083"
+summary = "A fresh install records legacy_shared_rag_v1 as completed against a database that never held RAG tables, burning the one shot"
+guard = "test_a_fresh_install_does_not_record_a_migration_it_never_ran"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if not legacy_tables_found:\n"
+replace = "                if False:\n"

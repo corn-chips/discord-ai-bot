@@ -23,11 +23,14 @@ def register_personalization_commands(context: CommandContext) -> None:
     performance_logger = context.performance_logger
     token_tracker = context.token_tracker
 
-    channel_settings_service = ChannelSettingsService(
+    # Reuse the instance DiscordBot.__init__ built. Constructing it here was
+    # the DAB-002 defect: a failure in any registrar left the attribute absent,
+    # and every reader uses getattr, so live mode silently reported itself
+    # disabled for the lifetime of the process.
+    channel_settings_service = getattr(bot, "_channel_settings_service", None) or ChannelSettingsService(
         db_path=config.token_db_path,
         personalities=config.personalities,
     )
-    # Store on bot so discord_bot.py can access it
     bot._channel_settings_service = channel_settings_service
 
     async def personality_autocomplete(
@@ -359,12 +362,12 @@ def register_personalization_commands(context: CommandContext) -> None:
 
     # ── User Preferences Commands ─────────────────────────────────────
 
-    user_prefs_service = UserPreferencesService(
+    # Reuse the instance DiscordBot.__init__ built; see the note above.
+    user_prefs_service = getattr(bot, "_user_prefs_service", None) or UserPreferencesService(
         db_path=config.token_db_path,
         valid_models=config.valid_models,
         valid_languages=config.valid_languages,
     )
-    # Store on bot so discord_bot.py can access it
     bot._user_prefs_service = user_prefs_service
 
     prefs_group = app_commands.Group(name="preferences", description="Manage your personal bot preferences")

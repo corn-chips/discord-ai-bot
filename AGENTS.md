@@ -47,7 +47,7 @@ Work on the `dev` branch â€” do not target `main`.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 21 test files hold 49 `TestCase` classes, all named `<Subject>Test`).
+ the 22 test files hold 51 `TestCase` classes, all named `<Subject>Test`).
 - `python -m compileall -q main.py src scripts tests` â€” syntax check without booting.
 - `python scripts/mutation_check.py` â€” reintroduces each fixed bug in a scratch copy and
  reports whether the suite notices. ~7 s with `--jobs 5`; exit 0 only when every mutant
@@ -98,12 +98,14 @@ Commands do not exist until `on_ready` (`discord_bot.py:462`) runs `setup_comman
 
 - No DI container. `DiscordBot.__init__` is hand-wired and **construction order matters** â€”
  module-level `_get_or_create_*` factories read attributes set earlier in the constructor.
-- `bot._channel_settings_service` (`command_modules/personalization.py:31`),
- `_message_visibility_service` (`:134`), and `_user_prefs_service` (`:368`) are attached
- during *command registration*, not in `__init__`. Nothing in `discord_bot.py` assigns them;
- it only reads them through `getattr`/`hasattr`. Before `on_ready` they are absent, so
- `_is_live_mode_enabled` (`discord_bot.py:702-705`) returns `False` and user preferences are
- skipped.
+- `bot._channel_settings_service`, `_message_visibility_service` and `_user_prefs_service` are
+ built in `DiscordBot.__init__` (`discord_bot.py:381-395`), alongside `_pin_service`. They used
+ to be attached as a side effect of `register_personalization_commands`, which meant any
+ registrar raising left them absent â€” and since every reader reaches them through
+ `getattr`/`hasattr`, `_is_live_mode_enabled` then returned `False` for every channel and user
+ preferences were skipped, silently, for the life of the process (DAB-002). The registrars now
+ reuse the eager instances via `getattr(bot, ...) or ...`; keep it that way, and do not move
+ construction back into a registrar.
 - `_pin_service` is **not** in that group, despite sitting next to them in
  `personalization.py`. `DiscordBot.__init__` builds it at `discord_bot.py:366` and hands it
  to `HybridContextRetriever` at `:378`; `personalization.py:126` only reuses it
@@ -212,7 +214,7 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 207 in 21 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+now 213 in 22 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
 `tests/test_on_message_flow.py`, and Phase 1 added `tests/test_context_fallback.py`,
 `tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`).
 Some tickets deliberately change the count on top of that; each says so.
@@ -259,7 +261,7 @@ the line number.
  Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
 
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (207 stdlib `unittest` tests across 21 files). It now carries a staleness banner listing its
+ (213 stdlib `unittest` tests across 22 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 
 

@@ -35,6 +35,9 @@ from ..services.rate_limiter import TextRateLimiter
 from ..services.report_service import ReportService
 from ..services.report_web_server import ReportWebServer
 from ..services.pin_service import PinService
+from ..services.channel_settings_service import ChannelSettingsService
+from ..services.message_visibility_service import MessageVisibilityService
+from ..services.user_preferences_service import UserPreferencesService
 from ..services.message_index_service import MessageIndexService
 from ..services.context_pack_builder import ContextPackBuilder
 from ..services.hybrid_context_retriever import HybridContextRetriever
@@ -369,6 +372,32 @@ class DiscordBot(discord.Client):
             db_path=config.rag_database_path,
             legacy_db_path=config.token_db_path,
         )
+
+        # Construct these here rather than during command registration (DAB-002).
+        #
+        # They used to be attached to the bot as a side effect of
+        # register_personalization_commands. on_ready wraps setup_commands in a
+        # broad `except Exception: log`, so any registrar raising left these
+        # attributes absent -- and the code that reads them uses getattr/hasattr,
+        # so nothing failed loudly. Live mode reported itself disabled for every
+        # channel and user preferences were skipped silently, for the lifetime
+        # of the process, after one log line.
+        #
+        # Building them in __init__ means a registration failure can no longer
+        # decide whether they exist. The registrars now reuse these instances.
+        self._channel_settings_service = ChannelSettingsService(
+            db_path=config.token_db_path,
+            personalities=config.personalities,
+        )
+        self._message_visibility_service = MessageVisibilityService(
+            db_path=config.token_db_path,
+        )
+        self._user_prefs_service = UserPreferencesService(
+            db_path=config.token_db_path,
+            valid_models=config.valid_models,
+            valid_languages=config.valid_languages,
+        )
+
         self._rag_event_coordinator = _get_or_create_rag_event_coordinator(self)
         self.context_pack_builder = ContextPackBuilder()
         self.hybrid_context_retriever = HybridContextRetriever(
@@ -537,18 +566,41 @@ class DiscordBot(discord.Client):
         )
         await self.change_presence(activity=activity)
         
-        # Set up slash commands
+        # Set up slash commands.
+        #
+        # Registration and syncing are separate concerns and get separate
+        # handlers. They shared one `try`, so a registrar raising was reported
+        # as "Failed to sync slash commands" -- sending the operator to look at
+        # Discord when the fault was in their own code -- and the bot then
+        # carried on serving with a partial or empty command tree.
+        registered = False
         try:
             await setup_commands(self, self.config, self.gemini_client, self.performance_logger, self.token_tracker)
-            
-            # Sync commands globally
+            registered = True
+        except Exception as e:
+            logger.critical(
+                "Slash command registration FAILED: %s. The bot is running with an "
+                "incomplete command tree; anything registered after the failure point "
+                "does not exist. This is a code fault, not a Discord outage.",
+                e,
+                exc_info=True,
+            )
+
+        try:
             synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} slash command(s) globally")
-            
+            if registered:
+                logger.info(f"Synced {len(synced)} slash command(s) globally")
+            else:
+                logger.critical(
+                    "Synced only %d slash command(s) after a registration failure; "
+                    "the command tree is incomplete.",
+                    len(synced),
+                )
+
             # Log each synced command for verification
             for cmd in synced:
                 logger.info(f"  ✓ Command synced: /{cmd.name} - {cmd.description}")
-            
+
         except Exception as e:
             logger.error(f"Failed to sync slash commands: {e}", exc_info=True)
 

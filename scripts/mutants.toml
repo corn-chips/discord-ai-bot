@@ -278,3 +278,14 @@ expect = "killed"
 [[mutant.edit]]
 find = "        floor = min(MIN_RETRIEVAL_SLOTS, max(0, max_messages - 1))\n        return max(remaining, floor)\n"
 replace = "        return remaining\n"
+
+[[mutant]]
+id = "M-DAB002"
+bug = "DAB-002"
+summary = "Personalization services built during command registration again, so any registrar failure leaves live mode and user preferences permanently inert"
+guard = "test_live_mode_survives_a_registrar_raising"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        self._channel_settings_service = ChannelSettingsService(\n            db_path=config.token_db_path,\n            personalities=config.personalities,\n        )\n        self._message_visibility_service = MessageVisibilityService(\n            db_path=config.token_db_path,\n        )\n        self._user_prefs_service = UserPreferencesService(\n            db_path=config.token_db_path,\n            valid_models=config.valid_models,\n            valid_languages=config.valid_languages,\n        )\n\n"
+replace = ""

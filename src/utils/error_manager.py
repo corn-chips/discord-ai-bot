@@ -222,14 +222,21 @@ class ErrorManager:
             return ErrorType.MESSAGE_TOO_LONG_ERROR
         
         # API-related errors (check error message content).
-        # "resource_exhausted" and "429" are how Gemini actually reports a quota
-        # refusal. Its prose reads "exceeded your current quota", which does not
-        # contain the substring "quota exceeded", so the first three terms alone
-        # let a real 429 fall through to UNKNOWN_ERROR and be treated as
-        # permanent.
+        #
+        # "resource_exhausted" and "exceeded your current quota" are how Gemini
+        # actually words a quota refusal. Its prose does NOT contain the
+        # substring "quota exceeded", so the first three terms alone let a real
+        # 429 fall through to UNKNOWN_ERROR and be treated as permanent.
+        #
+        # Deliberately no bare "429" term. It matches any message containing
+        # that digit trigram -- a token count of 1429876, a trace id, a Discord
+        # snowflake (roughly 1.7% of them) -- and would reclassify expired API
+        # keys and malformed requests as retryable rate limits. It is also
+        # redundant: every canonical Gemini quota error matches on the terms
+        # above.
         elif any(term in error_str for term in [
             "rate limit", "quota exceeded", "too many requests",
-            "resource_exhausted", "429", "exceeded your current quota",
+            "resource_exhausted", "exceeded your current quota",
         ]):
             return ErrorType.RATE_LIMIT
         elif any(term in error_str for term in ["timeout", "timed out"]):

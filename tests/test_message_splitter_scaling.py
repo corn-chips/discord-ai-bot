@@ -21,7 +21,18 @@ regression. A call count is exact, fast, and fails for the right reason.
 import unittest
 
 from src.services.message_splitter import MessageSplitter
-from src.utils.markdown_utils import MarkdownParser
+from src.utils.markdown_utils import BlockType, MarkdownParser
+
+#: Reimplemented here, not imported from markdown_utils, so that widening
+#: the production set cannot silently widen the oracle too.
+INLINE_UNSAFE_TYPES = frozenset({
+    BlockType.INLINE_CODE,
+    BlockType.BOLD,
+    BlockType.ITALIC,
+    BlockType.STRIKETHROUGH,
+    BlockType.SPOILER,
+    BlockType.LINK,
+})
 
 
 #: Whole-message scans permitted per split_message call, regardless of size.
@@ -117,40 +128,84 @@ class SplitterScalingTest(unittest.TestCase):
         )
 
 
-class SplitIndexTest(unittest.TestCase):
-    """The index must answer exactly as the original predicate did."""
+def reference_is_safe_split_point(parser, text, position):
+    """The pre-index predicate, reimplemented independently.
 
-    def test_index_agrees_with_the_direct_predicate_at_every_position(self):
-        text = (
+    This is deliberately a separate implementation rather than a call to
+    `MarkdownParser.is_safe_split_point`. That method now delegates to the very
+    index under test, so using it as the oracle would compare the index against
+    itself and could never fail -- which is exactly the mistake the first
+    version of this file made. Reviewers caught that the "load-bearing" running
+    maximum could be deleted with the whole suite still green.
+
+    Semantics copied from the original: unsafe iff some code-block or
+    inline-formatting span strictly contains the position.
+    """
+    for start, end, _ in parser.find_code_block_boundaries(text):
+        if start < position < end:
+            return False
+    for block in parser.parse_markdown(text):
+        if block.type in INLINE_UNSAFE_TYPES and block.start_pos < position < block.end_pos:
+            return False
+    return True
+
+
+class SplitIndexTest(unittest.TestCase):
+    """The index must answer exactly as the pre-index predicate did."""
+
+    #: Texts chosen to exercise the structures that make a naive index wrong:
+    #: nesting, overlap, adjacency, and spans that start later but end sooner.
+    CASES = {
+        "prose_and_fence": (
             "Some prose with **bold text** and `inline code` here.\n\n"
             "```python\nx = 1\ny = 2\n```\n\n"
             "More prose with *italics*, ~~strike~~, ||spoiler|| and "
             "[a link](http://example.com/path).\n"
-        )
+        ),
+        # The case that exposed the deletable running maximum: an inline span
+        # nested wholly inside a longer bold span.
+        "nested_code_in_bold": "**bold with `code` inside** trailing",
+        "long_then_short": "```\n" + "a" * 200 + "\n```\n\n`x`\n",
+        "adjacent_spans": "**a**`b`*c*~~d~~||e||",
+        "unterminated_fence": "text before\n```python\nx = 1\nno close",
+        "crlf": "line one\r\n\r\n**bold**\r\n```\r\ncode\r\n```\r\n",
+        "unicode": "prefix \u00e9\u00e8\u00ea **gr\u00e4s** `\u4ee3\u7801` \U0001F600 suffix",
+        "empty": "",
+        "plain": "just plain words with no formatting at all",
+    }
+
+    def test_index_matches_the_reference_predicate_at_every_position(self):
+        parser = MarkdownParser()
+
+        for name, text in self.CASES.items():
+            index = parser.build_split_index(text)
+            # Include out-of-range probes; the splitter can ask about either end.
+            for position in range(-2, len(text) + 3):
+                expected = reference_is_safe_split_point(parser, text, position)
+                if index.is_safe_split_point(position) != expected:
+                    self.fail(
+                        f"index disagrees with the reference predicate on "
+                        f"{name!r} at position {position}: index="
+                        f"{index.is_safe_split_point(position)} reference={expected}"
+                    )
+
+    def test_a_span_nested_inside_a_longer_one_is_still_unsafe(self):
+        # Direct assertion of the property the running maximum exists for. In
+        # "**bold with `code` inside** trailing" the inline-code span starts
+        # after the bold span but ends before it, so comparing a position only
+        # against the immediately preceding span's end reports "safe" inside
+        # bold. Cutting there produces an unterminated ** in the output.
+        text = "**bold with `code` inside** trailing"
         parser = MarkdownParser()
         index = parser.build_split_index(text)
 
-        for position in range(len(text) + 1):
+        # Positions between the end of the nested code span and the end of bold.
+        for position in range(19, 26):
             with self.subTest(position=position):
-                self.assertEqual(
+                self.assertFalse(
                     index.is_safe_split_point(position),
-                    parser.is_safe_split_point(text, position),
+                    f"position {position} is inside the bold span but reported safe",
                 )
-
-    def test_overlapping_spans_use_the_running_maximum_end(self):
-        # A long span followed by a short one that starts later and ends sooner.
-        # Comparing against only the immediately preceding span's end would call
-        # a position inside the long span "safe".
-        text = "```\n" + "a" * 200 + "\n```\n\n`x`\n"
-        parser = MarkdownParser()
-        index = parser.build_split_index(text)
-
-        inside_long_span = 100
-        self.assertFalse(index.is_safe_split_point(inside_long_span))
-        self.assertEqual(
-            index.is_safe_split_point(inside_long_span),
-            parser.is_safe_split_point(text, inside_long_span),
-        )
 
     def test_text_with_no_markdown_is_safe_everywhere(self):
         text = "just plain words with no formatting at all"

@@ -351,6 +351,58 @@ class PdfPixmapConversionTest(unittest.TestCase):
                 self.assertEqual(new.size, old.size)
                 self.assertEqual(new.tobytes(), old.tobytes())
 
+    def test_every_colorspace_and_alpha_combination_renders_correctly(self):
+        # The mode cannot be assumed from pix.alpha alone. Getting it wrong
+        # misreads the buffer silently -- a white CMYK page came out solid
+        # black -- and gray+alpha raised outright. Neither is reachable from
+        # the current call site, which never passes a colorspace, but the
+        # derivation should be right rather than accidentally right.
+        from PIL import Image
+
+        from src.constants import RGB_WHITE_BACKGROUND
+
+        bot = self._bot()
+        with fitz.open() as document:
+            page = document.new_page(width=60, height=60)
+            page.insert_text((5, 30), "Hi", fontsize=14)
+
+            for colorspace, name in (
+                (fitz.csCMYK, "CMYK"),
+                (fitz.csGRAY, "GRAY"),
+                (fitz.csRGB, "RGB"),
+            ):
+                for alpha in (False, True):
+                    with self.subTest(colorspace=name, alpha=alpha):
+                        pixmap = page.get_pixmap(colorspace=colorspace, alpha=alpha)
+
+                        if pixmap.colorspace is None or pixmap.colorspace.n not in (1, 3):
+                            pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+                        if pixmap.alpha:
+                            mode = "LA" if pixmap.n == 2 else "RGBA"
+                        else:
+                            mode = "L" if pixmap.n == 1 else "RGB"
+
+                        image = Image.frombytes(
+                            mode, (pixmap.width, pixmap.height), pixmap.samples
+                        )
+                        if image.mode == "LA":
+                            image = image.convert("RGBA")
+                        flattened = bot._convert_image_to_rgb(image)
+
+                        # Compared in RGB. _convert_image_to_rgb deliberately
+                        # passes an "L" image through unchanged, which is
+                        # pre-existing behaviour and not this test's business.
+                        self.assertEqual(
+                            flattened.convert("RGB").getpixel((55, 5)),
+                            RGB_WHITE_BACKGROUND,
+                            f"{name} alpha={alpha}: background is not white",
+                        )
+                        self.assertLess(
+                            min(flattened.convert("L").get_flattened_data()),
+                            128,
+                            f"{name} alpha={alpha}: glyph did not render",
+                        )
+
     def test_the_png_round_trip_is_not_reintroduced(self):
         # The equivalence test above passes either way, so this is the assertion
         # that actually fails if someone puts the encode/decode back.

@@ -1214,12 +1214,29 @@ class DiscordBot(discord.Client):
                         # buffer -- pure waste, measured at 4-10x depending on
                         # the fixture, and pixel-identical either way.
                         #
-                        # The mode is derived from pix.n rather than hard-coded:
-                        # an alpha-bearing pixmap has 4 samples per pixel, and
-                        # Image.frombytes("RGB", ...) would silently misread that
-                        # buffer rather than raising.
-                        mode = "RGBA" if pix.alpha else ("L" if pix.n == 1 else "RGB")
+                        # The mode must be derived, not assumed. A pixmap's
+                        # sample count depends on both its colourspace and
+                        # whether it carries alpha, and Image.frombytes with the
+                        # wrong mode misreads the buffer *silently* rather than
+                        # raising -- a white CMYK page comes out solid black.
+                        #
+                        # Anything that is not a plain gray or RGB base is
+                        # converted through MuPDF first, which is what
+                        # tobytes("png") used to do internally. Alpha is kept
+                        # and flattened onto white by _convert_image_to_rgb
+                        # below, the same as before.
+                        if pix.colorspace is None or pix.colorspace.n not in (1, 3):
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        if pix.alpha:
+                            mode = "LA" if pix.n == 2 else "RGBA"
+                        else:
+                            mode = "L" if pix.n == 1 else "RGB"
                         image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+                        if image.mode == "LA":
+                            # _convert_image_to_rgb only composites RGBA; an LA
+                            # image would fall through to .convert("RGB") and
+                            # turn every transparent pixel black.
+                            image = image.convert("RGBA")
                         image = self._convert_image_to_rgb(image)
                         
                         images.append(image)

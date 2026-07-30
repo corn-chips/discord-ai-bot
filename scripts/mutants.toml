@@ -111,7 +111,7 @@ guard = "test_a_real_429_is_a_rate_limit_not_an_unknown_error"
 file = "src/utils/error_manager.py"
 expect = "killed"
 [[mutant.edit]]
-find = "            \"rate limit\", \"quota exceeded\", \"too many requests\",\n            \"resource_exhausted\", \"429\", \"exceeded your current quota\",\n        ]):"
+find = "            \"rate limit\", \"quota exceeded\", \"too many requests\",\n            \"resource_exhausted\", \"exceeded your current quota\",\n        ]):"
 replace = "            \"rate limit\", \"quota exceeded\", \"too many requests\",\n        ]):"
 
 [[mutant]]
@@ -177,5 +177,5 @@ guard = "test_the_png_round_trip_is_not_reintroduced"
 file = "src/bot/discord_bot.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                        mode = \"RGBA\" if pix.alpha else (\"L\" if pix.n == 1 else \"RGB\")\n                        image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)\n"
+find = "                        if pix.colorspace is None or pix.colorspace.n not in (1, 3):\n                            pix = fitz.Pixmap(fitz.csRGB, pix)\n                        if pix.alpha:\n                            mode = \"LA\" if pix.n == 2 else \"RGBA\"\n                        else:\n                            mode = \"L\" if pix.n == 1 else \"RGB\"\n                        image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)\n"
 replace = "                        img_data = pix.tobytes(\"png\")\n                        image = Image.open(io.BytesIO(img_data))\n"

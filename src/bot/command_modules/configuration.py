@@ -14,6 +14,43 @@ from .context import CommandContext
 logger = logging.getLogger("src.bot.commands")
 
 
+async def _require_config_admin(interaction: discord.Interaction) -> bool:
+    """
+    Refuse a `/config` mutation unless the caller may run the bot.
+
+    Everything `/config` writes is process-global. `set_force_search`,
+    `set_model` and `set_thinking_level` take no guild argument, there is one
+    GeminiClient for the process, and `bot.image_generation_enabled` and the
+    root logger's level are likewise shared. So one member of one guild changes
+    behaviour for every guild the bot serves -- the same blast radius as
+    `/rag delete scope:all`, differing in reversibility rather than reach.
+    `/config deepsearch` in particular forces a web search on every query for
+    everyone until the process restarts, which is an unowned spend lever.
+
+    Guarded at runtime rather than in the payload, deliberately. discord.py
+    drops a *subcommand's* default_permissions from to_dict() (see DAB-141), so
+    the only payload-level option is to gate the whole group -- which would take
+    `/config info` away from ordinary members for no security benefit, since it
+    only reports the current model, thinking level and a few limits. The payload
+    permission was never the enforcement anyway: it is a default a guild admin
+    can re-grant.
+
+    Returns True when the caller may proceed, and has already told them why not
+    when it returns False.
+    """
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if interaction.guild is not None and permissions is not None:
+        if permissions.manage_guild or permissions.administrator:
+            return True
+
+    await interaction.response.send_message(
+        "You need the Manage Server permission to change bot configuration. "
+        "These settings are global: they affect every server this bot runs in.",
+        ephemeral=True,
+    )
+    return False
+
+
 def create_config_group(context: CommandContext) -> app_commands.Group:
     bot = context.bot
     config = context.config
@@ -33,6 +70,8 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
     ])
     async def model(interaction: discord.Interaction, model_name: app_commands.Choice[str]):
         """Switch the Gemini AI model."""
+        if not await _require_config_admin(interaction):
+            return
         try:
             old_model = gemini_client.get_current_model()
             success = gemini_client.set_model(model_name.value)
@@ -74,6 +113,8 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
     ])
     async def thinking(interaction: discord.Interaction, level: app_commands.Choice[str]):
         """Set runtime thinking level using Gemini API native thinking config."""
+        if not await _require_config_admin(interaction):
+            return
         success = gemini_client.set_thinking_level(level.value)
 
         if success:
@@ -95,6 +136,8 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
     @app_commands.describe(enabled="Enable or disable DeepSearch")
     async def deepsearch(interaction: discord.Interaction, enabled: bool):
         """Toggle DeepSearch to force Google Search on all queries."""
+        if not await _require_config_admin(interaction):
+            return
         gemini_client.set_force_search(enabled)
 
         status = "✅ Enabled" if enabled else "❌ Disabled"
@@ -111,6 +154,8 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
     @app_commands.describe(enabled="Enable or disable image generation requests")
     async def image_generation(interaction: discord.Interaction, enabled: bool):
         """Toggle runtime image generation availability."""
+        if not await _require_config_admin(interaction):
+            return
         if not getattr(bot, "image_processing_service", None):
             await interaction.response.send_message(
                 "Image processing service is not configured, so image generation cannot be toggled.",
@@ -136,6 +181,8 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
     @app_commands.describe(enabled="Enable or disable verbose debug logging")
     async def debug(interaction: discord.Interaction, enabled: bool):
         """Toggle debug logging level."""
+        if not await _require_config_admin(interaction):
+            return
         root_logger = logging.getLogger()
 
         if enabled:

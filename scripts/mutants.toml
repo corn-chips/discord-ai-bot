@@ -256,3 +256,14 @@ expect = "killed"
 [[mutant.edit]]
 find = "                existing_count, existing_chars = conn.execute(\n                    \"\"\"\n                    SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)\n                    FROM pinned_messages\n                    WHERE channel_id = ?\n                    \"\"\",\n                    (channel_id,),\n                ).fetchone()\n"
 replace = "                _rows = self.get_pins(channel_id)\n                existing_count = len(_rows)\n                existing_chars = sum(len(r[1]) for r in _rows)\n"
+
+[[mutant]]
+id = "M-DAB148"
+bug = "DAB-148"
+summary = "/config deepsearch admin guard removed, letting any member of any guild force a web search on every query for everyone"
+guard = "test_an_ordinary_member_cannot_change_global_configuration"
+file = "src/bot/command_modules/configuration.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        \"\"\"Toggle DeepSearch to force Google Search on all queries.\"\"\"\n        if not await _require_config_admin(interaction):\n            return\n"
+replace = "        \"\"\"Toggle DeepSearch to force Google Search on all queries.\"\"\"\n"

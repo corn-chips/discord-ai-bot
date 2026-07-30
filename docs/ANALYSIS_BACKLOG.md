@@ -200,7 +200,7 @@ here.
 | DAB-143 | Report web UI serves every guild's reports with no authentication | security |
 | DAB-144 | `ReportWebServer.url` rewrites a `0.0.0.0` bind to `127.0.0.1` | security |
 | DAB-147 | `/report-status` reads any report by enumerable id, unscoped | security |
-| DAB-148 | Every `/config` subcommand mutates process-global state, ungated | security |
+| DAB-148 | **DONE** — Every `/config` subcommand mutates process-global state, ungated. Promoted out of Tier 3 and landed in Phase 3: runtime Manage Server guards on the five mutating subcommands, `/config info` deliberately left open | security |
 | DAB-153 | Raw exception text echoed to Discord by default, no secret scrubbing | security |
 | DAB-159 | Indirect prompt injection: retrieved content can forge the RAG context fence | security |
 | DAB-163 | `/pins` breaks permanently at 26 pins (Discord's 25-field embed cap) | security |

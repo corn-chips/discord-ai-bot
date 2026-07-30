@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from src.constants import MAX_LATEX_FIGURE_HEIGHT_INCHES
 from src.services.content_renderer import ContentRenderer
 
 
@@ -288,6 +289,116 @@ class ContentRendererTest(unittest.TestCase):
 
         self.assertIsNone(rendered)
         close_mock.assert_called_once_with("all")
+
+
+class MultiEquationRenderTest(unittest.TestCase):
+    """DAB-114: any response with two or more equations failed to render.
+
+    The separator line between rows passed `transform=ax.transAxes` to
+    `axhline`, which builds its own blended transform and rejects the keyword.
+    The exception was caught and the renderer degraded to code blocks, so the
+    advertised LaTeX feature was dead for every multi-equation answer.
+
+    The existing tests above cannot see it, for two independent reasons: they
+    mock `plt.subplots`, so a Mock axis happily accepts the illegal keyword, and
+    they pass a single expression, so the `if i < n - 1` separator branch is
+    never reached. These use the real matplotlib path with two expressions.
+    """
+
+    def _renderer(self):
+        try:
+            import matplotlib
+        except ImportError:  # pragma: no cover
+            self.skipTest("matplotlib is not installed")
+        matplotlib.use("Agg", force=False)
+
+        renderer = object.__new__(ContentRenderer)
+        renderer._matplotlib_available = True
+        for key in ("text.usetex", "mathtext.fontset"):
+            self.addCleanup(
+                matplotlib.rcParams.__setitem__, key, matplotlib.rcParams[key]
+            )
+        return renderer
+
+    def test_two_equations_render_to_a_real_png(self):
+        renderer = self._renderer()
+
+        rendered = renderer._render_combined_latex_image(
+            [("[1]", "x^2 + y^2 = z^2"), ("[2]", "a + b = c")]
+        )
+
+        self.assertIsNotNone(rendered, "multi-equation rendering is broken again")
+        self.assertTrue(rendered.startswith(b"\x89PNG"), "not a PNG")
+        self.assertGreater(len(rendered), 1000)
+
+    def test_a_single_equation_still_renders(self):
+        renderer = self._renderer()
+
+        rendered = renderer._render_combined_latex_image([("[1]", "E = mc^2")])
+
+        self.assertIsNotNone(rendered)
+        self.assertTrue(rendered.startswith(b"\x89PNG"))
+
+
+class LatexFigureHeightCapTest(unittest.TestCase):
+    """DAB-128: the computed figure height is attacker-influenced.
+
+    One row is stacked per expression with no upper bound on the count, so a
+    long answer asks for an enormous canvas: 400 expressions computes to a
+    1500x42060 pixel figure, measured at 5.9 s and 568 MB resident.
+
+    These assert the refusal *without* allocating anything, by spying on
+    `plt.subplots` rather than letting it run. A test that actually rendered the
+    pathological case would itself burn hundreds of megabytes.
+    """
+
+    def _renderer(self):
+        try:
+            import matplotlib
+        except ImportError:  # pragma: no cover
+            self.skipTest("matplotlib is not installed")
+        matplotlib.use("Agg", force=False)
+
+        renderer = object.__new__(ContentRenderer)
+        renderer._matplotlib_available = True
+        for key in ("text.usetex", "mathtext.fontset"):
+            self.addCleanup(
+                matplotlib.rcParams.__setitem__, key, matplotlib.rcParams[key]
+            )
+        return renderer
+
+    def test_an_oversized_figure_is_refused_before_any_canvas_is_allocated(self):
+        import matplotlib.pyplot as plt
+
+        renderer = self._renderer()
+        # Comfortably past the cap: 0.4 padding plus at least 0.7 each.
+        exprs = [(f"[{i}]", f"x = {i}") for i in range(400)]
+
+        with patch.object(plt, "subplots") as subplots_mock:
+            rendered = renderer._render_combined_latex_image(exprs)
+
+        self.assertIsNone(rendered, "an unbounded figure was rendered")
+        subplots_mock.assert_not_called()
+
+    def test_a_realistic_answer_stays_under_the_cap(self):
+        import matplotlib.pyplot as plt
+
+        renderer = self._renderer()
+        exprs = [(f"[{i}]", f"x_{i} = {i}") for i in range(8)]
+
+        with patch.object(plt, "subplots", wraps=plt.subplots) as subplots_mock:
+            rendered = renderer._render_combined_latex_image(exprs)
+
+        self.assertIsNotNone(rendered, "a normal multi-equation answer was refused")
+        subplots_mock.assert_called_once()
+        _, kwargs = subplots_mock.call_args
+        self.assertLessEqual(kwargs["figsize"][1], MAX_LATEX_FIGURE_HEIGHT_INCHES)
+
+    def test_the_cap_is_a_sane_size(self):
+        # Guards against someone "fixing" a refusal by raising the cap until the
+        # bomb comes back. 40 in at the renderer's 150 dpi is 6000 px.
+        self.assertGreaterEqual(MAX_LATEX_FIGURE_HEIGHT_INCHES, 10)
+        self.assertLessEqual(MAX_LATEX_FIGURE_HEIGHT_INCHES, 100)
 
 
 if __name__ == "__main__":

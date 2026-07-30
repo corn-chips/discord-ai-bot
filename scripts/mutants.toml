@@ -135,3 +135,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "        index = self.markdown_parser.build_split_index(content)\n        \n        while current_pos < len(content):\n"
 replace = "        index = None\n        \n        while current_pos < len(content):\n"
+
+[[mutant]]
+id = "M-DAB114"
+bug = "DAB-114"
+summary = "transform=ax.transAxes restored on axhline, so every response with 2+ equations fails to render"
+guard = "test_two_equations_render_to_a_real_png"
+file = "src/services/content_renderer.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    ax.axhline(y=sep_y, xmin=0.02, xmax=0.98,\n                               color='#E0E0E0', linewidth=0.5)\n"
+replace = "                    ax.axhline(y=sep_y, xmin=0.02, xmax=0.98,\n                               color='#E0E0E0', linewidth=0.5,\n                               transform=ax.transAxes)\n"
+
+[[mutant]]
+id = "M-DAB128"
+bug = "DAB-128"
+summary = "Figure-height cap removed, so a long answer allocates an unbounded canvas (1500x42060 px at 400 expressions)"
+guard = "test_an_oversized_figure_is_refused_before_any_canvas_is_allocated"
+file = "src/services/content_renderer.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if fig_height > MAX_LATEX_FIGURE_HEIGHT_INCHES:\n"
+replace = "            if False:\n"

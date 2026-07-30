@@ -62,15 +62,27 @@ making the two a co-requisite pair.
   is `DAB-114`'s actual bug, guarded by `if i < n - 1`
 
 With `n == 1` the separator line is never reached, so a **single** equation reaches `savefig`
-normally. One expression containing 300 `\\` row separators produces `figsize=(10, 135.85)` and a
-measured **2,558 MB peak RSS** — on the tree as shipped, with `DAB-114` unfixed.
+normally. One expression containing 300 `\\` row separators computes `figsize=(10, 135.85)` on the
+tree as shipped, with `DAB-114` unfixed — an unbounded height, reached without fixing anything.
 
-The corpus's own severity intuition was also inverted: a 50-equation response is benign (35.4 in,
-0.39 s, 147 KB). The bomb is one pathological expression, not many equations.
+> **This entry overstated its own magnitude, and the figure is corrected here.** An earlier
+> revision claimed **2,558 MB peak RSS** for that 300-separator input. Re-measured directly:
+> **270 MB**, and that input does not even reach `savefig` — mathtext rejects the expression
+> first. The unbounded *height* is real and was computed exactly as described; the memory number
+> attached to it was not reproducible. Applying this file's own rule to itself: assume the
+> mechanism, check the trigger.
+>
+> The honest magnitude comes from the many-expressions path, measured after `DAB-114` was fixed:
+> 400 expressions compute a 280 in figure, `1500x42060` px, **5.9 s and 568 MB resident**, growing
+> linearly with the expression count. That is the shape the cap has to stop.
 
-**Consequence.** `DAB-128` is an independent, live resource exhaustion bug and needs its own ticket
-and its own commit. It must **not** be scheduled as a rider on `DAB-114`, where it would slip
-whenever `DAB-114` slips. `DAB-114` itself remains a correct one-keyword fix.
+**Consequence.** `DAB-128` is a real unbounded-allocation bug and needed its own fix, not a rider
+on `DAB-114`. In the end both landed in one commit, for a reason worth recording: shipping
+`DAB-114` alone knowingly unlocks the many-expressions path that makes the bomb *large*, and
+shipping the cap alone gives it a vacuous test, because with `DAB-114` unfixed every
+multi-expression render returns `None` anyway and the cap is never what refused it. The two are one
+logical change. Landed with `MAX_LATEX_FIGURE_HEIGHT_INCHES = 40.0` in `src/constants.py`; over the
+cap the renderer degrades to inline code blocks, which is the path every other failure there takes.
 
 ## 3. `DAB-141`'s prescribed fix does not work on discord.py 2.7.1
 

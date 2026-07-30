@@ -13,6 +13,8 @@ from typing import List, Tuple, Optional
 
 import discord
 
+from ..constants import MAX_LATEX_FIGURE_HEIGHT_INCHES
+
 logger = logging.getLogger(__name__)
 
 # LaTeX to Unicode mapping for simple inline expressions
@@ -443,6 +445,27 @@ class ContentRenderer:
                 total_height += h
             
             fig_height = max(total_height, 1.0)
+            
+            # DAB-128: refuse rather than allocate an unusable canvas.
+            #
+            # total_height grows without bound -- 0.4 plus at least 0.7 per
+            # expression, more for multi-line ones -- and nothing upstream caps
+            # how many expressions a response may contain. At 150 dpi a
+            # 400-expression response asks for a 1500x42060 pixel figure,
+            # measured here at 5.9 s and 568 MB resident. Discord could not
+            # usefully display that image even if it were free.
+            #
+            # Returning None degrades to inline code blocks, the same path every
+            # other failure in this method takes. That preserves all the content
+            # as text, which is strictly better than truncating silently.
+            if fig_height > MAX_LATEX_FIGURE_HEIGHT_INCHES:
+                logger.warning(
+                    "Refusing to render %d LaTeX expression(s): computed figure height "
+                    "%.1f in exceeds the %.1f in cap. Falling back to code blocks.",
+                    n, fig_height, MAX_LATEX_FIGURE_HEIGHT_INCHES,
+                )
+                return None
+            
             fig, ax = plt.subplots(figsize=(10, fig_height))
             ax.axis('off')
             fig.patch.set_facecolor('white')
@@ -484,9 +507,12 @@ class ContentRenderer:
                 # Subtle separator line (except after last)
                 if i < n - 1:
                     sep_y = (y_positions[i] + y_positions[i + 1]) / 2
+                    # No transform= here. axhline's y is already in axes
+                    # coordinates and it builds its own blended transform, so
+                    # passing one raises ValueError -- which killed every
+                    # response containing two or more equations (DAB-114).
                     ax.axhline(y=sep_y, xmin=0.02, xmax=0.98,
-                               color='#E0E0E0', linewidth=0.5,
-                               transform=ax.transAxes)
+                               color='#E0E0E0', linewidth=0.5)
 
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',

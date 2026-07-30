@@ -91,3 +91,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                if rag_context is not None:\n"
 replace = "                if rag_context:\n"
+
+[[mutant]]
+id = "M-DAB041"
+bug = "DAB-041"
+summary = "Type-based fallback removed, so message-less TimeoutError/ConnectionError classify as UNKNOWN_ERROR and are never retried"
+guard = "test_every_transient_fault_is_retryable"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        # Fall back to the exception TYPE before giving up.\n        #\n        # Everything above matches on str(error), and the most common transient\n        # faults in a Discord/Gemini bot carry no message at all: asyncio's\n        # TimeoutError, the builtin TimeoutError, ConnectionError,\n        # ConnectionResetError and httpx's transport errors all stringify to \"\",\n        # so they matched nothing and were classified UNKNOWN_ERROR -- which is\n        # not retryable. The bot gave up on precisely the failures that retrying\n        # fixes.\n        #\n        # This dispatch is deliberately placed AFTER the substring chain rather\n        # than before it. An early isinstance(error, OSError) would be tidier and\n        # wrong: PIL.UnidentifiedImageError is an OSError, and hoisting the check\n        # would reclassify a corrupt upload as a network fault and retry it.\n        # Running last means zero perturbation of the classifications the\n        # existing tests pin.\n        elif isinstance(error, (asyncio.TimeoutError, TimeoutError)):\n            return ErrorType.TIMEOUT\n        elif isinstance(error, (ConnectionError, socket.gaierror)) or _is_transport_error(error):\n            return ErrorType.DISCORD_CONNECTION_ERROR\n        \n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB041B"
+bug = "DAB-041"
+summary = "Gemini 429 keywords reverted, so a real RESOURCE_EXHAUSTED quota refusal is classified UNKNOWN_ERROR and treated as permanent"
+guard = "test_a_real_429_is_a_rate_limit_not_an_unknown_error"
+file = "src/utils/error_manager.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            \"rate limit\", \"quota exceeded\", \"too many requests\",\n            \"resource_exhausted\", \"429\", \"exceeded your current quota\",\n        ]):"
+replace = "            \"rate limit\", \"quota exceeded\", \"too many requests\",\n        ]):"

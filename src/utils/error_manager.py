@@ -5,7 +5,9 @@ This module provides the ErrorManager class for handling different types of erro
 throughout the application and generating user-friendly error messages.
 """
 
+import asyncio
 import logging
+import socket
 from enum import Enum
 from typing import Dict, Optional
 from dataclasses import dataclass
@@ -14,6 +16,22 @@ import discord
 
 
 logger = logging.getLogger(__name__)
+
+# httpx is the transport under google-genai. It is a transitive dependency, not
+# a declared one, so it is imported defensively: if it is ever absent the
+# type-based classification below simply falls back to the builtin socket
+# exceptions rather than breaking import of the whole error module.
+try:  # pragma: no cover - exercised by whichever branch the environment takes
+    import httpx as _httpx
+
+    _TRANSPORT_ERRORS: tuple = (_httpx.TransportError,)
+except ImportError:  # pragma: no cover
+    _TRANSPORT_ERRORS = ()
+
+
+def _is_transport_error(error: Exception) -> bool:
+    """True for a network-transport failure raised by the HTTP client."""
+    return bool(_TRANSPORT_ERRORS) and isinstance(error, _TRANSPORT_ERRORS)
 
 
 class ErrorType(Enum):
@@ -203,8 +221,16 @@ class ErrorManager:
         elif any(term in error_str for term in ["message too long", "exceeds character limit"]):
             return ErrorType.MESSAGE_TOO_LONG_ERROR
         
-        # API-related errors (check error message content)
-        elif any(term in error_str for term in ["rate limit", "quota exceeded", "too many requests"]):
+        # API-related errors (check error message content).
+        # "resource_exhausted" and "429" are how Gemini actually reports a quota
+        # refusal. Its prose reads "exceeded your current quota", which does not
+        # contain the substring "quota exceeded", so the first three terms alone
+        # let a real 429 fall through to UNKNOWN_ERROR and be treated as
+        # permanent.
+        elif any(term in error_str for term in [
+            "rate limit", "quota exceeded", "too many requests",
+            "resource_exhausted", "429", "exceeded your current quota",
+        ]):
             return ErrorType.RATE_LIMIT
         elif any(term in error_str for term in ["timeout", "timed out"]):
             return ErrorType.TIMEOUT
@@ -226,6 +252,27 @@ class ErrorManager:
         # Context collection errors
         elif any(term in error_str for term in ["context", "history", "message retrieval"]):
             return ErrorType.CONTEXT_COLLECTION_ERROR
+        
+        # Fall back to the exception TYPE before giving up.
+        #
+        # Everything above matches on str(error), and the most common transient
+        # faults in a Discord/Gemini bot carry no message at all: asyncio's
+        # TimeoutError, the builtin TimeoutError, ConnectionError,
+        # ConnectionResetError and httpx's transport errors all stringify to "",
+        # so they matched nothing and were classified UNKNOWN_ERROR -- which is
+        # not retryable. The bot gave up on precisely the failures that retrying
+        # fixes.
+        #
+        # This dispatch is deliberately placed AFTER the substring chain rather
+        # than before it. An early isinstance(error, OSError) would be tidier and
+        # wrong: PIL.UnidentifiedImageError is an OSError, and hoisting the check
+        # would reclassify a corrupt upload as a network fault and retry it.
+        # Running last means zero perturbation of the classifications the
+        # existing tests pin.
+        elif isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+            return ErrorType.TIMEOUT
+        elif isinstance(error, (ConnectionError, socket.gaierror)) or _is_transport_error(error):
+            return ErrorType.DISCORD_CONNECTION_ERROR
         
         # Default to unknown error
         else:

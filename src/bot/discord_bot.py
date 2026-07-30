@@ -882,6 +882,7 @@ class DiscordBot(discord.Client):
         """
         try:
             if self.config.rag_enabled and routed_intent != "image_generate":
+                rag_context = None
                 try:
                     rag_context = await self.hybrid_context_retriever.retrieve(
                         message=message,
@@ -891,6 +892,23 @@ class DiscordBot(discord.Client):
                         needs_context=needs_context,
                         force_full_context=bool(message.reference) or routed_intent == "live_mode",
                     )
+                except Exception as exc:
+                    logger.warning(
+                        "Hybrid RAG failed for message %s; using legacy context fallback: %s",
+                        message.id,
+                        exc,
+                    )
+
+                # Only a *retrieval* failure may fall through to the legacy path.
+                # Generation and delivery used to sit inside this try, so anything
+                # that failed after the model had already answered re-entered the
+                # legacy path and answered again: a second reply and a second
+                # Gemini charge for one inbound message.
+                #
+                # The gate is `is not None`, not truthiness. A retrieval that
+                # legitimately returns an empty context has succeeded, and
+                # re-running it buys a duplicate generation for nothing.
+                if rag_context is not None:
                     await self._generate_and_send_response(
                         message,
                         user_prompt,
@@ -904,12 +922,6 @@ class DiscordBot(discord.Client):
                         complexity_level=complexity_level,
                     )
                     return
-                except Exception as exc:
-                    logger.warning(
-                        "Hybrid RAG failed for message %s; using legacy context fallback: %s",
-                        message.id,
-                        exc,
-                    )
 
             context_limit = self._get_context_limit_for_complexity(complexity_level)
             candidate_limit = max(self.config.max_context_messages, context_limit)

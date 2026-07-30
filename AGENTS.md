@@ -129,9 +129,16 @@ router** â†’ `is_bot_mentioned` (`:1218`) â†’ rate limit â†’ `Enh
 re-indexed into RAG.
 
 
-Silent degradation is the house style: any exception during hybrid RAG retrieval falls back to
-the legacy `ContextCollector` path with only a warning (`discord_bot.py:907-912`), and indexing
+Silent degradation is the house style: any exception during hybrid RAG **retrieval** falls back to
+the legacy `ContextCollector` path with only a warning (`discord_bot.py:894-899`), and indexing
 failures log at `debug`. A broken RAG change looks like "nothing happened" â€” check the logs.
+
+The word *retrieval* is load-bearing. That `try` used to span generation and delivery as well, so
+anything that failed after the model had already answered fell through to the legacy path and
+answered again â€” a duplicate reply and a duplicate Gemini charge (DAB-001). Delivery now sits
+outside it, behind `if rag_context is not None` (`:908`). Keep it that way: widening the `try`, or
+weakening that gate to a truthiness test, each reintroduce paid duplicate work, and
+`scripts/mutation_check.py` carries `M-DAB001` and `M-DAB001B` for exactly those two mistakes.
 
 
 ## SQLite
@@ -205,8 +212,8 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 140 in 15 files** (`9894bcc`..`6f1dc79`: `b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79`
-added `tests/test_on_message_flow.py`).
+now 150 in 16 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+`tests/test_on_message_flow.py`, and Phase 1 added `tests/test_context_fallback.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Two commits have
@@ -251,7 +258,7 @@ the line number.
  Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
 
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (140 stdlib `unittest` tests across 15 files). It now carries a staleness banner listing its
+ (150 stdlib `unittest` tests across 16 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 
 

@@ -69,3 +69,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                    self.pending_messages[channel_id] = remaining_messages + newly_queued\n"
 replace = "                    self.pending_messages[channel_id] = newly_queued\n"
+
+[[mutant]]
+id = "M-DAB001"
+bug = "DAB-001"
+summary = "Hybrid-RAG fallback try re-widened over generation and delivery, so a post-generation failure re-runs the whole cycle: duplicate reply, duplicate Gemini charge"
+guard = "test_a_failure_after_delivery_is_not_retried_through_the_fallback"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                rag_context = None\n                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                    )\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n\n                # Only a *retrieval* failure may fall through to the legacy path.\n                # Generation and delivery used to sit inside this try, so anything\n                # that failed after the model had already answered re-entered the\n                # legacy path and answered again: a second reply and a second\n                # Gemini charge for one inbound message.\n                #\n                # The gate is `is not None`, not truthiness. A retrieval that\n                # legitimately returns an empty context has succeeded, and\n                # re-running it buys a duplicate generation for nothing.\n                if rag_context is not None:\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n"
+replace = "                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                    )\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n"
+
+[[mutant]]
+id = "M-DAB001B"
+bug = "DAB-001"
+summary = "Fallback gate uses truthiness, so an empty-but-successful retrieval is treated as a failure and the legacy path generates a second time"
+guard = "test_an_empty_but_successful_retrieval_is_not_a_failure"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if rag_context is not None:\n"
+replace = "                if rag_context:\n"

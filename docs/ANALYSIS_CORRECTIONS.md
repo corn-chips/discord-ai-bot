@@ -135,6 +135,26 @@ to cover event handlers if it is ever written.
 
 ---
 
+## 6. `DAB-197 -> DAB-198` is reversed, and the published direction was hazardous
+
+`docs/analysis-tickets/DAB-197.md` stated that DAB-197 (delete the PDF PNG round-trip) *blocks*
+DAB-198 (clamp page rasterisation), and instructed an implementer to land the deletion first.
+
+**The edge points the other way, and following it would have made the bomb worse.** On the
+decompression-bomb fixture MuPDF does not fail — it renders happily. The only thing that stops the
+allocation today is Pillow raising `DecompressionBombError`, and it is raised by precisely the
+`Image.open` call that DAB-197 removes. Deleting the round-trip before the clamp exists therefore
+converts a slow, contained failure into a **successful 256 MP allocation**: strictly worse than the
+S1 it was meant to help close.
+
+Landed in the corrected order by `1ee538a` — clamp first, then delete the round-trip. The ticket
+now carries the corrected edge inline.
+
+The general lesson matches §1: the corpus's dependency edges were inferred from reading, not from
+executing, and a dependency direction asserted without a runtime check can be exactly backwards.
+Verify the edge before trusting the ordering, especially where the "blocked" ticket is a safety
+guard.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

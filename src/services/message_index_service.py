@@ -147,10 +147,37 @@ class MessageIndexService:
                     )
                     """
                 )
+                # Two scope indexes, one per scope the retrieval path actually
+                # uses, replacing the single (guild_id, channel_id, created_at)
+                # composite that served neither (DAB-078).
+                #
+                # The default path is channel-scoped (`cross_channel_enabled:
+                # false`), so the composite's leading column was never bound:
+                # SQLite skip-scanned every distinct guild_id and then built a
+                # temp B-tree to satisfy ORDER BY created_at DESC -- for a query
+                # that wants twelve rows. Measured on 100k rows: channel scope
+                # 24.9 ms, guild scope 61.4 ms, both linear in corpus size.
+                #
+                # Partial, because `hidden = 0 AND deleted_at IS NULL` is in
+                # every one of these queries, and REPLACING the composite rather
+                # than joining it: the composite serves no query these two do
+                # not, and keeping all three costs +35% on writes and +8 MB
+                # against +15% and +0.1 MB for the swap. Measured after:
+                # channel 0.027 ms (924x), guild 0.027 ms (2273x), and the
+                # pending-embeddings poll 38.4 -> 0.070 ms (549x) for free.
+                conn.execute("DROP INDEX IF EXISTS idx_message_index_scope_time")
                 conn.execute(
                     """
-                    CREATE INDEX IF NOT EXISTS idx_message_index_scope_time
-                    ON message_index (guild_id, channel_id, created_at DESC)
+                    CREATE INDEX IF NOT EXISTS idx_message_index_channel_time
+                    ON message_index (channel_id, created_at DESC)
+                    WHERE hidden = 0 AND deleted_at IS NULL
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_message_index_guild_time
+                    ON message_index (guild_id, created_at DESC)
+                    WHERE hidden = 0 AND deleted_at IS NULL
                     """
                 )
                 conn.execute(

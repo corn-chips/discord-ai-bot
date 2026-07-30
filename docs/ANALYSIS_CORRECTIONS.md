@@ -417,6 +417,53 @@ settle: a 5xx whose details mention a timeout, where the substring chain reaches
 and answers `TIMEOUT` instead of `SERVICE_UNAVAILABLE`. A mutant that stops discriminating is a
 signal, not a nuisance.
 
+## 13. `DAB-212` is refuted, not deferred: applied on top of `DAB-078` it makes the query it targets 111x slower
+
+**Claimed**, in `analysis-tickets/DAB-212.md`: rewriting `get_pending_embeddings`'s
+`ORDER BY m.created_at DESC` to `ORDER BY e.message_id DESC` removes a temp B-tree and is worth
+**1844x**, with "no reason for it to wait behind anything".
+
+**Refuted twice over.**
+
+First, the measurement is against a query the bot never issues. `get_pending_embeddings` is reached
+only through `HybridContextRetriever._drain_pending_documents`, whose signature is
+`(*, channel_id: int)` — a **required** keyword — and both call sites pass a real channel id. Every
+production poll is channel-scoped; the unscoped form is dead code. The ticket's 1844x, and my own
+first re-measurement of it, were both taken on the unscoped variant.
+
+Second, on the query that *is* issued, `DAB-078`'s index inverts the result. Measured at 100k rows
+against the real service SQL:
+
+| `DAB-078` index | `ORDER BY m.created_at DESC` | `ORDER BY e.message_id DESC` |
+|---|---|---|
+| absent | 38.757 ms, temp B-tree | 0.066 ms, no B-tree |
+| **present** | **0.078 ms, no B-tree** | **8.650 ms, temp B-tree** |
+
+With the index present the planner drives from `message_index` and the existing `ORDER BY` is
+already free. `DAB-212`'s rewrite forces the join back the other way and **reintroduces the temp
+B-tree it exists to remove**, at 111x the cost — violating its own acceptance criterion.
+
+**Consequence.** `DAB-078` alone delivers the win on that query (38.4 → 0.070 ms, 549x) as a side
+effect of an index added for `search_recent`. `DAB-212` was **not applied**, and `M-DAB212` applies
+it so that nobody re-applies it from the ticket.
+
+Two further corrections to the same ticket. Its behavioural caveat — "bot responses are indexed
+with `created_at=datetime.now()`" — is wrong; the live caller passes Discord's own
+`sent_message.created_at` and `datetime.now()` is only a fallback. And its premise that
+`ORDER BY e.message_id DESC` is "semantically identical" does not hold in general:
+`created_at` is a TEXT column sorted as a string, so mixed offsets already sort wrongly
+(`2026-01-01T12:00:00-05:00` sorts before `2026-01-01T13:00:00+00:00` although it is later).
+`tests/test_rag_query_plans.py` fixes a fixture where recency order and id order disagree, and the
+rewrite would return that batch backwards.
+
+**The lesson is discipline 2 applied to a benchmark.** I verified the `DAB-212 ↔ DAB-078` edge by
+execution and still got it wrong, because I executed a paraphrase of the query instead of the query.
+The same mistake then appeared in the test: `tests/test_rag_query_plans.py` originally explained SQL
+copied into the test file, so `M-DAB212` **survived** — the assertions could not see a mutation of
+the service's own `ORDER BY`. The test now captures the executed statement with
+`Connection.set_trace_callback` and explains that. A plan assertion against a copy of the query is
+a proxy, not an end state.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

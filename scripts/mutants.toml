@@ -535,3 +535,44 @@ expect = "killed"
 [[mutant.edit]]
 find = "            await self._tell_user_the_turn_failed(\n                channel_id, target_message, len(paid_for)\n            )\n            raise\n"
 replace = "            raise\n"
+
+[[mutant]]
+id = "M-DAB078"
+bug = "DAB-078"
+summary = "Restore the (guild_id, channel_id, created_at) composite as the only scope index, so the default channel-scoped path skip-scans and builds a temp B-tree"
+guard = "test_channel_scoped_retrieval_uses_the_channel_index"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                conn.execute(\"DROP INDEX IF EXISTS idx_message_index_scope_time\")\n                conn.execute(\n                    \"\"\"\n                    CREATE INDEX IF NOT EXISTS idx_message_index_channel_time\n                    ON message_index (channel_id, created_at DESC)\n                    WHERE hidden = 0 AND deleted_at IS NULL\n                    \"\"\"\n                )\n                conn.execute(\n                    \"\"\"\n                    CREATE INDEX IF NOT EXISTS idx_message_index_guild_time\n                    ON message_index (guild_id, created_at DESC)\n                    WHERE hidden = 0 AND deleted_at IS NULL\n                    \"\"\"\n                )\n"
+replace = "                conn.execute(\n                    \"\"\"\n                    CREATE INDEX IF NOT EXISTS idx_message_index_scope_time\n                    ON message_index (guild_id, channel_id, created_at DESC)\n                    \"\"\"\n                )\n"
+
+[[mutant]]
+id = "M-DAB078B"
+bug = "DAB-078"
+# The partial predicate is not decoration. Without it SQLite cannot prove the
+# index covers the query's `hidden = 0 AND deleted_at IS NULL` filter on the
+# pending-embeddings join, and the plan changes.
+summary = "Drop the partial WHERE clause from the channel index"
+guard = "test_the_pending_embedding_poll_uses_the_channel_index_too"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    CREATE INDEX IF NOT EXISTS idx_message_index_channel_time\n                    ON message_index (channel_id, created_at DESC)\n                    WHERE hidden = 0 AND deleted_at IS NULL\n"
+replace = "                    CREATE INDEX IF NOT EXISTS idx_message_index_channel_time\n                    ON message_index (channel_id, created_at DESC)\n"
+
+[[mutant]]
+id = "M-DAB212"
+bug = "DAB-212"
+# DAB-212 as the ticket prescribes it. With DAB-078's index present this puts
+# the temp B-tree BACK on the channel-scoped pending poll -- the only form the
+# bot ever issues -- at 111x the cost. The ticket is refuted, not deferred;
+# see docs/ANALYSIS_CORRECTIONS.md item 13. This mutant exists so nobody
+# re-applies it from the ticket.
+summary = "Apply DAB-212's ORDER BY rewrite, which reintroduces the temp B-tree it claims to remove"
+guard = "test_the_pending_embedding_poll_uses_the_channel_index_too"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                      {channel_clause}\n                    ORDER BY m.created_at DESC\n                    LIMIT ?\n"
+replace = "                      {channel_clause}\n                    ORDER BY e.message_id DESC\n                    LIMIT ?\n"

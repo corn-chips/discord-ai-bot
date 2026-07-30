@@ -347,3 +347,53 @@ expect = "killed"
 [[mutant.edit]]
 find = "                owed[:] = [\n                    message for message in owed if message.author.id != user_id\n                ]\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB165"
+bug = "DAB-165"
+summary = "Formatter splices extras into record.msg again: records with a % in an extra are dropped, extras double up, and exc_info records lose them behind the traceback"
+guard = "test_the_formatter_does_not_mutate_the_record"
+file = "src/utils/logging_config.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    def formatMessage(self, record: logging.LogRecord) -> str:\n"
+replace = "    def format(self, record: logging.LogRecord) -> str:\n"
+[[mutant.edit]]
+find = "        base = super().formatMessage(record)\n        if self.include_extra_fields:\n"
+replace = "        if self.include_extra_fields:\n"
+[[mutant.edit]]
+find = "            if extra_fields:\n                return f\"{base} [{', '.join(extra_fields)}]\"\n\n        return base\n"
+replace = "            if extra_fields:\n                record.msg = f\"{record.msg} [{', '.join(extra_fields)}]\"\n\n        return super().format(record)\n"
+
+[[mutant]]
+id = "M-DAB166"
+bug = "DAB-166"
+summary = "File handler level pinned at startup again, so raising the root level at runtime reaches nothing"
+guard = "test_raising_the_root_level_at_runtime_reaches_the_file"
+file = "src/utils/logging_config.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        file_handler.setFormatter(file_formatter)\n        root_logger.addHandler(file_handler)\n"
+replace = "        file_handler.setLevel(numeric_level)\n        file_handler.setFormatter(file_formatter)\n        root_logger.addHandler(file_handler)\n"
+
+[[mutant]]
+id = "M-DAB166B"
+bug = "DAB-166"
+summary = "/config debug mutates the logger but not config.log_level, so /config info keeps reporting the old level"
+guard = "test_enabling_debug_actually_reaches_the_log_file"
+file = "src/bot/command_modules/configuration.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        config.log_level = target_name\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB166C"
+bug = "DAB-166"
+summary = "Performance logger propagates to root again, so unpinning the handlers pushes INFO timing lines into bot.log at any configured level"
+guard = "test_performance_records_stay_out_of_the_main_log"
+file = "src/utils/logging_config.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        perf_logger.propagate = False\n"
+replace = ""

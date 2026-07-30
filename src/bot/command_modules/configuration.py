@@ -60,6 +60,13 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
 
     config_group = app_commands.Group(name="config", description="Configure bot settings")
 
+    # Captured once, before /config debug can overwrite config.log_level, so
+    # turning debug back off returns to the level the operator configured
+    # rather than to a hard-coded INFO.
+    startup_log_level = str(getattr(config, "log_level", "INFO") or "INFO").upper()
+    if startup_log_level == "DEBUG":
+        startup_log_level = "INFO"
+
     @config_group.command(name="model", description="Switch between Gemini Flash AI models")
     @app_commands.describe(
         model_name="The Gemini Flash model to use"
@@ -184,19 +191,47 @@ def create_config_group(context: CommandContext) -> app_commands.Group:
         if not await _require_config_admin(interaction):
             return
         root_logger = logging.getLogger()
+        target_name = "DEBUG" if enabled else startup_log_level
+        target_level = getattr(logging, target_name, logging.INFO)
+        root_logger.setLevel(target_level)
+
+        # setup_logging deliberately leaves handler levels at NOTSET so the
+        # logger is the single gate (DAB-166). This loop is the guard against a
+        # handler some other code path pinned: without it, the command would
+        # once again report a level change that no record can actually reach.
+        for handler in root_logger.handlers:
+            if handler.level > target_level:
+                handler.setLevel(logging.NOTSET)
+
+        if not root_logger.isEnabledFor(target_level):
+            await interaction.response.send_message(
+                "Could not change the logging level; it is still "
+                f"{logging.getLevelName(root_logger.getEffectiveLevel())}.",
+                ephemeral=True,
+            )
+            return
+
+        # /config info reports config.log_level. Leaving it stale meant the bot
+        # told the operator one level while running at another.
+        config.log_level = target_name
 
         if enabled:
-            root_logger.setLevel(logging.DEBUG)
             status = "✅ Enabled"
             color = discord.Color.orange()
+            description = (
+                "Logging level set to DEBUG, and it now reaches the console and "
+                "the log file. Expect substantially more output: until this was "
+                "fixed the handlers stayed pinned at startup level, so the "
+                "toggle changed nothing."
+            )
         else:
-            root_logger.setLevel(logging.INFO)
             status = "❌ Disabled"
             color = discord.Color.light_grey()
+            description = f"Logging level set to {target_name}."
 
         embed = discord.Embed(
             title=f"🐞 Debug Mode {status}",
-            description=f"Logging level set to {'DEBUG' if enabled else 'INFO'}.",
+            description=description,
             color=color
         )
         await interaction.response.send_message(embed=embed)

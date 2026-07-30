@@ -39,17 +39,33 @@ class StructuredFormatter(logging.Formatter):
             datefmt="%Y-%m-%d %H:%M:%S"
         )
     
-    def format(self, record: logging.LogRecord) -> str:
+    def formatMessage(self, record: logging.LogRecord) -> str:
         """
-        Format a log record with structured information.
-        
+        Render one record's message line, with its extra context appended.
+
+        This overrides `formatMessage`, not `format`, and never touches the
+        record. Both details are load-bearing (DAB-164, DAB-165):
+
+        - The old code spliced the extras *into* `record.msg` and then called
+          `super().format()`, which calls `record.getMessage()`, which evaluates
+          `self.msg % self.args`. A `%` in any extra value therefore became a
+          rogue conversion specifier: `getMessage()` raised, `Handler.handle`
+          aborted, and the whole record was lost to a stderr traceback. It also
+          mutated shared state, so a record passing through two handlers came
+          out with its extras printed twice, and it happened even when
+          `include_extra_fields` was False.
+        - Appending to the result of `format()` instead would put the extras
+          *after* the exception traceback, because the base `format()` appends
+          `exc_text` last. `formatMessage` runs before that, so extras stay on
+          the message line where they belong.
+
         Args:
             record: The log record to format
-            
+
         Returns:
-            Formatted log string
+            The formatted message line
         """
-        # Add extra context if available
+        base = super().formatMessage(record)
         if self.include_extra_fields:
             extra_fields = []
             
@@ -96,9 +112,9 @@ class StructuredFormatter(logging.Formatter):
                 extra_fields.append(f"success={record.success}")
             
             if extra_fields:
-                record.msg = f"{record.msg} [{', '.join(extra_fields)}]"
-        
-        return super().format(record)
+                return f"{base} [{', '.join(extra_fields)}]"
+
+        return base
 
 
 class PerformanceLogger:
@@ -298,10 +314,17 @@ def setup_logging(
     console_formatter = StructuredFormatter(include_extra_fields=False)
     file_formatter = StructuredFormatter(include_extra_fields=True)
     
-    # Set up console handler
+    # Neither the console nor the file handler below sets a level, on purpose.
+    #
+    # A record has to clear two gates: the logger's, then the handler's. Pinning
+    # the handlers at startup made the root logger's level advisory, which is
+    # why `/config debug` was a no-op -- it raised the logger to DEBUG and every
+    # record still died at a handler that was still at INFO, while the command
+    # reported success (DAB-166). A handler left at NOTSET passes whatever the
+    # logger allowed, so the level now lives in exactly one place and the
+    # runtime toggle reaches the file and the console.
     if enable_console:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(numeric_level)
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
     
@@ -318,7 +341,6 @@ def setup_logging(
             backupCount=5,
             encoding='utf-8'
         )
-        file_handler.setLevel(numeric_level)
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
     
@@ -326,6 +348,11 @@ def setup_logging(
     if enable_performance_logging:
         perf_logger = logging.getLogger("performance")
         perf_logger.setLevel(logging.INFO)
+        # Performance records belong in performance_*.log and nowhere else.
+        # This logger sets its own level, so with the root handlers no longer
+        # pinned it would otherwise push INFO timing lines into bot.log and the
+        # console even when the operator asked for WARNING.
+        perf_logger.propagate = False
         
         # Performance logs go to separate file if file logging is enabled
         if log_file:

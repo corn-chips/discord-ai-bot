@@ -271,6 +271,63 @@ The general lesson repeats items 1, 6 and 7: the corpus's *fixes* are inferred f
 like its dependency edges, and a prescribed one-liner in a ticket deserves the same execution check
 as a prescribed ordering.
 
+## 9. `DAB-165`'s headline trigger is unreachable, and its real one is worse
+
+**Claimed**, in `analysis-tickets/DAB-165.md`: the defect is that a `%` in a log extra *silently
+drops the whole record from the log file*, filed S2 on that basis.
+
+**The mechanism is exactly as described and the trigger is not reachable from any current call
+site.** `LogRecord.getMessage` only evaluates `self.msg % self.args` when `record.args` is truthy,
+so the crash needs a `%`-style call that passes args **and** an extra containing `%`. There are six
+`extra=` call sites under `src/`, and every one uses a literal or f-string message with no args.
+The `%` case is a latent trap, not a live bug; it is kept as a guard test.
+
+**What is live, on the shipped path, is the doubling** — `DAB-164`, which the ticket treats as a
+rider. The reports attribute it to a record passing through two handlers. **One is enough.**
+`logging.handlers.RotatingFileHandler.emit` calls `shouldRollover(record)`, which formats the
+record to measure it, and then formats it again to write it. Because the old formatter mutated
+`record.msg` in place, every extra was written twice on any deployment with file logging on:
+
+```
+2026-07-29 21:54:32 | INFO | t | indexed [user_id=7, action=backfill] [user_id=7, action=backfill]
+```
+
+captured with a single `RotatingFileHandler` and `enable_console=False`. `M-DAB165` is killed by
+`test_the_rotating_file_handler_does_not_double_the_extras` for that reason.
+
+A third consequence neither ticket mentions: the ticket's suggested fix — format first, then append
+the extras to the returned string — puts them **after the exception traceback**, because
+`logging.Formatter.format` appends `exc_text` last. What landed overrides `formatMessage`, which
+runs before the traceback is attached.
+
+## 10. `DAB-166`'s "preferred" option 1 needs a companion change to be safe
+
+**Claimed**, in `analysis-tickets/DAB-166.md`: option 1 — delete the two handler `setLevel` calls in
+`setup_logging` — is "structurally better", with the only stated caveat being to check the
+performance handler still gets the level it needs.
+
+**Incomplete, and the gap is in the other direction.** `logging.getLogger("performance")` sets its
+own level (`INFO`) and never sets `propagate = False`, and `Logger.callHandlers` walks ancestor
+*handlers* without consulting ancestor *logger levels*. The root handlers' pin was therefore the
+only thing keeping performance records out of `bot.log`. Measured at `log_level: WARNING`, before
+and after deleting the pins:
+
+```
+[BEFORE] PERF-MARKER in main log: False   root handler levels: [30]
+[AFTER]  PERF-MARKER in main log: True    root handler levels: [0]
+```
+
+Currently inert — `PerformanceLogger` is only ever constructed as `PerformanceLogger("discord_bot")`
+and `PerformanceLogger("gemini_client")`, so the `performance` logger has a handler and no traffic
+(that orphan is `DAB-172`). It would become live the moment `DAB-172` is fixed. Option 1 landed
+**with** `perf_logger.propagate = False`, and `M-DAB166C` /
+`test_performance_records_stay_out_of_the_main_log` keep it that way.
+
+`/config debug` also walks `root_logger.handlers` and clears any that are pinned above the target.
+That is redundant against `setup_logging` as it now stands and is deliberately kept: it is the one
+place where a stale pin would silently make the command a lie again. It carries no mutant, because
+removing it changes nothing observable — which is the point of belt and braces.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

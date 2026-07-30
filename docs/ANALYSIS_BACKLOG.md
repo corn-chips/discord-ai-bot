@@ -89,7 +89,7 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 10 | DAB-141 | `/rag delete scope:all` is ungated, cross-guild, irreversible | BUG | **S1** | XS | **8.0** | DAB-203 | [DAB-141](analysis-tickets/DAB-141.md) |
 | 11 | DAB-197 | PDF PNG encode/decode round-trip | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | — | [DAB-197](analysis-tickets/DAB-197.md) |
 | 12 | DAB-077 | Startup eligibility reconcile full-scans on every boot | IMPROVEMENT | 1938 ms -> 0.034 ms (57,000x) | S | **8.0** | DAB-083 | [DAB-077](analysis-tickets/DAB-077.md) |
-| 13 | DAB-165 | A `%` in any log extra silently drops the record | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
+| 13 | DAB-165 | **DONE** (Phase 3b) — A `%` in any log extra silently drops the record. The `%` trigger turned out unreachable from any current call site; the live half was DAB-164, the extras doubling, which one `RotatingFileHandler` is enough to cause. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 9 | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
 | 14 | DAB-019 | **DONE** (Phase 3b) — Live batch silently destroyed when `process_messages` raises. Landed with an unanswered-messages receipt, **not** the ticket's requeue-the-popped-batch expression, which duplicates the attachment suffix, re-debits the rate limiter and re-bills Gemini. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 8 | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
 | 15 | DAB-198 | PDF resource bomb: 3.6 KB upload -> 107 s CPU, 1.63 GB RSS | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
 | 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `b5851ab` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
@@ -122,7 +122,7 @@ an afternoon or that need a Tier-0 item first.
 | 22 | DAB-180 | `grok-prompts` is a dangling gitlink; `/deepresearch` silently degrades | BUG | S2 | S | **8.0** | DAB-203 | [DAB-180](analysis-tickets/DAB-180.md) |
 | 23 | DAB-213 | No cooldown on any slash command | IMPROVEMENT | worst case $3,247/h -> ~$0.90/h | S | **8.0** | DAB-203 | [DAB-213](analysis-tickets/DAB-213.md) |
 | 24 | DAB-096 | Synchronous SQLite on the asyncio event loop (13 call sites) | IMPROVEMENT | 4997 ms -> 3.1 ms max loop stall | M | **6.0** | DAB-095 | [DAB-096](analysis-tickets/DAB-096.md) |
-| 25 | DAB-166 | `/config debug` is a no-op; handler levels pinned at startup | BUG | S2 | S | **6.0** | — | [DAB-166](analysis-tickets/DAB-166.md) |
+| 25 | DAB-166 | **DONE** (Phase 3b) — `/config debug` is a no-op; handler levels pinned at startup. Landed as option 1 plus `perf_logger.propagate = False`, which option 1 needs to be safe. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 10 | BUG | S2 | S | **6.0** | — | [DAB-166](analysis-tickets/DAB-166.md) |
 | 26 | DAB-073 | Pins have absolute priority and starve retrieval to zero slots | BUG | S2 | S | **6.0** | — | [DAB-073](analysis-tickets/DAB-073.md) |
 | 27 | DAB-150 | `/pin` is uncapped, unsanitised, and evicts all retrieved context | BUG | S2 | S | **6.0** | DAB-073 | [DAB-150](analysis-tickets/DAB-150.md) |
 | 28 | DAB-065 | A transient DB error during an edit permanently tombstones the message | BUG | **S1** | M | **4.0** | DAB-095 | [DAB-065](analysis-tickets/DAB-065.md) |

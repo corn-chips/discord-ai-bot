@@ -328,6 +328,47 @@ That is redundant against `setup_logging` as it now stands and is deliberately k
 place where a stale pin would silently make the command a lie again. It carries no mutant, because
 removing it changes nothing observable — which is the point of belt and braces.
 
+## 11. `on_ready` cannot be awaited in a test without `PropertyMock`, and two Phase 2 tests were passing without reaching it
+
+**Not a corpus claim — a defect in this programme's own earlier work, recorded here for the same
+reason the corpus records its own.**
+
+`DAB-009`'s ticket says to "await `DiscordBot.on_ready()`" and assert. That does not work.
+`discord.Client.user` and `.guilds` are read-only properties with no setter, and `on_ready`
+dereferences `self.user.id` on its third line:
+
+```
+NAKED on_ready raised:
+  File ".../src/bot/discord_bot.py", line 509, in on_ready
+AttributeError: 'NoneType' object has no attribute 'id'
+```
+
+A test must patch `type(bot).user` and `type(bot).guilds` with `PropertyMock`. With that in place
+the coroutine runs to completion, and `DAB-009` reproduces exactly: presence raising leaves
+`setup_commands` awaited **0 times**.
+
+**The consequence for Phase 2.** `RegistrarFailureTest.test_live_mode_survives_a_registrar_raising`
+and `..._user_preferences_survive_a_registrar_raising` (`tests/test_startup_integrity.py`, landed
+in `1a361cb`) wrapped `await self.bot.on_ready()` in `try/except Exception: pass`. They therefore
+died at line 509 every run, several hundred lines before the `setup_commands` call they were named
+for, and passed on assertions that only needed `DiscordBot.__init__` to have run —
+which `StartupServiceAvailabilityTest` already proves. `M-DAB002` was killed by them anyway,
+because deleting the eager construction makes those same assertions raise, so the mutant score did
+not reveal it.
+
+Both now run `on_ready` to completion on the shared `OnReadyHarness` and assert
+`setup_commands.assert_awaited_once()` as well, so the registrar really does explode where the
+test says it does.
+
+**Two side effects the harness has to suppress.** A completed `on_ready` starts the report web
+server, which binds `127.0.0.1:8080` and is never stopped — the first test to run held the socket
+for the rest of the process and the next one failed to bind. It also starts the image processing
+service. Both are set to `None` in the harness.
+
+The lesson is discipline 3's, applied to a test rather than to code: a test that swallows the
+exception it provokes cannot tell you where it stopped. `try/except Exception: pass` around the
+subject of a test is a smell worth grepping for.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

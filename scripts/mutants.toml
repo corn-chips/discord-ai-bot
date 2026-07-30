@@ -441,3 +441,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "        status_error = status.get(\"error\")\n        if status_error:\n"
 replace = "        status_error = None\n        if status_error:\n"
+
+[[mutant]]
+id = "M-DAB009"
+bug = "DAB-009"
+summary = "Bare change_presence between two guarded regions: a gateway close skips setup_commands, tree.sync() and the RAG backlog"
+guard = "test_a_presence_failure_does_not_skip_command_registration"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        try:\n            activity = discord.Activity(\n                type=discord.ActivityType.listening,\n                name=\"@mentions for AI responses\"\n            )\n            await self.change_presence(activity=activity)\n        except Exception as e:\n            logger.warning(\n                \"Could not set the bot presence: %s. Startup continues; the \"\n                \"status badge may be stale.\",\n                e,\n                exc_info=True,\n            )\n"
+replace = "        activity = discord.Activity(\n            type=discord.ActivityType.listening,\n            name=\"@mentions for AI responses\"\n        )\n        await self.change_presence(activity=activity)\n"
+
+[[mutant]]
+id = "M-DAB009B"
+bug = "DAB-009"
+summary = "Bare _start_automatic_rag_backlog: a backlog failure escapes on_ready as an unhandled event error"
+guard = "test_a_backlog_failure_does_not_escape_on_ready"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        try:\n            _start_automatic_rag_backlog(self)\n        except Exception as e:\n            logger.warning(\n                \"Could not start the automatic RAG backlog: %s. Commands are \"\n                \"registered; retrieval will fall back to live indexing.\",\n                e,\n                exc_info=True,\n            )\n"
+replace = "        _start_automatic_rag_backlog(self)\n"

@@ -559,12 +559,31 @@ class DiscordBot(discord.Client):
             "Active" if self.report_web_server and self.report_web_server.is_running else "Disabled",
         )
 
-        # Set bot status
-        activity = discord.Activity(
-            type=discord.ActivityType.listening,
-            name="@mentions for AI responses"
-        )
-        await self.change_presence(activity=activity)
+        # Set bot status.
+        #
+        # Guarded, because change_presence writes to the gateway WebSocket and
+        # this call sits between the guarded service startups above and the
+        # guarded command registration below. A gateway close in the window
+        # between READY and the presence update -- routine during Discord's
+        # rolling gateway restarts -- used to escape on_ready into on_error,
+        # skipping setup_commands, tree.sync() and the RAG backlog entirely.
+        # The bot then ran with ZERO registered commands, which is a strictly
+        # worse version of DAB-002, and could not self-heal: the reconnect that
+        # re-fires on_ready hits CommandAlreadyRegistered instead (DAB-003).
+        # A stale presence badge is a much cheaper failure than that.
+        try:
+            activity = discord.Activity(
+                type=discord.ActivityType.listening,
+                name="@mentions for AI responses"
+            )
+            await self.change_presence(activity=activity)
+        except Exception as e:
+            logger.warning(
+                "Could not set the bot presence: %s. Startup continues; the "
+                "status badge may be stale.",
+                e,
+                exc_info=True,
+            )
         
         # Set up slash commands.
         #
@@ -604,8 +623,21 @@ class DiscordBot(discord.Client):
         except Exception as e:
             logger.error(f"Failed to sync slash commands: {e}", exc_info=True)
 
-        _start_automatic_rag_backlog(self)
-        
+        # Also guarded: this is the last unprotected statement in on_ready, and
+        # everything it can raise (a permissions lookup against a partially
+        # populated cache, a retriever that failed to construct) is a reason to
+        # log and carry on rather than to abort a startup that has already
+        # registered the command tree.
+        try:
+            _start_automatic_rag_backlog(self)
+        except Exception as e:
+            logger.warning(
+                "Could not start the automatic RAG backlog: %s. Commands are "
+                "registered; retrieval will fall back to live indexing.",
+                e,
+                exc_info=True,
+            )
+
         logger.info("✅ Bot is ready and listening for mentions!")
     
     async def on_error(self, event, *args, **kwargs):

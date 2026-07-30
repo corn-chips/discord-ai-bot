@@ -19,7 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, PropertyMock, patch
 
 from src.bot.discord_bot import DiscordBot
 from src.config import BotConfig
@@ -83,8 +83,18 @@ class StartupServiceAvailabilityTest(unittest.TestCase):
         self.assertEqual(service.get_preferences(7).preferred_model, "model-a")
 
 
-class RegistrarFailureTest(unittest.IsolatedAsyncioTestCase):
-    """A raising registrar must not take the features down with it."""
+class OnReadyHarness(unittest.IsolatedAsyncioTestCase):
+    """Run the real `on_ready` against a stubbed gateway.
+
+    `Client.user` and `Client.guilds` are read-only properties, and `on_ready`
+    dereferences `self.user.id` on its third line. Without these PropertyMocks
+    the coroutine dies at `discord_bot.py:509` with
+    `AttributeError: 'NoneType' object has no attribute 'id'` -- which is how
+    the two registrar tests below used to end, several hundred lines before
+    reaching the code they were named for. They passed anyway, because their
+    `try/except Exception: pass` swallowed it and their assertions only needed
+    the constructor to have run.
+    """
 
     async def asyncSetUp(self):
         self._dir = tempfile.TemporaryDirectory()
@@ -93,19 +103,66 @@ class RegistrarFailureTest(unittest.IsolatedAsyncioTestCase):
         self.bot = DiscordBot(self.config)
         self.addCleanup(lambda: self.bot._pdf_executor.shutdown(wait=False))
 
+        user = patch.object(type(self.bot), "user", new_callable=PropertyMock)
+        guilds = patch.object(type(self.bot), "guilds", new_callable=PropertyMock)
+        self.user_property = user.start()
+        self.guilds_property = guilds.start()
+        self.addCleanup(user.stop)
+        self.addCleanup(guilds.stop)
+        self.user_property.return_value = SimpleNamespace(id=99)
+        self.guilds_property.return_value = []
+
+        self.change_presence = AsyncMock()
+        self.bot.change_presence = self.change_presence
+        sync = patch.object(self.bot.tree, "sync", AsyncMock(return_value=[]))
+        sync.start()
+        self.addCleanup(sync.stop)
+
+        # on_ready really does start these. The report web server binds
+        # 127.0.0.1:8080 and is never stopped, so leaving it in place makes the
+        # suite hold a listening socket for the rest of the process and the
+        # second test in this class fails to bind.
+        self.bot.report_web_server = None
+        self.bot.image_processing_service = None
+
+
+class OnReadyResilienceTest(OnReadyHarness):
+    """DAB-009: one bare await between two guarded regions cost everything."""
+
+    async def test_a_presence_failure_does_not_skip_command_registration(self):
+        self.change_presence.side_effect = RuntimeError("gateway closed")
+
+        with patch("src.bot.discord_bot.setup_commands", AsyncMock()) as setup:
+            await self.bot.on_ready()
+
+        # The observable end state: the command tree was built. Before the fix
+        # this was 0 -- the exception escaped into on_error and the bot ran with
+        # no slash commands at all.
+        setup.assert_awaited_once()
+
+    async def test_a_backlog_failure_does_not_escape_on_ready(self):
+        with patch("src.bot.discord_bot.setup_commands", AsyncMock()) as setup, patch(
+            "src.bot.discord_bot._start_automatic_rag_backlog",
+            side_effect=RuntimeError("permissions cache empty"),
+        ):
+            await self.bot.on_ready()
+
+        setup.assert_awaited_once()
+
+
+class RegistrarFailureTest(OnReadyHarness):
+    """A raising registrar must not take the features down with it."""
+
     async def test_live_mode_survives_a_registrar_raising(self):
-        # Simulate the exact shape of the defect: setup_commands explodes.
+        # Simulate the exact shape of the defect: setup_commands explodes. With
+        # the harness above, on_ready now actually reaches this call.
         with patch(
             "src.bot.discord_bot.setup_commands",
             side_effect=RuntimeError("registrar exploded"),
-        ):
-            try:
-                await self.bot.on_ready()
-            except Exception:
-                # on_ready touches a live gateway for other reasons; only the
-                # post-failure service state matters here.
-                pass
+        ) as setup:
+            await self.bot.on_ready()
 
+        setup.assert_awaited_once()
         self.bot._channel_settings_service.set_live_enabled(99, True)
         self.assertTrue(
             self.bot._is_live_mode_enabled(99),
@@ -116,12 +173,10 @@ class RegistrarFailureTest(unittest.IsolatedAsyncioTestCase):
         with patch(
             "src.bot.discord_bot.setup_commands",
             side_effect=RuntimeError("registrar exploded"),
-        ):
-            try:
-                await self.bot.on_ready()
-            except Exception:
-                pass
+        ) as setup:
+            await self.bot.on_ready()
 
+        setup.assert_awaited_once()
         service = getattr(self.bot, "_user_prefs_service", None)
         self.assertIsNotNone(
             service, "user preferences were lost to a registration failure"

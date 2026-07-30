@@ -844,7 +844,16 @@ class DiscordBot(discord.Client):
                         message.channel.id
                     )
             except Exception as exc:
-                logger.debug("Failed to index incoming message %s for RAG: %s", message.id, exc)
+                # WARNING, not debug: with DAB-065 an infrastructure write
+                # failure surfaces here as an exception, and this is now the
+                # only signal that one happened. At the shipped log_level a
+                # debug line is no signal at all.
+                logger.warning(
+                    "Failed to index incoming message %s for RAG: %s",
+                    message.id,
+                    exc,
+                    exc_info=True,
+                )
 
         # Live mode bypasses mention requirements in opted-in channels.
         if message.guild and self._is_live_mode_enabled(message.channel.id):

@@ -515,6 +515,52 @@ can be read back. That is false — CPython's `sqlite3` turns `timeout=` into ex
 (`connect(timeout=1.234)` reads back `1234`). The line changed nothing observable and its mutant
 survived, which is the correct verdict on a line that restates the one above it. Removed.
 
+## 15. `DAB-065`'s prescribed repair does not repair anything, and the test it predicted would invert does not
+
+Item 4 already recorded that the executive summary's fix — add `deleted_at = NULL` to the
+`ON CONFLICT` list — reintroduces BUG-0004. Two further findings, both measured, and the second one
+corrects an expectation this programme was handed.
+
+**a. Clearing `deleted_at` recovers nothing on its own.** `mark_deleted` sets `hidden = 1` as well,
+and `hidden` independently removes the row from FTS and from all three retrieval paths. Driving the
+real service:
+
+```
+after mark_deleted        hidden=1 deleted_at=SET  fts=0 recent=[] lexical=[] by_id=[] pending=[]
+deleted_at = NULL only    hidden=1 deleted_at=NULL fts=0 recent=[] lexical=[] by_id=[] pending=[]
++ hidden = 0              hidden=0 deleted_at=NULL fts=0 recent=[4242] lexical=[]  by_id=[4242]
++ a later re-index        hidden=0 deleted_at=NULL fts=1 recent=[4242] lexical=[4242] by_id=[4242]
+```
+
+So the summary's one-line fix is wrong twice over: it reintroduces BUG-0004 *and* it would not have
+restored the message. A `restore`/`mark_undeleted` method would have needed to clear both flags,
+re-insert the FTS row, and reset `embedding_status` from `skipped` back to `pending` — four things,
+where the ticket names one — and to run *before* the upsert rather than after it.
+
+**What landed avoids all of that by not creating the tombstone in the first place.**
+`upsert_message` raises `MessageIndexWriteError` on a failed write; `False` keeps its existing
+meaning of "this content is not indexable"; and `handle_message_edit` tombstones only on `False`.
+No new column, no `restore`, no `ON CONFLICT` change, no repair path — because there is nothing
+left to repair.
+
+**b. `test_stale_upsert_does_not_resurrect_deleted_message` does NOT invert.** The Phase 4 brief
+predicted it would, and instructed that the inversion be justified as a real contract change. It
+does not invert, and the reason is worth stating: that test asserts that a *stale edit event* must
+not resurrect a deliberately deleted message, and the fix never touches that path. A deliberate
+`mark_deleted` still wins, and a later `upsert_message` still leaves `deleted_at` set. The
+prediction was sound for the `ON CONFLICT` fix and does not apply to this one.
+`test_ineligible_edit_marks_existing_index_row_deleted` is likewise untouched: genuine
+ineligibility still tombstones, and there is a test asserting exactly that so the fix cannot drift
+into "never tombstone".
+
+**Acceptance criteria not taken, and why.** The ticket also asks for jittered retries inside
+`upsert_message` before surfacing. Not done. `backfill_channel` already resumes from a durable
+cursor — verified: raising on message 3 of 10 leaves the cursor at the last success with
+`completed_at` NULL, so the next pass continues correctly and loses nothing — and `on_message`
+absorbs and logs. With the tombstone gone, a failed write is benign, so a retry would be an
+optimisation rather than a correctness fix. The `hidden`/`deleted_at` overloading in `mark_deleted`
+is likewise still there; it is now inert for this defect but remains a latent trap.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

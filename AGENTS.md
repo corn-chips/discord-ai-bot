@@ -236,7 +236,7 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 265 in 26 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+now 270 in 26 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
 `tests/test_on_message_flow.py`, Phase 1 added `tests/test_context_fallback.py`,
 `tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`, Phases 2-3
 added `tests/test_command_cooldowns.py`, `tests/test_pin_limits.py`,

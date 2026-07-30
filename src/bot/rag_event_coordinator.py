@@ -71,12 +71,40 @@ class RagEventCoordinator:
             if before.content == after.content:
                 return
 
+        # DAB-065. `False` and an exception used to mean the same thing here,
+        # and the difference between them is the whole defect. `False` means the
+        # CONTENT is no longer indexable, which is a real reason to tombstone
+        # the row. An exception means the DATABASE was unavailable, which says
+        # nothing about the message -- and tombstoning on it is unrecoverable:
+        # no code path clears `deleted_at`, every later re-index still deletes
+        # the FTS row and forces embedding_status='skipped', and /rag backfill
+        # goes through the same write. The message keeps its content faithfully
+        # updated while being invisible to lexical and semantic retrieval, for
+        # the life of the database.
         try:
             indexed = await self.message_index_service.index_discord_message_async(
                 after,
                 include_bot_user_id=bot_user.id if bot_user else None,
             )
-            if not indexed:
-                await self.message_index_service.mark_deleted_async(after.id)
         except Exception as exc:
-            logger.debug("Failed to refresh edited message %s in RAG index: %s", after.id, exc)
+            logger.warning(
+                "Could not re-index edited message %s; leaving its existing index "
+                "row untouched rather than reading a write failure as a deletion: %s",
+                after.id,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        if indexed:
+            return
+
+        try:
+            await self.message_index_service.mark_deleted_async(after.id)
+        except Exception as exc:
+            logger.warning(
+                "Could not tombstone message %s whose content became ineligible: %s",
+                after.id,
+                exc,
+                exc_info=True,
+            )

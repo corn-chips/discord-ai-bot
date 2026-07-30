@@ -27,6 +27,18 @@ from .sqlite_utils import sqlite_connection, sqlite_transaction
 logger = logging.getLogger(__name__)
 
 
+class MessageIndexWriteError(RuntimeError):
+    """A write to the message index failed for an infrastructure reason.
+
+    Distinct from a `False` return, which means the *content* is not indexable
+    -- an out-of-scope bot message, or text that normalises to nothing. Callers
+    are entitled to treat `False` as a statement about the message and this as a
+    statement about the database, and DAB-065 is what happens when they cannot:
+    a lock timeout was read as "no longer eligible" and permanently tombstoned a
+    live message.
+    """
+
+
 @dataclass
 class IndexedMessage:
     message_id: int
@@ -591,8 +603,26 @@ class MessageIndexService:
             self._cache_remove(message_id)
             return True
         except Exception as exc:
+            # Raise, do not return False (DAB-065).
+            #
+            # False is a business decision -- "this content is not indexable" --
+            # and the edit handler acts on it by tombstoning the row. Reporting
+            # a failed WRITE the same way meant a five-second lock timeout was
+            # read as "no longer eligible", and the tombstone it produced is
+            # permanent: no code path clears deleted_at, every later re-index
+            # still deletes the FTS row and forces embedding_status='skipped',
+            # and /rag backfill goes through here too. The message stayed in the
+            # index with its content faithfully updated while being invisible to
+            # both the lexical and the semantic candidate sets, for good.
+            #
+            # Callers are deliberately left to decide: backfill_channel lets it
+            # abort and resumes from its durable cursor, on_message logs and
+            # moves on, and handle_message_edit now leaves the existing row
+            # exactly as it was.
             logger.error("Failed to index message %s: %s", message_id, exc, exc_info=True)
-            return False
+            raise MessageIndexWriteError(
+                f"failed to index message {message_id}: {exc}"
+            ) from exc
 
     async def backfill_channel(
         self,

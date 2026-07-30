@@ -1,10 +1,18 @@
 import asyncio
+import sqlite3
+import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.bot.discord_bot import DiscordBot
+from src.bot.rag_event_coordinator import RagEventCoordinator
+from src.services.message_index_service import (
+    MessageIndexService,
+    MessageIndexWriteError,
+)
 from src.models.data_models import APIResponse, EditType, ImageEditRequest
 from src.services.image_processing_service import (
     ImageProcessingService,
@@ -357,3 +365,186 @@ class NanoBananaClientRegressionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TombstoneOnWriteFailureTest(unittest.IsolatedAsyncioTestCase):
+    """DAB-065: a transient DB error during an edit permanently tombstoned the message.
+
+    Three decisions composed into unrecoverable loss. `upsert_message` swallowed
+    every exception and reported it as a benign `False`; the edit handler read
+    `False` as "no longer eligible for indexing" and tombstoned the row; and no
+    code path can clear `deleted_at`. The tombstone survived every later
+    re-index, and each one made it worse -- the FTS row is deleted again and
+    `embedding_status` is forced to `skipped` -- so the message kept its content
+    faithfully updated while being invisible to both the lexical and the
+    semantic candidate sets. `/rag backfill` did not heal it, because backfill
+    goes through the same write.
+
+    The fix separates the two meanings rather than adding a repair path, so
+    there is nothing to repair: `False` still means the content became
+    ineligible and still tombstones; an infrastructure failure now raises and
+    the existing row is left exactly as it was.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.db_path = str(Path(self._dir.name) / "rag.db")
+        self.service = MessageIndexService(self.db_path, embedding_model="test-embedding")
+        self.now = datetime.now(timezone.utc)
+
+    def _index(self, message_id=4242, text="a message worth remembering and indexing"):
+        return self.service.upsert_message(
+            message_id=message_id,
+            guild_id=10,
+            channel_id=20,
+            author_id=7,
+            author_name="Ada",
+            is_bot=False,
+            reply_to_message_id=None,
+            created_at=self.now,
+            content_text=text,
+        )
+
+    def _retrievable(self, message_id=4242):
+        return {
+            "recent": [
+                m.message_id
+                for m in self.service.search_recent(
+                    guild_id=10, channel_id=20, cross_channel=False, limit=10
+                )
+            ],
+            "lexical": [
+                m.message_id
+                for m in self.service.search_lexical(
+                    query="remembering", guild_id=10, channel_id=20,
+                    cross_channel=False, limit=10,
+                )
+            ],
+            "by_id": [m.message_id for m in self.service.get_messages_by_ids([message_id])],
+        }
+
+    def test_a_write_failure_raises_instead_of_reporting_a_business_decision(self):
+        self._index()
+        with patch(
+            "src.services.message_index_service.sqlite_transaction",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            with self.assertRaises(MessageIndexWriteError):
+                self._index(text="an edited message worth remembering")
+
+    def test_ineligible_content_still_returns_false_rather_than_raising(self):
+        # The other half of the distinction. If this ever raises, the edit
+        # handler stops tombstoning content that really did become ineligible.
+        # An out-of-scope bot message is the unambiguous case: a business
+        # decision about the message, taken before any database access.
+        message = SimpleNamespace(
+            id=99,
+            content="a bot message from some other bot",
+            clean_content="a bot message from some other bot",
+            attachments=[],
+            embeds=[],
+            stickers=[],
+            author=SimpleNamespace(id=555, bot=True, display_name="Other", name="Other"),
+            channel=SimpleNamespace(id=20),
+            guild=SimpleNamespace(id=10),
+            reference=None,
+            created_at=self.now,
+            system_content="",
+            type=SimpleNamespace(name="default"),
+        )
+        self.assertFalse(
+            self.service.index_discord_message(message, include_bot_user_id=99)
+        )
+
+    async def test_a_locked_database_during_an_edit_does_not_tombstone(self):
+        self._index()
+        before_state = self._retrievable()
+        self.assertEqual(before_state["recent"], [4242])
+
+        index_service = SimpleNamespace(
+            index_discord_message_async=AsyncMock(
+                side_effect=MessageIndexWriteError("database is locked")
+            ),
+            mark_deleted_async=AsyncMock(),
+        )
+        coordinator = RagEventCoordinator(
+            message_index_service=index_service,
+            rag_enabled=lambda: True,
+            index_bot_responses=lambda: True,
+            get_bot_user=lambda: SimpleNamespace(id=99),
+        )
+        author = SimpleNamespace(id=7, bot=False)
+        await coordinator.handle_message_edit(
+            SimpleNamespace(id=4242, author=author, content="before"),
+            SimpleNamespace(id=4242, author=author, content="after"),
+        )
+
+        index_service.mark_deleted_async.assert_not_awaited()
+
+    async def test_the_message_survives_a_failed_edit_and_a_later_reindex(self):
+        # The end state the ticket asks for, through the real service rather
+        # than a double: after a failed edit and a successful one, the message
+        # is retrievable by every path and is queued for embedding again.
+        self._index()
+        coordinator = RagEventCoordinator(
+            message_index_service=self.service,
+            rag_enabled=lambda: True,
+            index_bot_responses=lambda: True,
+            get_bot_user=lambda: SimpleNamespace(id=99),
+        )
+        author = SimpleNamespace(id=7, bot=False, display_name="Ada", name="Ada")
+
+        def make(content):
+            return SimpleNamespace(
+                id=4242, content=content, clean_content=content, attachments=[],
+                embeds=[], stickers=[], author=author,
+                channel=SimpleNamespace(id=20), guild=SimpleNamespace(id=10),
+                reference=None, created_at=self.now, system_content=content,
+                type=SimpleNamespace(name="default"),
+            )
+
+        with patch(
+            "src.services.message_index_service.sqlite_transaction",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            await coordinator.handle_message_edit(
+                make("a message worth remembering and indexing"),
+                make("an edit that arrives while the database is locked, remembering"),
+            )
+
+        # The database recovers, and a later edit lands normally.
+        await coordinator.handle_message_edit(
+            make("a message worth remembering and indexing"),
+            make("an edit that lands cleanly, still worth remembering"),
+        )
+
+        state = self._retrievable()
+        self.assertEqual(state["recent"], [4242], "lost from recency retrieval")
+        self.assertEqual(state["lexical"], [4242], "lost from lexical retrieval")
+        self.assertEqual(state["by_id"], [4242], "lost from id lookup")
+        self.assertIn(
+            4242,
+            [row[0] for row in self.service.get_pending_embeddings()],
+            "never re-queued for embedding",
+        )
+
+    async def test_content_that_became_ineligible_is_still_tombstoned(self):
+        # The contract that must NOT change: this is a real deletion signal.
+        index_service = SimpleNamespace(
+            index_discord_message_async=AsyncMock(return_value=False),
+            mark_deleted_async=AsyncMock(),
+        )
+        coordinator = RagEventCoordinator(
+            message_index_service=index_service,
+            rag_enabled=lambda: True,
+            index_bot_responses=lambda: True,
+            get_bot_user=lambda: SimpleNamespace(id=99),
+        )
+        author = SimpleNamespace(id=7, bot=False)
+        await coordinator.handle_message_edit(
+            SimpleNamespace(id=10, author=author, content="before"),
+            SimpleNamespace(id=10, author=author, content="after"),
+        )
+
+        index_service.mark_deleted_async.assert_awaited_once_with(10)

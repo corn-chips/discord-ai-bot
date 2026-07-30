@@ -620,3 +620,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "    if milliseconds > 0:\n        _busy_timeout_seconds = milliseconds / 1000.0\n"
 replace = "    return\n"
+
+[[mutant]]
+id = "M-DAB065"
+bug = "DAB-065"
+summary = "upsert_message swallows a write failure and reports it as a benign False, which the edit handler reads as 'no longer eligible'"
+guard = "test_a_write_failure_raises_instead_of_reporting_a_business_decision"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            raise MessageIndexWriteError(\n                f\"failed to index message {message_id}: {exc}\"\n            ) from exc\n"
+replace = "            return False\n"
+
+[[mutant]]
+id = "M-DAB065B"
+bug = "DAB-065"
+summary = "The edit handler tombstones on any failure again, so a lock timeout permanently deletes a live message from retrieval"
+guard = "test_a_locked_database_during_an_edit_does_not_tombstone"
+file = "src/bot/rag_event_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        except Exception as exc:\n            logger.warning(\n                \"Could not re-index edited message %s; leaving its existing index \"\n                \"row untouched rather than reading a write failure as a deletion: %s\",\n                after.id,\n                exc,\n                exc_info=True,\n            )\n            return\n"
+replace = "        except Exception as exc:\n            logger.warning(\"edit failed: %s\", exc)\n            await self.message_index_service.mark_deleted_async(after.id)\n            return\n"

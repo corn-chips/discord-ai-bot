@@ -142,6 +142,19 @@ outside it, behind `if rag_context is not None` (`:908`). Keep it that way: wide
 weakening that gate to a truthiness test, each reintroduce paid duplicate work, and
 `scripts/mutation_check.py` carries `M-DAB001` and `M-DAB001B` for exactly those two mistakes.
 
+The live-mode fork has the same rule, enforced differently. `LiveMessageCoordinator.run_channel_worker`
+retries a batch whose processing raised (up to `max_retry_attempts`, default 3, with a linear
+backoff), so a transient fault no longer destroys the queue silently (DAB-019). What makes that
+safe is the `owed` receipt threaded through `_answer_batch`: it holds the messages still awaiting
+an answer, and it is **emptied the moment a model call has been made** — after `generate_response`
+returns, and before `process_message_with_context` is awaited. A call that *raises* produced
+nothing and is retryable; a call that *returns* has been billed and must never be repeated. `owed`
+is also narrowed when the batch is (attachment split, rate-limit refusal), and `charged` records
+which users the limiter already debited so a retry costs each participant one token per turn, not
+per attempt. `M-DAB019` through `M-DAB019E` pin all five properties. Do not requeue the popped
+batch instead of `owed` — that is what the ticket prescribes and it duplicates the attachment
+suffix, re-debits the limiter and re-bills Gemini.
+
 
 ## SQLite
 
@@ -214,9 +227,12 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 213 in 22 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
-`tests/test_on_message_flow.py`, and Phase 1 added `tests/test_context_fallback.py`,
-`tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`).
+now 220 in 23 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+`tests/test_on_message_flow.py`, Phase 1 added `tests/test_context_fallback.py`,
+`tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`, Phases 2-3
+added `tests/test_command_cooldowns.py`, `tests/test_pin_limits.py`,
+`tests/test_config_command_gate.py` and `tests/test_startup_integrity.py`, and Phase 3b added
+`tests/test_live_message_coordinator.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Several commits have

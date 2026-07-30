@@ -289,3 +289,61 @@ expect = "killed"
 [[mutant.edit]]
 find = "        self._channel_settings_service = ChannelSettingsService(\n            db_path=config.token_db_path,\n            personalities=config.personalities,\n        )\n        self._message_visibility_service = MessageVisibilityService(\n            db_path=config.token_db_path,\n        )\n        self._user_prefs_service = UserPreferencesService(\n            db_path=config.token_db_path,\n            valid_models=config.valid_models,\n            valid_languages=config.valid_languages,\n        )\n\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB019"
+bug = "DAB-019"
+summary = "Live worker logs a batch failure and drops the batch: no requeue, no retry, no user notification"
+guard = "test_a_transient_failure_is_retried_and_the_batch_is_answered"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    if owed and attempts < self.max_retry_attempts:\n                        async with lock:\n                            queued = self.pending_messages.get(channel_id, [])\n                            self.pending_messages[channel_id] = list(owed) + queued\n                        await asyncio.sleep(self.retry_backoff_seconds * attempts)\n                        continue\n                    if owed:\n                        await self._abandon_batch(channel_id, list(owed))\n                    attempts = 0\n                    charged.clear()\n"
+replace = "                    attempts = 0\n                    charged.clear()\n"
+
+[[mutant]]
+id = "M-DAB019B"
+bug = "DAB-019"
+# The expression DAB-019 itself prescribes (ticket line 110). It requeues the
+# popped list verbatim, so the attachment suffix _answer_batch already requeued
+# is queued a second time -- and the `finally` respawn re-splits it every pass.
+summary = "Requeue the whole popped batch instead of the unanswered receipt, duplicating the attachment suffix"
+guard = "test_the_attachment_suffix_is_not_duplicated_by_a_retry"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                            self.pending_messages[channel_id] = list(owed) + queued\n"
+replace = "                            self.pending_messages[channel_id] = list(pending_messages) + queued\n"
+
+[[mutant]]
+id = "M-DAB019C"
+bug = "DAB-019"
+summary = "Keep the batch retryable after generate_response has returned, so a delivery failure buys a second paid Gemini call"
+guard = "test_a_failure_after_the_model_answered_never_regenerates"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        # The model has answered and the call has been billed. Nothing after\n        # this line may be retried, because a retry would generate again.\n        owed.clear()\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB019D"
+bug = "DAB-019"
+summary = "Retry re-debits the rate limiter, so one turn costs each participant a token per attempt"
+guard = "test_one_turn_debits_each_user_once_however_many_attempts"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if user_id in charged:\n                allowed_user_ids.add(user_id)\n                continue\n\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB019E"
+bug = "DAB-019"
+summary = "Rate-limit refusals stay on the receipt, so a retry re-notifies a user who was already told"
+guard = "test_one_turn_debits_each_user_once_however_many_attempts"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                owed[:] = [\n                    message for message in owed if message.author.id != user_id\n                ]\n"
+replace = ""

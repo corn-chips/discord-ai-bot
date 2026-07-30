@@ -90,7 +90,7 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 11 | DAB-197 | PDF PNG encode/decode round-trip | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | — | [DAB-197](analysis-tickets/DAB-197.md) |
 | 12 | DAB-077 | Startup eligibility reconcile full-scans on every boot | IMPROVEMENT | 1938 ms -> 0.034 ms (57,000x) | S | **8.0** | DAB-083 | [DAB-077](analysis-tickets/DAB-077.md) |
 | 13 | DAB-165 | A `%` in any log extra silently drops the record | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
-| 14 | DAB-019 | Live batch silently destroyed when `process_messages` raises | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
+| 14 | DAB-019 | **DONE** (Phase 3b) — Live batch silently destroyed when `process_messages` raises. Landed with an unanswered-messages receipt, **not** the ticket's requeue-the-popped-batch expression, which duplicates the attachment suffix, re-debits the rate limiter and re-bills Gemini. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 8 | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
 | 15 | DAB-198 | PDF resource bomb: 3.6 KB upload -> 107 s CPU, 1.63 GB RSS | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
 | 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `b5851ab` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | Unguarded `change_presence()` sits before `setup_commands` | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |

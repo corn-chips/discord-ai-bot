@@ -222,6 +222,55 @@ Two further corrections for whoever lands `DAB-073`:
   `/pins` (`personalization.py:191`) is the only delete UI, so an unconditional limit makes older
   pins both invisible and undeletable.
 
+## 8. `DAB-019`'s prescribed requeue expression is wrong three ways, and its test-file premise is false
+
+**Claimed**, in `analysis-tickets/DAB-019.md` line 110, as the fix to apply:
+
+```python
+self.pending_messages[cid] = pending_messages + self.pending_messages.get(cid, [])
+```
+
+**Refuted.** Requeuing the *popped* list rather than the messages still owed an answer is wrong on
+three independent counts, each demonstrated by running the design in a scratch copy:
+
+1. **It duplicates the attachment suffix.** `process_messages` already requeues the post-attachment
+   suffix itself (`live_message_coordinator.py:216-220`) *before* the failure window. Requeuing the
+   popped list queues that suffix a second time — and because the `finally` clause respawns the
+   worker, which re-splits, the duplication compounds each pass. Measured on a three-message batch
+   `[A, B(attachment), C]` with a failing rate limiter: `requeued ids: [1, 2, 3, 3, 3, 3, 3, 3, 3, 3]`.
+2. **It re-debits the rate limiter.** The popped list contains every author's messages, so a retry
+   re-runs `check_and_record` for users the limiter already cleared. One user, one message, a
+   limiter allowing one request: `charges: [2, 2]`, and the retry is then *refused* — so a transient
+   Gemini fault is reported to the user as "Text rate limit reached" and the message is dropped
+   anyway. It also re-notifies users who were already told "limited".
+3. **It re-bills Gemini.** The popped list is still requeued when the failure lands *after*
+   `generate_response` returned — during `record_token_usage` (a SQLite write, whose ordinary
+   failure mode is "database is locked") or `send_response`. Measured: **3 paid generations for one
+   inbound message.** This is DAB-001 reproduced in a second file.
+
+**Consequence.** What landed is an explicit receipt. `_answer_batch` maintains an `owed` list — the
+messages this call still has to answer — narrowing it whenever the batch narrows and clearing it
+the moment a model call has been *made*. The worker requeues `owed`, never the popped list. A model
+call that raises produced nothing and is retryable; one that returns has been billed and is not.
+A companion `charged` set means one turn debits each participant once however many attempts it
+takes. `M-DAB019B` reintroduces the ticket's expression verbatim and is killed by
+`test_the_attachment_suffix_is_not_duplicated_by_a_retry`; `M-DAB019C` and `M-DAB019D` pin the
+other two.
+
+Two smaller corrections to the same ticket:
+
+- It says the module "has no test file today" and asks for a new one. There has been a
+  `LiveMessageCoordinatorTest` in `tests/test_discord_orchestration.py:33` all along — three tests,
+  covering the attachment split, `close()` and the rate-limit filter. A separate file for the
+  durability contract is still the right call, but the premise was wrong.
+- Its acceptance criterion "the popped batch is re-queued **under the lock**, ahead of anything
+  enqueued while it was in flight" is right about the ordering and wrong about the subject. Requeue
+  the unanswered subset, not the batch.
+
+The general lesson repeats items 1, 6 and 7: the corpus's *fixes* are inferred from reading, exactly
+like its dependency edges, and a prescribed one-liner in a ticket deserves the same execution check
+as a prescribed ordering.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

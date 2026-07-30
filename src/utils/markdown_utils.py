@@ -7,6 +7,7 @@ intelligent message splitting while preserving formatting integrity.
 """
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple, Dict, Any
@@ -303,21 +304,84 @@ class MarkdownParser:
         Returns:
             True if the position is safe for splitting, False otherwise
         """
-        # Don't split inside code blocks
-        code_boundaries = self.find_code_block_boundaries(text)
-        for start, end, _ in code_boundaries:
-            if start < position < end:
-                return False
+        return self.build_split_index(text).is_safe_split_point(position)
+    
+    def build_split_index(self, text: str) -> "SplitIndex":
+        """
+        Build a reusable index of the spans that make a position unsafe to split.
         
-        # Don't split in the middle of inline formatting
-        blocks = self.parse_markdown(text)
-        for block in blocks:
-            if block.type in [BlockType.INLINE_CODE, BlockType.BOLD, BlockType.ITALIC, 
-                             BlockType.STRIKETHROUGH, BlockType.SPOILER, BlockType.LINK]:
-                if block.start_pos < position < block.end_pos:
-                    return False
+        Callers that test many candidate positions against the *same* text should
+        build this once and query it, rather than calling `is_safe_split_point`
+        in a loop. See `SplitIndex` for why that matters.
         
-        return True
+        Args:
+            text: The text to index
+            
+        Returns:
+            A SplitIndex answering safe-split queries in O(log n)
+        """
+        return SplitIndex(self, text)
+
+
+#: Inline spans that must not be cut through. Kept next to SplitIndex because the
+#: two have to agree: this is the same set is_safe_split_point used to test inline.
+_INLINE_UNSAFE_TYPES = frozenset({
+    BlockType.INLINE_CODE,
+    BlockType.BOLD,
+    BlockType.ITALIC,
+    BlockType.STRIKETHROUGH,
+    BlockType.SPOILER,
+    BlockType.LINK,
+})
+
+
+class SplitIndex:
+    """One markdown parse of a text; O(log n) safe-split-point queries.
+    
+    `is_safe_split_point(text, p)` is False exactly when some code block or
+    inline-formatting span satisfies `start < p < end`. Answering that by
+    re-scanning the whole text per candidate is what made splitting quadratic:
+    the splitter probes many candidate positions per part, and each probe ran a
+    full regex scan plus a full markdown parse of the entire message. A 139 KB
+    response took 30.1 s of blocked event loop.
+    
+    Sorting the spans by start and carrying a running maximum of `end` reduces
+    each query to one bisect. Building the index costs a single parse.
+    
+    The running maximum is what makes it correct for *nested and overlapping*
+    spans: a span starting earlier may still cover `position` even though a
+    later-starting span does not, so comparing against the largest `end` seen up
+    to that point -- rather than the immediately preceding span's `end` -- is
+    required.
+    """
+    
+    __slots__ = ("code_boundaries", "_starts", "_prefix_max_end")
+    
+    def __init__(self, parser: "MarkdownParser", text: str):
+        self.code_boundaries: List[Tuple[int, int, Optional[str]]] = \
+            parser.find_code_block_boundaries(text)
+        
+        intervals = [(start, end) for start, end, _ in self.code_boundaries]
+        intervals.extend(
+            (block.start_pos, block.end_pos)
+            for block in parser.parse_markdown(text)
+            if block.type in _INLINE_UNSAFE_TYPES
+        )
+        intervals.sort()
+        
+        self._starts = [start for start, _ in intervals]
+        prefix_max_end: List[int] = []
+        running = -1
+        for _, end in intervals:
+            if end > running:
+                running = end
+            prefix_max_end.append(running)
+        self._prefix_max_end = prefix_max_end
+    
+    def is_safe_split_point(self, position: int) -> bool:
+        """True if `position` does not fall strictly inside any unsafe span."""
+        index = bisect_left(self._starts, position)
+        return index == 0 or self._prefix_max_end[index - 1] <= position
 
 
 def detect_markdown_elements(text: str) -> List[MarkdownBlock]:

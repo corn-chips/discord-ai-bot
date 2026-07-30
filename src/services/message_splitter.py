@@ -178,9 +178,14 @@ class MessageSplitter:
         split_points = [0]  # Always start at the beginning
         current_pos = 0
         
+        # One markdown parse for the whole message. Previously every candidate
+        # split point re-scanned the entire content, which made splitting
+        # quadratic: 30.1 s of blocked event loop on a 139 KB response.
+        index = self.markdown_parser.build_split_index(content)
+        
         while current_pos < len(content):
             # Find the next split point
-            next_split = self._find_next_split_point(content, current_pos)
+            next_split = self._find_next_split_point(content, current_pos, index)
             
             if next_split > current_pos:
                 split_points.append(next_split)
@@ -200,7 +205,7 @@ class MessageSplitter:
         
         return split_points
     
-    def _find_next_split_point(self, content: str, start_pos: int) -> int:
+    def _find_next_split_point(self, content: str, start_pos: int, index=None) -> int:
         """
         Find the next optimal split point from the given position.
         
@@ -211,6 +216,9 @@ class MessageSplitter:
         Returns:
             The position of the next split point
         """
+        if index is None:
+            index = self.markdown_parser.build_split_index(content)
+        
         max_end = min(start_pos + self.effective_max_length, len(content))
         
         if max_end >= len(content):
@@ -234,14 +242,13 @@ class MessageSplitter:
             # Try breaks from last to first, preferring those that create substantial parts
             for match in reversed(paragraph_breaks):
                 split_pos = start_pos + match.end()
-                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                if has_enough_content(split_pos) and index.is_safe_split_point(split_pos):
                     return split_pos
         
         # 2. End of code blocks
-        code_boundaries = self.markdown_parser.find_code_block_boundaries(content)
-        for start, end, _ in code_boundaries:
+        for start, end, _ in index.code_boundaries:
             if start_pos < end <= max_end:
-                if has_enough_content(end) and self.markdown_parser.is_safe_split_point(content, end):
+                if has_enough_content(end) and index.is_safe_split_point(end):
                     return end
         
         # 3. Single line breaks
@@ -250,7 +257,7 @@ class MessageSplitter:
             # Prefer line breaks that are not inside code blocks
             for match in reversed(line_breaks):
                 split_pos = start_pos + match.end()
-                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                if has_enough_content(split_pos) and index.is_safe_split_point(split_pos):
                     return split_pos
         
         # 4. Sentence endings
@@ -258,7 +265,7 @@ class MessageSplitter:
         if sentence_endings:
             for match in reversed(sentence_endings):
                 split_pos = start_pos + match.end()
-                if has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                if has_enough_content(split_pos) and index.is_safe_split_point(split_pos):
                     return split_pos
         
         # 5. Word boundaries
@@ -267,7 +274,7 @@ class MessageSplitter:
             # Take the last word boundary that's safe and makes progress
             for match in reversed(word_boundaries):
                 split_pos = start_pos + match.start()
-                if split_pos > start_pos and has_enough_content(split_pos) and self.markdown_parser.is_safe_split_point(content, split_pos):
+                if split_pos > start_pos and has_enough_content(split_pos) and index.is_safe_split_point(split_pos):
                     return split_pos
         
         # 6. Fallback: force split at character boundary (avoid breaking UTF-8)

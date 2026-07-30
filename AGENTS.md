@@ -47,7 +47,7 @@ Work on the `dev` branch â€” do not target `main`.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 15 test files hold 31 `TestCase` classes, all named `<Subject>Test`).
+ the 18 test files hold 39 `TestCase` classes, all named `<Subject>Test`).
 - `python -m compileall -q main.py src scripts tests` â€” syntax check without booting.
 - `python scripts/mutation_check.py` â€” reintroduces each fixed bug in a scratch copy and
  reports whether the suite notices. ~7 s with `--jobs 5`; exit 0 only when every mutant
@@ -212,11 +212,12 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 150 in 16 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
-`tests/test_on_message_flow.py`, and Phase 1 added `tests/test_context_fallback.py`).
+now 165 in 18 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+`tests/test_on_message_flow.py`, and Phase 1 added `tests/test_context_fallback.py`,
+`tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
-The `file:line` evidence in those four documents was measured at `c83f740`. Two commits have
+The `file:line` evidence in those four documents was measured at `c83f740`. Several commits have
 since landed â€” `9894bcc` (dead-code removal) and `4baa29c` (five dependencies dropped) â€”
 shifting many of those offsets (for example `src/bot/commands.py:91`, cited in several tickets,
 is past the end of an 80-line file). Trust the finding and re-locate the symbol; do not trust
@@ -258,7 +259,7 @@ the line number.
  Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
 
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (150 stdlib `unittest` tests across 16 files). It now carries a staleness banner listing its
+ (165 stdlib `unittest` tests across 18 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 
 

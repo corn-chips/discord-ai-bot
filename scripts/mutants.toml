@@ -124,3 +124,14 @@ expect = "killed"
 [[mutant.edit]]
 find = "                            if getattr(part, 'thought', False):\n                                continue\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB115"
+bug = "DAB-115"
+summary = "Split index rebuilt per candidate instead of once per message, restoring the quadratic whole-text rescan (30.1 s at 139 KB)"
+guard = "test_whole_text_scans_do_not_grow_with_the_number_of_parts"
+file = "src/services/message_splitter.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        index = self.markdown_parser.build_split_index(content)\n        \n        while current_pos < len(content):\n"
+replace = "        index = None\n        \n        while current_pos < len(content):\n"

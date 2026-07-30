@@ -194,6 +194,9 @@ def _parse_secret_reporting_values(
         "dev_mode_enabled": get_config_value(config_data, "bot", "dev_mode", False),
         "token_db_path": os.getenv("TOKEN_DB_PATH")
         or get_config_value(config_data, "bot", "token_db_path", "data/token_usage.db"),
+        "sqlite_busy_timeout_ms": get_config_value(
+            config_data, "bot", "sqlite_busy_timeout_ms", 5000
+        ),
         "report_web_enabled": get_config_value(
             config_data, "reports", "web_enabled", True
         ),
@@ -488,6 +491,9 @@ def _validate_core_values(config: Any) -> List[str]:
         errors.append("DISCORD_BOT_TOKEN is required (set in .env)")
     if not config.gemini_api_key:
         errors.append("GEMINI_API_KEY is required (set in .env)")
+
+    if config.sqlite_busy_timeout_ms <= 0:
+        errors.append("bot.sqlite_busy_timeout_ms must be positive")
 
     if config.max_context_messages <= 0:
         errors.append("context.max_messages must be positive")

@@ -32,6 +32,7 @@ from ..services.user_experience_service import UserExperienceService
 from ..services.token_tracker import TokenTracker
 from ..services.content_renderer import ContentRenderer
 from ..services.rate_limiter import TextRateLimiter
+from ..services.sqlite_utils import configure_busy_timeout
 from ..services.report_service import ReportService
 from ..services.report_web_server import ReportWebServer
 from ..services.pin_service import PinService
@@ -328,6 +329,11 @@ class DiscordBot(discord.Client):
         )
         
         self.config = config
+        # Before any service opens a connection. sqlite_connection is the only
+        # sqlite3.connect site under src/, and it holds no config object, so the
+        # configured lock-wait budget is applied to the seam once here rather
+        # than threaded through seven constructors.
+        configure_busy_timeout(config.sqlite_busy_timeout_ms)
         self._media_extraction = _get_or_create_media_extraction(self)
         self.error_manager = ErrorManager(config)
         self.performance_logger = PerformanceLogger("discord_bot")

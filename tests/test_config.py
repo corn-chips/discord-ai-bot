@@ -94,6 +94,10 @@ class BotConfigTest(unittest.TestCase):
         self.assertEqual(config.gemini_api_key, "gemini-secret")
         self.assertEqual(config.nano_banana_api_key, "")
         self.assertEqual(config.token_db_path, "yaml.db")
+        # DAB-095: 5000 ms was already in force as Python's sqlite3 default.
+        # The point of the setting is that it is now stated and tunable, so the
+        # default must not drift silently.
+        self.assertEqual(config.sqlite_busy_timeout_ms, 5000)
         self.assertEqual(config.log_file, "yaml.log")
         self.assertFalse(config.dev_mode_enabled)
         self.assertFalse(config.report_web_enabled)

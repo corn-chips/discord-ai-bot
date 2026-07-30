@@ -598,3 +598,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                if not legacy_tables_found:\n"
 replace = "                if False:\n"
+
+[[mutant]]
+id = "M-DAB095"
+bug = "DAB-095"
+summary = "Connection seam stops passing the configured lock-wait budget, so the timeout is inherited and unstated again"
+guard = "test_the_timeout_is_readable_off_the_connection"
+file = "src/services/sqlite_utils.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    connection = sqlite3.connect(db_path, timeout=_busy_timeout_seconds)\n"
+replace = "    connection = sqlite3.connect(db_path)\n"
+
+[[mutant]]
+id = "M-DAB095B"
+bug = "DAB-095"
+summary = "The configured busy timeout is ignored and the sqlite3 default is used, so the setting is decorative"
+guard = "test_a_short_budget_still_fails_fast_rather_than_hanging"
+file = "src/services/sqlite_utils.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    if milliseconds > 0:\n        _busy_timeout_seconds = milliseconds / 1000.0\n"
+replace = "    return\n"

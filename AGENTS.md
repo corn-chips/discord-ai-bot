@@ -171,6 +171,11 @@ suffix, re-debits the limiter and re-bills Gemini.
 - All access goes through `sqlite_connection` / `sqlite_transaction` in
  `src/services/sqlite_utils.py` â€” the only `sqlite3.connect` site under `src/`. Don't add
  another.
+ It sets the lock-wait budget from `bot.sqlite_busy_timeout_ms` (default 5000 ms, applied once by
+ `DiscordBot.__init__` via `configure_busy_timeout`). It deliberately does **not** set
+ `journal_mode=WAL`: on a per-call-connection architecture WAL costs +0.34 ms on every call and
+ made no difference to the DAB-065 trigger in any journal mode. Reopen that when connections are
+ pooled — see `docs/ANALYSIS_CORRECTIONS.md` item 14.
 - **No migration framework and no `PRAGMA user_version`.** Each service creates its own schema
  in `_ensure_table` / `_ensure_schema` at construction.
  - New table: add `CREATE TABLE IF NOT EXISTS` to the owning service.
@@ -231,13 +236,13 @@ most of what a fresh sweep would rediscover.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 257 in 25 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
+now 265 in 26 files** (`b5851ab` added `tests/test_repo_hygiene.py`, `6f1dc79` added
 `tests/test_on_message_flow.py`, Phase 1 added `tests/test_context_fallback.py`,
 `tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`, Phases 2-3
 added `tests/test_command_cooldowns.py`, `tests/test_pin_limits.py`,
 `tests/test_config_command_gate.py` and `tests/test_startup_integrity.py`, and Phase 3b added
 `tests/test_live_message_coordinator.py` and `tests/test_logging_config.py`, and Phase 4
-added `tests/test_rag_query_plans.py`).
+added `tests/test_rag_query_plans.py` and `tests/test_sqlite_utils.py`).
 Some tickets deliberately change the count on top of that; each says so.
 
 The `file:line` evidence in those four documents was measured at `c83f740`. Several commits have

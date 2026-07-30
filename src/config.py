@@ -31,6 +31,7 @@ class BotConfig:
     # === Bot ===
     dev_mode_enabled: bool = False
     token_db_path: str = "data/token_usage.db"
+    sqlite_busy_timeout_ms: int = 5000
 
     # === Reports ===
     report_web_enabled: bool = True

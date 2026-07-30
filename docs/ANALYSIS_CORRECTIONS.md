@@ -464,6 +464,57 @@ the service's own `ORDER BY`. The test now captures the executed statement with
 `Connection.set_trace_callback` and explains that. A plan assertion against a copy of the query is
 a proxy, not an end state.
 
+## 14. `DAB-095`'s WAL half is deferred, and its headline payoff needs a precondition the ticket omits
+
+**Claimed**, in `analysis-tickets/DAB-095.md`: set `journal_mode=WAL` plus an explicit busy timeout;
+payoff "a contended read **fails after 5.01 s -> succeeds in 3.3 ms**", and the change **blocks**
+`DAB-065` and `DAB-096` because "the pragmas remove the contention".
+
+**Three corrections, all measured.**
+
+**a. WAL does nothing for `DAB-065`.** The tombstone is produced by a failed *write*. Driving the
+real `upsert_message` under a six-second `BEGIN EXCLUSIVE`:
+
+| journal | busy timeout | `upsert_message` | elapsed |
+|---|---|---|---|
+| delete | 5000 ms | `False` | 5009 ms |
+| delete | 15000 ms | `True` | 6036 ms |
+| wal | 5000 ms | `False` | 5007 ms |
+| wal | 15000 ms | `True` | 6037 ms |
+
+WAL is irrelevant in all four cells; the timeout is the entire effect, and it only moves the cliff.
+The edge is soft, and `DAB-065`'s own risk note already said the semantics fix is required
+regardless.
+
+**b. The headline read figure reproduces only against an EXCLUSIVE lock.** Against `BEGIN
+IMMEDIATE` a contended read succeeds in **0.1 ms in both journal modes**; against `BEGIN EXCLUSIVE`
+it fails at **5005.9 ms** on a rollback journal and succeeds in **0.1 ms** on WAL. The ticket's
+severity line and its own "honest counter-evidence" paragraph contradict each other, and both are
+right — under different lock modes. Quote the lock mode with the number.
+
+**c. WAL costs more than it buys *here*, and the ticket says so in one line before recommending it
+anyway.** On this per-call-connection architecture, connect+query+close measures **0.230 ms today,
+0.573 ms with the pragmas** — and a database already in WAL mode costs the same with the pragmas
+removed, so the cost is WAL's *connect*, paid on every SQLite call the bot makes, including
+`get_live_enabled` on every inbound message.
+
+**What landed:** the busy timeout only, as `bot.sqlite_busy_timeout_ms`, defaulting to **5000 ms** —
+the value Python's `sqlite3.connect` was already applying. That is deliberate and is the actual
+defect the ticket describes: *"there is a busy timeout... the defect is that it is not a stated
+contract and cannot be tuned."* Raising it to the ticket's 15000/30000 was rejected because it
+trades a failed write for a proportionally longer **event-loop stall** — most SQLite calls still run
+on the loop (`DAB-096`) — and with `DAB-065` fixed a failed write is now benign.
+
+**Reopen condition for WAL: connection pooling or long-lived connections.** That is when the
+per-call connect disappears and WAL's reader-concurrency win (finding b) arrives free.
+`test_the_journal_mode_is_still_the_default` pins the deferral so re-adding it is a deliberate act.
+
+One smaller correction, against my own first attempt rather than the ticket: an explicit
+`PRAGMA busy_timeout` was written alongside `connect(timeout=)` on the grounds that only the pragma
+can be read back. That is false — CPython's `sqlite3` turns `timeout=` into exactly that pragma
+(`connect(timeout=1.234)` reads back `1234`). The line changed nothing observable and its mutant
+survived, which is the correct verdict on a line that restates the one above it. Removed.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

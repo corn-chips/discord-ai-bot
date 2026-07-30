@@ -9,6 +9,12 @@
 bot:
   dev_mode: false
   token_db_path: "data/token_usage.db"
+  # How long a SQLite statement waits for a lock before giving up.
+  # 5000 ms was already in force as Python's sqlite3 default; it is set
+  # explicitly here so it is a stated contract that can be tuned.
+  # Raising it trades a failed write for a longer event-loop stall,
+  # because most SQLite calls still run on the loop (DAB-096).
+  sqlite_busy_timeout_ms: 5000
 
 # --- Report Tracking ---
 reports:

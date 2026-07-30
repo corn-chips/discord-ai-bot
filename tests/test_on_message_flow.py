@@ -125,9 +125,19 @@ class OnMessageGateTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        with self.assertLogs("src.bot.discord_bot", level=logging.DEBUG):
+        # Assert the specific record, not merely that *something* was logged:
+        # on_message emits other DEBUG lines on this logger, so a bare
+        # assertLogs passes even if the handler is gutted to `pass`.
+        with self.assertLogs("src.bot.discord_bot", level=logging.DEBUG) as captured:
             await DiscordBot.on_message(bot, make_message())
 
+        self.assertTrue(
+            any(
+                "Failed to index incoming message" in line and "index down" in line
+                for line in captured.output
+            ),
+            f"indexing failure was not logged with its cause: {captured.output}",
+        )
         bot._process_message_with_context.assert_awaited_once()
 
     async def test_embeddings_are_scheduled_only_when_a_row_was_indexed(self):

@@ -68,10 +68,14 @@ class RepoHygieneTest(unittest.TestCase):
                     f"{path} is not gitignored; `git add -A` would commit it",
                 )
 
+        # --no-index is load-bearing. `git check-ignore` normally short-circuits
+        # on tracked paths and reports them un-ignored whatever the rules say, so
+        # without it this loop passes even for a `.gitignore` that swallows the
+        # whole repository.
         for path in MUST_STAY_TRACKABLE:
             with self.subTest(path=path):
                 self.assertNotEqual(
-                    _git("check-ignore", "-q", path).returncode,
+                    _git("check-ignore", "--no-index", "-q", path).returncode,
                     0,
                     f"{path} became ignored; an ignore rule is too broad",
                 )

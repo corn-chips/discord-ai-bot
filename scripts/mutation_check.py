@@ -46,6 +46,17 @@ COPY_ROOTS = ("src", "tests", "scripts", "main.py", "config.yaml")
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".mypy_cache", ".pytest_cache")
 FAILURE_LINE = re.compile(r"^(?:FAIL|ERROR): (\S+)", re.MULTILINE)
 
+# Catalogue ``expect`` value -> the status that satisfies it. A lookup rather
+# than string surgery: the previous form derived the target by stripping the
+# "known-" prefix and upper-casing, which turned "known-survivor" into
+# "SURVIVOR" and could never equal the "SURVIVED" that ``status`` emits, so the
+# documented escape hatch was unsatisfiable.
+EXPECTATIONS = {
+    "killed": "KILLED",
+    "survived": "SURVIVED",
+    "known-survivor": "SURVIVED",
+}
+
 
 @dataclass
 class Mutant:
@@ -73,12 +84,12 @@ class Result:
     def ok(self) -> bool:
         if self.error:
             return False
-        return self.status == self.mutant.expect.upper().replace("KNOWN-", "")
+        return self.status == EXPECTATIONS[self.mutant.expect.lower()]
 
 
 def load_catalogue(path: Path) -> list[Mutant]:
     data = tomllib.loads(path.read_text())
-    return [
+    mutants = [
         Mutant(
             id=entry["id"],
             bug=entry.get("bug", "?"),
@@ -90,6 +101,15 @@ def load_catalogue(path: Path) -> list[Mutant]:
         )
         for entry in data.get("mutant", [])
     ]
+    # Reject an unknown expectation up front. Left to the comparison it would
+    # silently never match, and the mutant would look permanently broken.
+    for mutant in mutants:
+        if mutant.expect.lower() not in EXPECTATIONS:
+            raise ValueError(
+                f"{mutant.id}: unknown expect={mutant.expect!r}; "
+                f"choose one of {sorted(EXPECTATIONS)}"
+            )
+    return mutants
 
 
 def stage_tree(destination: Path) -> None:
@@ -130,16 +150,16 @@ def run_suite(tree: Path) -> subprocess.CompletedProcess:
     )
 
 
-def measure_baseline() -> tuple[bool, set[str]]:
+def measure_baseline() -> tuple[bool, frozenset[str]]:
     """Run the suite unmutated. Mutation scores are meaningless on a red suite."""
     with tempfile.TemporaryDirectory(prefix="mutate-baseline-") as scratch:
         tree = Path(scratch)
         stage_tree(tree)
         completed = run_suite(tree)
-    return completed.returncode == 0, set(FAILURE_LINE.findall(completed.stderr))
+    return completed.returncode == 0, frozenset(FAILURE_LINE.findall(completed.stderr))
 
 
-def evaluate(mutant: Mutant, baseline_failures: set[str] = frozenset()) -> Result:
+def evaluate(mutant: Mutant, baseline_failures: frozenset[str] = frozenset()) -> Result:
     with tempfile.TemporaryDirectory(prefix=f"mutate-{mutant.id}-") as scratch:
         tree = Path(scratch)
         try:
@@ -152,6 +172,23 @@ def evaluate(mutant: Mutant, baseline_failures: set[str] = frozenset()) -> Resul
     failures = set(FAILURE_LINE.findall(completed.stderr))
     # A test that already fails without the mutant proves nothing about it.
     killers = sorted(failures - set(baseline_failures))
+
+    # Trust the exit status over the parsed output. A mutant that stops the
+    # suite from running at all -- SyntaxError, ImportError, a collection crash
+    # -- produces no "FAIL:"/"ERROR:" lines, so scoring on parsed failures alone
+    # would report the strongest possible signal as SURVIVED.
+    if completed.returncode != 0 and not killers:
+        return Result(
+            mutant,
+            survived=False,
+            killers=killers,
+            error=(
+                f"suite exited {completed.returncode} with no parseable failure line; "
+                "the mutant probably broke collection rather than a test. "
+                f"stderr tail: {completed.stderr.strip()[-300:]}"
+            ),
+        )
+
     survived = not killers
     return Result(mutant, survived=survived, killers=killers)
 

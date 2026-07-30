@@ -642,3 +642,29 @@ expect = "killed"
 [[mutant.edit]]
 find = "        except Exception as exc:\n            logger.warning(\n                \"Could not re-index edited message %s; leaving its existing index \"\n                \"row untouched rather than reading a write failure as a deletion: %s\",\n                after.id,\n                exc,\n                exc_info=True,\n            )\n            return\n"
 replace = "        except Exception as exc:\n            logger.warning(\"edit failed: %s\", exc)\n            await self.message_index_service.mark_deleted_async(after.id)\n            return\n"
+
+[[mutant]]
+id = "M-DAB066"
+bug = "DAB-066"
+summary = "A migration that silently dropped every row records itself as complete, gating every later boot so it is never retried"
+guard = "test_a_short_copy_is_not_recorded_as_a_completed_migration"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if shortfalls:\n"
+replace = "                if False:\n"
+
+[[mutant]]
+id = "M-DAB066B"
+bug = "DAB-066"
+# The tempting stronger fix, and the wrong one: MessageIndexService is
+# constructed unguarded in DiscordBot.__init__ and schema drift is
+# deterministic, so raising turns silent data loss into a permanent boot loop
+# (DAB-067).
+summary = "Refuse a short migration by raising, which aborts DiscordBot.__init__ on every boot forever"
+guard = "test_a_short_copy_does_not_abort_startup"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                        \"; \".join(shortfalls),\n                    )\n                    return\n"
+replace = "                        \"; \".join(shortfalls),\n                    )\n                    raise RuntimeError(\"; \".join(shortfalls))\n"

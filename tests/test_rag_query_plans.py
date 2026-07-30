@@ -304,3 +304,137 @@ class MigrationLedgerTest(unittest.TestCase):
                 row[0] for row in conn.execute("SELECT name FROM rag_migrations")
             ]
         self.assertEqual(recorded, ["legacy_shared_rag_v1"])
+
+
+class LegacyMigrationTest(unittest.TestCase):
+    """DAB-066: a short migration recorded itself as a success.
+
+    The one-time copy of the shared `token_usage.db` RAG tables into
+    `message_rag.db` uses `INSERT OR IGNORE`, which extends conflict resolution
+    to NOT NULL violations. A legacy schema missing a column the target declares
+    NOT NULL without a default therefore drops **every** row, silently -- and
+    the ledger row was then written unconditionally, gating every later boot, so
+    the migration was never retried. 5,000 rows in, 0 rows out, "Copied legacy
+    message RAG data" in the log.
+
+    The precondition is not reachable from this repository's history: the
+    `message_index` NOT NULL column set is byte-identical across all nine
+    revisions that ever touched the file. This is a latent-trap guard against
+    the next schema change, not a live bug fix, and it is cheap.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.db_path = str(Path(self._dir.name) / "rag.db")
+        self.legacy_path = Path(self._dir.name) / "legacy.db"
+
+    def _drifted_legacy(self, rows=25):
+        """A legacy message_index with no `content_hash` (NOT NULL, no default)."""
+        with sqlite3.connect(self.legacy_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE message_index (
+                    message_id INTEGER PRIMARY KEY,
+                    guild_id INTEGER,
+                    channel_id INTEGER NOT NULL,
+                    author_id INTEGER,
+                    author_name TEXT NOT NULL,
+                    is_bot INTEGER NOT NULL DEFAULT 0,
+                    reply_to_message_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    indexed_at TEXT NOT NULL,
+                    content_text TEXT NOT NULL,
+                    attachment_summary TEXT NOT NULL DEFAULT '',
+                    hidden INTEGER NOT NULL DEFAULT 0,
+                    deleted_at TEXT
+                )
+                """
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            conn.executemany(
+                "INSERT INTO message_index VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (900 + i, 10, 20, 7, "Ada", 0, None, now, now,
+                     f"legacy message {i}", "", 0, None)
+                    for i in range(rows)
+                ],
+            )
+            conn.commit()
+
+    def test_a_short_copy_is_not_recorded_as_a_completed_migration(self):
+        self._drifted_legacy()
+
+        service = MessageIndexService(
+            self.db_path,
+            embedding_model="test-embedding",
+            legacy_db_path=str(self.legacy_path),
+        )
+
+        with sqlite3.connect(self.db_path) as conn:
+            recorded = conn.execute("SELECT name FROM rag_migrations").fetchall()
+        self.assertEqual(
+            recorded,
+            [],
+            "a migration that dropped every row recorded itself as complete",
+        )
+        # And the operator can still fix the cause and retry, which is the whole
+        # point of not writing the ledger row.
+        self.assertEqual(service.get_status()["messages"], 0)
+
+    def test_a_short_copy_does_not_abort_startup(self):
+        # MessageIndexService is constructed unguarded in DiscordBot.__init__,
+        # and schema drift is deterministic rather than transient, so raising
+        # here would abort every boot forever (DAB-067). Degrading to "no legacy
+        # data" is strictly better than degrading to "no bot".
+        self._drifted_legacy()
+
+        service = MessageIndexService(
+            self.db_path,
+            embedding_model="test-embedding",
+            legacy_db_path=str(self.legacy_path),
+        )
+
+        self.assertIsNotNone(service)
+        service.upsert_message(
+            message_id=1,
+            guild_id=10,
+            channel_id=20,
+            author_id=7,
+            author_name="Ada",
+            is_bot=False,
+            reply_to_message_id=None,
+            created_at=datetime.now(timezone.utc),
+            content_text="the bot still works after a refused migration",
+        )
+        self.assertEqual(service.get_status()["messages"], 1)
+
+    def test_a_complete_copy_is_still_recorded_and_not_repeated(self):
+        # The control: an intact legacy schema must migrate and be recorded, or
+        # the guard above has simply broken migration.
+        legacy_service = MessageIndexService(
+            str(self.legacy_path), embedding_model="test-embedding"
+        )
+        for index in range(3):
+            legacy_service.upsert_message(
+                message_id=800 + index,
+                guild_id=10,
+                channel_id=20,
+                author_id=7,
+                author_name="Ada",
+                is_bot=False,
+                reply_to_message_id=None,
+                created_at=datetime.now(timezone.utc),
+                content_text=f"a legacy message {index} worth carrying across",
+            )
+
+        migrated = MessageIndexService(
+            self.db_path,
+            embedding_model="test-embedding",
+            legacy_db_path=str(self.legacy_path),
+        )
+
+        self.assertEqual(migrated.get_status()["messages"], 3)
+        with sqlite3.connect(self.db_path) as conn:
+            recorded = [row[0] for row in conn.execute("SELECT name FROM rag_migrations")]
+        self.assertEqual(recorded, ["legacy_shared_rag_v1"])

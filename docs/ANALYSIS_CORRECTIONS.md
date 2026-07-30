@@ -561,6 +561,58 @@ absorbs and logs. With the tombstone gone, a failed write is benign, so a retry 
 optimisation rather than a correctness fix. The `hidden`/`deleted_at` overloading in `mark_deleted`
 is likewise still there; it is now inert for this defect but remains a latent trap.
 
+## 16. `DAB-066` is a latent-trap guard, and its prescribed fix would have been worse than the bug
+
+**Precondition verified unreachable, by execution rather than by reading.** The `message_index`
+NOT NULL column set is byte-identical (md5 `e98a0ad7`) across **all nine** revisions that have ever
+touched the file — the corpus checked seven and found the same. Six of those nine columns have no
+default. Nothing in this history can produce the drift the defect needs, so the S1 rating is
+insurance against the next schema change, not a description of a live fault.
+
+**The prescribed fix converts silent data loss into a permanent boot loop.** The acceptance
+criteria ask for `MigrationError` and "refuse to run", with the ledger left unwritten so it
+"retries next boot". But `_migrate_legacy_database` re-raises, `MessageIndexService(...)` is
+constructed **unguarded** at `discord_bot.py`, and `legacy_db_path=config.token_db_path` is always
+set — so the raise aborts `DiscordBot.__init__`. Schema drift is deterministic, not transient, so
+it would abort **every** boot, forever, with no operator escape. That is `DAB-067`, which the
+ticket never mentions. Today's behaviour at least starts the bot.
+
+**What landed** counts rows before and after each table copy, and on a shortfall logs at ERROR,
+leaves the ledger row unwritten, and **returns**. The migration is retried on the next start once
+the cause is fixed; the bot boots either way. `M-DAB066B` reintroduces the raise and is killed by a
+test that asserts the service is still usable afterwards.
+
+**Not taken:** the declared column map from the `I2-03` design. `message_retrieval_events` has an
+AUTOINCREMENT primary key and eight `_ensure_column`-added columns, so a hand-declared map there is
+more brittle than the intersection it replaces, and a NOT NULL-with-default column would newly
+raise where it previously worked. The count assertion closes the "0 rows + ledger written"
+criterion without that risk. `DAB-068` — the sibling pin migration with the opposite bug — is
+**not** fixed and stays open.
+
+## The pattern across the corpus's measured claims
+
+Collected in one place because the individual corrections above make each look like a one-off, and
+it is not one. **This corpus measured prototypes in isolation and inferred dependency edges by
+reading. Both failure modes produce confident, specific, wrong numbers.**
+
+| Claim | As published | Re-measured | What went wrong |
+|---|---|---|---|
+| `DAB-212` ORDER BY rewrite | 1844x (127.666 → 0.069 ms) | **Refuted, and inverted: 111x slower** on the real query once `DAB-078` lands | Benchmarked a query production never issues — the scope argument is a required keyword |
+| `DAB-078` scope index | 1200x channel | **924x**, and the composite it adds beside is better dropped | Prototype used a hand-copied schema and a different corpus shape |
+| `DAB-095` WAL | "5.01 s failure → 3.3 ms" and "removes the contention behind `DAB-065`" | Reproduces **only against `BEGIN EXCLUSIVE`**; **zero** effect on the `DAB-065` trigger in all four lock cells; costs **+0.34 ms per call** here | Measured a read against one lock mode, then generalised to writes; ignored the per-call-connection architecture, which the ticket itself names in one line |
+| `DAB-096` per-call cost | 0.258 ms inline → 0.089 ms offloaded | **0.144 → 0.225 ms** — offloading is *slower* | The published figure was a *pooled* connection vs a per-call one; a plain `to_thread` is a different change |
+| `DAB-077` reconcile | "1938 ms → 0.034 ms (57,000x)" | Ratio is against a no-op; ~25 ms at this deployment's size | Ratio against zero work is unbounded and says nothing |
+| `DAB-128` LaTeX bomb | 2,558 MB peak RSS | **270 MB**, and that input never reaches `savefig` | Memory figure was not reproducible; the mechanism was real |
+| `DAB-065` fix | "add `deleted_at = NULL` to `ON CONFLICT`" | Reintroduces BUG-0004 **and does not restore the message** — `hidden` is set too | Fix inferred from reading one statement, never executed |
+| `DAB-019` fix | requeue the popped batch | Duplicates the attachment suffix, re-debits the limiter, **re-bills Gemini 3x** | Same: a plausible one-liner, never run |
+
+Two rules follow, and they are the ones this file keeps re-deriving:
+
+1. **Benchmark the call path, not the query.** Find the production caller and its arguments first.
+   `DAB-212` and `DAB-095` both failed on this, and so did my own first verification of each.
+2. **A prescribed fix deserves the same execution check as a prescribed ordering.** Four of the
+   eight rows above are fixes, not measurements. Items 4, 6, 8 and 15 are all the same shape.
+
 ## Restated figures
 
 | Claim | As published | Corrected | Why |

@@ -705,6 +705,7 @@ class MessageIndexService:
 
                 conn.execute("ATTACH DATABASE ? AS legacy", (str(legacy_path),))
                 legacy_tables_found = 0
+                shortfalls: list[str] = []
                 for table_name in tables:
                     legacy_exists = conn.execute(
                         "SELECT 1 FROM legacy.sqlite_master WHERE type='table' AND name=?",
@@ -727,10 +728,35 @@ class MessageIndexService:
                     if not common_columns:
                         continue
                     columns_sql = ", ".join(f'"{column}"' for column in common_columns)
+
+                    # Count before and after, and refuse to record success on a
+                    # short copy (DAB-066).
+                    #
+                    # `INSERT OR IGNORE` extends conflict resolution to NOT NULL
+                    # violations, so a legacy schema missing a column this table
+                    # declares NOT NULL without a default drops EVERY row --
+                    # silently, with no error -- and the ledger row below then
+                    # gates every later boot, so it is never retried. Measured
+                    # on the mechanism: 5,000 legacy rows in, 0 rows out, ledger
+                    # written, "Copied legacy message RAG data" logged.
+                    expected = conn.execute(
+                        f'SELECT COUNT(*) FROM legacy."{table_name}"'
+                    ).fetchone()[0]
+                    before = conn.execute(
+                        f'SELECT COUNT(*) FROM main."{table_name}"'
+                    ).fetchone()[0]
                     conn.execute(
                         f'INSERT OR IGNORE INTO main."{table_name}" ({columns_sql}) '
                         f'SELECT {columns_sql} FROM legacy."{table_name}"'
                     )
+                    after_count = conn.execute(
+                        f'SELECT COUNT(*) FROM main."{table_name}"'
+                    ).fetchone()[0]
+                    copied = after_count - before
+                    if copied != expected:
+                        shortfalls.append(
+                            f"{table_name}: expected {expected} rows, copied {copied}"
+                        )
 
                 conn.execute(
                     """
@@ -756,6 +782,30 @@ class MessageIndexService:
                         WHERE hidden = 0 AND deleted_at IS NULL
                         """
                     )
+                if shortfalls:
+                    # Leave the ledger unwritten so a fixed migration can run
+                    # again, and RETURN rather than raise. MessageIndexService
+                    # is constructed unguarded in DiscordBot.__init__, so
+                    # raising here would abort startup -- and because schema
+                    # drift is deterministic, not transient, it would abort
+                    # every startup, forever, with no operator escape (DAB-067).
+                    # Trading silent data loss for a permanent boot loop is not
+                    # an improvement. The transaction still commits what it
+                    # copied, which is a strict superset of today's behaviour;
+                    # what changes is that the migration is not recorded as
+                    # done and the operator is told.
+                    logger.error(
+                        "Legacy RAG migration from %s copied fewer rows than the "
+                        "legacy database holds (%s). The migration is NOT being "
+                        "recorded as complete, so it will be retried on the next "
+                        "start once the cause is fixed. This usually means the "
+                        "legacy schema lacks a column this version declares "
+                        "NOT NULL.",
+                        legacy_path,
+                        "; ".join(shortfalls),
+                    )
+                    return
+
                 if not legacy_tables_found:
                     # A fresh install always has a token_usage.db -- TokenTracker
                     # builds it -- and it has never held RAG tables. Recording

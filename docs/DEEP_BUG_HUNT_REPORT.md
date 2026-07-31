@@ -5,8 +5,8 @@
 > preserved verbatim and unedited. Every status field in it is wrong. Read this banner first.
 >
 > **Banner refreshed after `9894bcc` ("Remove verified dead code from the source tree"),
-> `4baa29c` ("Drop five unused runtime dependencies"), `b5851ab` ("Add a mutation harness and stop
-> rotated logs being committable") and `6f1dc79` ("Pin the on_message hot path and close the
+> `4baa29c` ("Drop five unused runtime dependencies"), `f0938a8` ("Add a mutation harness and stop
+> rotated logs being committable") and `4fc5063` ("Pin the on_message hot path and close the
 > BUG-0002 coverage gap") landed on `dev`.** Where those commits invalidated a claim below, the
 > entry is re-measured against the new HEAD and says so; every other figure is still as of
 > `c83f740`. **The current gate is `Ran 140 tests ... OK` in 15 files**, not the 125 in 13 files
@@ -55,7 +55,7 @@
 >    `discord_bot.py:798` (`:826` when this banner was written; `9894bcc` removed dead wrappers
 >    earlier in the file and shifted it), left **all 125 tests green** at `c83f740`: the user
 >    preference and `/config model` would be silently bypassed again and nothing in the suite
->    would notice. **Closed by `6f1dc79`**, which added `tests/test_on_message_flow.py` and its
+>    would notice. **Closed by `4fc5063`**, which added `tests/test_on_message_flow.py` and its
 >    `test_router_complexity_never_hardens_into_a_model_override`. Against the current 140-test
 >    gate the mutant is KILLED — `python scripts/mutation_check.py M-BUG0002` now reports 1/1,
 >    and the full catalogue run is 5/5.

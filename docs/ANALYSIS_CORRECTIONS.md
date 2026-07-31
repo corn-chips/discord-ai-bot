@@ -601,6 +601,59 @@ raise where it previously worked. The count assertion closes the "0 rows + ledge
 criterion without that risk. `DAB-068` — the sibling pin migration with the opposite bug — is
 **not** fixed and stays open.
 
+## 17. `b9a4514`'s central premise is false: slash commands hit no rate limiter at all
+
+**Claimed**, in the commit message of `b9a4514` "Put a per-user ceiling on the two commands that
+fan out" (`f8baf56` before the path scrub rewrote this history; identical message), and in three
+source comments it added:
+
+> `/deepresearch` and `/summarize` were governed only by the general text rate limit of 60 an
+> hour, which is not a meaningful ceiling on either.
+
+**Measured** at `922e899`. `TextRateLimiter.check_and_record` has exactly **one** call site
+against `self.text_rate_limiter`: `discord_bot.py:882`, inside `on_message`, after the mention
+gate. The same instance is injected into `LiveMessageCoordinator` at `discord_bot.py:172` and
+debited by the live worker at `live_message_coordinator.py:420`. Both paths are message paths.
+**No slash command touches it** — before `b9a4514` there was no `check_and_record` call anywhere
+under `src/bot/command_modules/`, and the only one there now is the `expensive_command_limiter`
+that this very commit introduced.
+
+```
+$ grep -rn "check_and_record" --include=*.py src/
+src/bot/command_modules/research.py:148   # added by b9a4514 itself
+src/bot/live_message_coordinator.py:420   # self.rate_limiter, injected from text_rate_limiter
+src/bot/discord_bot.py:882                # on_message
+src/services/rate_limiter.py:17           # the definition
+```
+
+`/edit-image` and `/image-queue` do consult a per-user quota (`general.py:168`, `:288`), but that
+is `image_processing_service`'s own counter, not the text limiter, and it does not reach
+`/deepresearch` or `/summarize`.
+
+**So the premise understates the hole it closes.** Those two commands were governed by **60 an
+hour**, per the commit; they were governed by **nothing**. The commit's own worst-case arithmetic
+(5.13e9 tokens/h across both commands) was computed *from* the 60/h figure, so the real
+pre-`b9a4514` worst case is not 5.13e9 tokens/h — it is bounded only by Discord's interaction
+rate, and is therefore larger. The fix is correct and the direction is unchanged; only the
+"before" number and the stated baseline are wrong. **The 2.42e7 tokens/h "after" figure stands**,
+because it is computed from the new limiter's own 1/min and 4/h settings.
+
+**What was done about it.** History is not being rewritten for a commit message. The three source
+comments that carried the same false claim into the code were corrected in place, because a
+comment is read as a statement about the current system:
+
+- `config.yaml:164-169` — the `expensive_command_limit_*` block header.
+- `src/bot/discord_bot.py:447-452` — above the `expensive_command_limiter` construction.
+- `src/bot/command_modules/research.py:128-133` — `_expensive_command_allowed`'s docstring.
+
+No behaviour changed; the limits, the call sites and `M-DAB213` are untouched. `docs`-side, the
+`DAB-213` row in `ANALYSIS_BACKLOG.md` and the ticket header now carry the correction.
+
+The review that found this counted further, smaller inaccuracies across the 34 commit messages —
+mostly restated figures and hashes that the rewrite moved. Only this one changes what a reader
+would believe about how the code works, and only this one reached the source, so only this one is
+reproduced here.
+
 ## 18. `DAB-078`'s stated justification is false: three call paths lose the index
 
 **Claimed**, in `15fc69a` and inline at `message_index_service.py:174-179`: the composite

@@ -125,12 +125,17 @@ async def _expensive_command_allowed(bot, interaction: discord.Interaction) -> b
     """
     Charge one unit against the expensive-command budget, or refuse.
 
-    /deepresearch and /summarize were governed only by the general text limit,
-    which permits 60 invocations an hour. Both fan out well beyond a single
-    ordinary reply -- /deepresearch makes two model calls, one of them on the
-    high-complexity model, and /summarize feeds up to channel_history_limit
-    messages into a single prompt with no per-message truncation -- so the
-    general limit is not a meaningful ceiling on either.
+    /deepresearch and /summarize had no per-user ceiling of any kind before
+    this. The general text limit does not reach them: text_rate_limiter is
+    charged in DiscordBot.on_message and by the live-mode worker, and by no
+    slash command. (An earlier version of this docstring said they "were
+    governed only by the general text limit, which permits 60 invocations an
+    hour". That was false -- see docs/ANALYSIS_CORRECTIONS.md item 17.)
+
+    Both fan out well beyond a single ordinary reply: /deepresearch makes two
+    model calls, one of them on the high-complexity model, and /summarize
+    feeds up to channel_history_limit messages into a single prompt with no
+    per-message truncation.
 
     Returns True when the caller may proceed, and has already told them why not
     when it returns False.

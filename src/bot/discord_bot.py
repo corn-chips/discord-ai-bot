@@ -446,8 +446,10 @@ class DiscordBot(discord.Client):
         )
         # A separate, much tighter budget for commands that fan out into many
         # model calls or feed a whole channel's history into one prompt.
-        # /deepresearch and /summarize were governed only by the general text
-        # limit above, which permits 60 an hour.
+        # text_rate_limiter above is charged in on_message and by the live
+        # worker it is injected into, and nowhere else -- no slash command
+        # touches it -- so /deepresearch and /summarize were governed by no
+        # limiter at all, not by 60 an hour (ANALYSIS_CORRECTIONS.md item 17).
         self.expensive_command_limiter = TextRateLimiter(
             per_minute=config.expensive_command_limit_per_minute,
             per_hour=config.expensive_command_limit_per_hour,

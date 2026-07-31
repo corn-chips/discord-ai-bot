@@ -1,6 +1,18 @@
 # Analysis corrections
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `6f1dc79` | Baseline suite: 140 tests, OK
+Last updated: 2026-07-31 | Repo state: branch `dev`, HEAD `922e899` | Baseline suite: 273 tests,
+OK; mutation harness 56/56
+
+Items 1-16 correct the 2026-07-29 analysis corpus. **Items 17-19 are different in kind:** they
+correct claims made by the remediation programme's own landed commits, found by reviewing the
+combined diff before the repository was pushed. Where a commit message is wrong, history is not
+being rewritten for it — the correction lives here, and where the same false claim also reached a
+source comment, the comment was fixed.
+
+**A note on commit hashes.** This history was rewritten once, to scrub absolute paths. Hashes
+quoted inside commit messages written before that rewrite may name objects that are no longer
+reachable from `dev` — the same failure mode `docs/DEEP_BUG_HUNT_REPORT.md` is superseded for.
+Check with `git merge-base --is-ancestor <sha> HEAD` before trusting a hash you find in a message.
 
 ## What this is
 
@@ -142,7 +154,7 @@ actually protected.
 
 **The underlying warning is still correct, and the real gap is wider.** Deleting three live gateway
 handlers — `on_disconnect`, `on_resumed`, `on_raw_bulk_message_delete` — in a `/tmp` copy leaves the
-suite at **140 tests, OK** (re-measured at `6f1dc79`; it was 125 at `4baa29c`, and the two test
+suite at **140 tests, OK** (re-measured at `4fc5063`; it was 125 at `4baa29c`, and the two test
 files added since change nothing here). No test references them. `DAB-203` as specified would not have caught
 that either, because it pins the *command* tree, not the event-handler surface.
 
@@ -165,7 +177,7 @@ allocation today is Pillow raising `DecompressionBombError`, and it is raised by
 converts a slow, contained failure into a **successful 256 MP allocation**: strictly worse than the
 S1 it was meant to help close.
 
-Landed in the corrected order by `1ee538a` — clamp first, then delete the round-trip. The ticket
+Landed in the corrected order by `4fb091c` — clamp first, then delete the round-trip. The ticket
 now carries the corrected edge inline.
 
 The general lesson matches §1: the corpus's dependency edges were inferred from reading, not from
@@ -353,7 +365,7 @@ the coroutine runs to completion, and `DAB-009` reproduces exactly: presence rai
 
 **The consequence for Phase 2.** `RegistrarFailureTest.test_live_mode_survives_a_registrar_raising`
 and `..._user_preferences_survive_a_registrar_raising` (`tests/test_startup_integrity.py`, landed
-in `1a361cb`) wrapped `await self.bot.on_ready()` in `try/except Exception: pass`. They therefore
+in `82b38a3`) wrapped `await self.bot.on_ready()` in `try/except Exception: pass`. They therefore
 died at line 509 every run, several hundred lines before the `setup_commands` call they were named
 for, and passed on assertions that only needed `DiscordBot.__init__` to have run —
 which `StartupServiceAvailabilityTest` already proves. `M-DAB002` was killed by them anyway,
@@ -588,6 +600,60 @@ more brittle than the intersection it replaces, and a NOT NULL-with-default colu
 raise where it previously worked. The count assertion closes the "0 rows + ledger written"
 criterion without that risk. `DAB-068` — the sibling pin migration with the opposite bug — is
 **not** fixed and stays open.
+
+## 18. `DAB-078`'s stated justification is false: three call paths lose the index
+
+**Claimed**, in `15fc69a` and inline at `message_index_service.py:174-179`: the composite
+`idx_message_index_scope_time (guild_id, channel_id, created_at DESC)` "serves no query the two
+new ones do not", so it is dropped rather than kept alongside them.
+
+**Measured.** The two replacements are **partial** indexes, predicated on
+`WHERE hidden = 0 AND deleted_at IS NULL`. Three call paths deliberately touch hidden and
+tombstoned rows and so cannot use them: `get_status` (`:1599`, `/rag status` must count hidden
+messages), `delete_rag_data(channel_id=...)` (`:1082`, `/rag delete scope:channel` must remove
+tombstones or orphan them), and the bare channel `COUNT(*)` both issue first. On a synthetic
+100k-row index (20 channels, 5% hidden, 5% tombstoned), median of 7:
+
+| Path | Composite | Partial only | |
+|---|---|---|---|
+| channel `COUNT(*)` | 4.97 ms | 11.69 ms | 2.35x slower; `COVERING INDEX` -> bare `SCAN` |
+| `/rag status`, channel-scoped | 26.43 ms | 32.88 ms | 1.24x slower |
+| `/rag delete scope:channel` | 113.9 ms | 139.4 ms | 1.22x slower |
+| `search_recent`, channel-scoped | 21.36 ms | 0.032 ms | **674x faster** |
+
+**The trade is still correct** and nothing should be reverted: three admin paths a few
+milliseconds slower buys 674x on a path that runs per message. The commit's read plans and its
++15%-write / +0.1 MB cost all reproduce. What is wrong is the reason recorded next to the code,
+and it is the kind of wrong that costs somebody later: the next person to touch these indexes
+will read "serves no query the two new ones do not" and not think to check the tombstone paths.
+Full detail as `PPR-01` in [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md).
+
+## 19. `DAB-066`'s landed fix is not idempotent: one shortfall makes every later boot re-run it
+
+**Claimed**, by `922e899`'s ERROR message and by the inline comment at
+`message_index_service.py:786-796`: on a shortfall the ledger is left unwritten "so it will be
+retried on the next start once the cause is fixed".
+
+**Measured.** The retry cannot succeed for any table that already copied. `copied` is
+`after_count - before` (`:755`) and is compared against `expected`, the legacy row count. On the
+second boot the rows are already in `main`, `INSERT OR IGNORE` copies nothing, and the comparison
+is `0 != N` — a shortfall, on a table holding 100% of its rows. The ledger is never written and
+every boot re-runs the ATTACH, the copy, the eligibility reconcile and the full FTS rebuild,
+because the `if shortfalls:` gate (`:785`) sits *after* them.
+
+Reproduced by driving the service into the state a shortfall leaves behind, 20,000 rows in each
+of `message_index` and `message_embeddings`, median of 7 boots: **134.1 ms** with the ledger
+present against **519.8 ms** without, i.e. **+385.8 ms per boot (3.9x)**, indefinitely. After 7
+boots the ledger row was still absent and the target still held exactly 20,000 rows. Each boot
+logged `expected 20000 rows, copied 0 ... This usually means the legacy schema lacks a column this
+version declares NOT NULL`, which by then is false and sends the operator after a schema that is
+already correct.
+
+This does not make the DAB-066 fix wrong — recording a short copy as a success was strictly
+worse, and the prescribed alternative (raise) would have been worse still (item 16). It makes the
+recovery story wrong. Compare `after_count` against `expected + before`, or count only the rows
+genuinely absent from `main`. Full detail as `PPR-02` in
+[`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md).
 
 ## The pattern across the corpus's measured claims
 

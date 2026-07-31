@@ -1,10 +1,25 @@
 ## Analysis Backlog
 
-Last updated: 2026-07-29 | Repo state: branch `dev`, HEAD `6f1dc79` | Gate: 140 tests, OK
-Findings below were measured at HEAD `c83f740` against a 125-test baseline; the document state
-above is current. Trust the finding, re-locate the line number, and quote the 140 gate.
+Last updated: 2026-07-31 | Repo state: branch `dev`, HEAD `922e899` | Gate: 273 tests, OK;
+mutation harness 56/56
+Findings below were measured at HEAD `c83f740` against a 125-test baseline; the status column is
+current as of 2026-07-31. Trust the finding, re-locate the line number, and quote the 273 gate.
 
-Tier 0: 20 (19 open, 1 done: DAB-157) | Tier 1: 12 | Tier 2: 5 (4 open, 1 done: DAB-194) | Tier 3: 47 (compact, no tickets) | Tickets written: 37 (35 open)
+**Ticket status at `922e899`: 23 LANDED, 1 PARTIAL (DAB-095), 1 REFUTED (DAB-212), 12 OPEN.**
+
+| Tier | Rows | Landed | Partial | Refuted | Open |
+|---|---|---|---|---|---|
+| 0 | 20 | 15 | 1 | 1 | 3 |
+| 1 | 12 | 7 | — | — | 5 |
+| 2 | 5 | 1 | — | — | 4 |
+| **Tickets** | **37** | **23** | **1** | **1** | **12** |
+| 3 (compact, no tickets) | 47 | 6 | 1 | — | 40 |
+
+The twelve open tickets are DAB-027, DAB-028, DAB-029, DAB-032, DAB-042, DAB-077, DAB-087,
+DAB-096, DAB-106, DAB-180, DAB-203 and DAB-204. Everything else in Tiers 0-2 is closed, deferred
+with a measurement, or refuted. See [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for
+the programme that closed them, and the "Post-programme findings" section at the foot of this
+document for the ten findings the 2026-07-31 pre-push review added.
 
 ### What this is
 
@@ -77,26 +92,26 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
 |---|---|---|---|---|---|---|---|---|
-| 1 | DAB-041 | Dead `error_class`: timeouts and connection resets classified as permanent | BUG | S2 | XS | **18.0** | — | [DAB-041](analysis-tickets/DAB-041.md) |
-| 2 | DAB-001 | Hybrid-RAG fallback `try` spans delivery: duplicate reply, duplicate bill | BUG | **S1** | XS | **16.0** | — | [DAB-001](analysis-tickets/DAB-001.md) |
+| 1 | DAB-041 | **DONE** (Phase 1, `a51da49`) — Dead `error_class`: timeouts and connection resets classified as permanent. The computed class is now dispatched; `a0782cf` then replaced the whole substring chain for DAB-040 | BUG | S2 | XS | **18.0** | — | [DAB-041](analysis-tickets/DAB-041.md) |
+| 2 | DAB-001 | **DONE** (Phase 1, `1d7ed94`) — Hybrid-RAG fallback `try` spanned delivery: duplicate reply, duplicate bill. Delivery now sits outside the `try`, behind `if rag_context is not None`; `M-DAB001` and `M-DAB001B` pin both the scope and the `is not None` gate | BUG | **S1** | XS | **16.0** | — | [DAB-001](analysis-tickets/DAB-001.md) |
 | 3 | DAB-078 | **DONE** (Phase 4) — `search_recent` cannot use its index. Landed by **replacing** the `(guild_id, channel_id, created_at)` composite with two partial indexes rather than adding to it: same read plans, +15% on writes instead of +35%, and no size growth. Re-measured 924x channel / 2273x guild / 549x on the pending poll | IMPROVEMENT | 1200x / 1870x measured | XS | **16.0** | — | [DAB-078](analysis-tickets/DAB-078.md) |
 | 4 | DAB-212 | **REFUTED** (Phase 4) — the 1844x is measured on a query production never issues; on the real channel-scoped form it is **111x slower** than leaving the `ORDER BY` alone once DAB-078 lands, and it reintroduces the temp B-tree it exists to remove. Not applied; `M-DAB212` stops it being re-applied. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 13 | IMPROVEMENT | 1844x measured, two lines | XS | **16.0** | — | [DAB-212](analysis-tickets/DAB-212.md) |
-| 5 | DAB-115 | `split_message` is O(n^2) on the event loop | BUG | **S1** | S | **12.0** | — | [DAB-115](analysis-tickets/DAB-115.md) |
-| 6 | DAB-114 | Every LaTeX response with 2+ equations fails to render | BUG | S2 | XS | **12.0** | — | [DAB-114](analysis-tickets/DAB-114.md) |
+| 5 | DAB-115 | **DONE** (Phase 1, `b0d8308`) — `split_message` was O(n^2) on the event loop. `MarkdownParser.build_split_index` parses once and each query is a bisect: 30.08 s -> 0.0375 s (802x) on a 139 KB fenced block, 192/192 outputs byte-identical. Re-measured 2026-07-31 on prose: x2.00 per doubling, i.e. linear. **It is still called synchronously on the loop** (`response_delivery.py:281`) — see TD-017 | BUG | **S1** | S | **12.0** | — | [DAB-115](analysis-tickets/DAB-115.md) |
+| 6 | DAB-114 | **DONE** (Phase 1, `dce7510`) — Every LaTeX response with 2+ equations failed to render. DAB-128's unbounded `fig_height` was capped in the same commit, as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 2 required | BUG | S2 | XS | **12.0** | — | [DAB-114](analysis-tickets/DAB-114.md) |
 | 7 | DAB-095 | **PARTIAL** (Phase 4) — busy timeout landed as `bot.sqlite_busy_timeout_ms`; **WAL deferred** until connections are pooled, because it costs +0.34 ms on every call here and made zero difference to the DAB-065 trigger in all four lock cells. FKs still off. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 14 | IMPROVEMENT | 5.01 s failure -> 3.3 ms; 4.2x writes | S | **9.0** | — | [DAB-095](analysis-tickets/DAB-095.md) |
-| 8 | DAB-002 | `on_ready` swallows `setup_commands` failure | BUG | **S1** | S | **8.0** | — | [DAB-002](analysis-tickets/DAB-002.md) |
-| 9 | DAB-039 | Chain-of-thought posted to Discord as the answer | BUG | **S1** | XS | **8.0** | — | [DAB-039](analysis-tickets/DAB-039.md) |
-| 10 | DAB-141 | `/rag delete scope:all` is ungated, cross-guild, irreversible | BUG | **S1** | XS | **8.0** | DAB-203 | [DAB-141](analysis-tickets/DAB-141.md) |
-| 11 | DAB-197 | PDF PNG encode/decode round-trip | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | — | [DAB-197](analysis-tickets/DAB-197.md) |
-| 12 | DAB-077 | Startup eligibility reconcile full-scans on every boot | IMPROVEMENT | 1938 ms -> 0.034 ms (57,000x) | S | **8.0** | DAB-083 | [DAB-077](analysis-tickets/DAB-077.md) |
+| 8 | DAB-002 | **DONE** (Phase 3b, `82b38a3`) — `on_ready` swallowed a `setup_commands` failure. The three personalization services are now built eagerly in `DiscordBot.__init__` (`discord_bot.py:394-405`), so a registrar raising can no longer decide whether they exist; the registrars reuse the eager instances | BUG | **S1** | S | **8.0** | — | [DAB-002](analysis-tickets/DAB-002.md) |
+| 9 | DAB-039 | **DONE** (Phase 1, `7955652`) — Chain-of-thought could be posted to Discord as the answer. The `_get_response_text` fallback now honours `part.thought` | BUG | **S1** | XS | **8.0** | — | [DAB-039](analysis-tickets/DAB-039.md) |
+| 10 | DAB-141 | **DONE** (Phase 2/3, `eb9daaf`) — `/rag delete scope:all` was ungated, cross-guild, irreversible. Gated at the **group** level (`Permissions(manage_guild=True)` plus `guild_only`), which is the only placement discord.py 2.7.1 serialises, with a runtime `_has_rag_admin` check on `/rag delete`. The ticket's prescribed subcommand-level gate does not work; see [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 3 | BUG | **S1** | XS | **8.0** | DAB-203 | [DAB-141](analysis-tickets/DAB-141.md) |
+| 11 | DAB-197 | **DONE** (Phase 1, `4fb091c`) — PDF PNG encode/decode round-trip deleted, in the same commit as DAB-198 and in the corrected order (`ANALYSIS_CORRECTIONS.md` item 6) | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | — | [DAB-197](analysis-tickets/DAB-197.md) |
+| 12 | DAB-077 | **OPEN.** Startup eligibility reconcile still full-scans on every boot: `_reconcile_embedding_eligibility` is called unconditionally from `_ensure_schema` (`message_index_service.py:322`). `DAB-083` unblocked it in Phase 4 and Phase 4 did not take it. Quote the absolute saving at your corpus size, not the ratio — see [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) "Restated figures" | IMPROVEMENT | 1938 ms -> 0.034 ms (57,000x) | S | **8.0** | DAB-083 | [DAB-077](analysis-tickets/DAB-077.md) |
 | 13 | DAB-165 | **DONE** (Phase 3b) — A `%` in any log extra silently drops the record. The `%` trigger turned out unreachable from any current call site; the live half was DAB-164, the extras doubling, which one `RotatingFileHandler` is enough to cause. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 9 | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
 | 14 | DAB-019 | **DONE** (Phase 3b) — Live batch silently destroyed when `process_messages` raises. Landed with an unanswered-messages receipt, **not** the ticket's requeue-the-popped-batch expression, which duplicates the attachment suffix, re-debits the rate limiter and re-bills Gemini. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 8 | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
-| 15 | DAB-198 | PDF resource bomb: 3.6 KB upload -> 107 s CPU, 1.63 GB RSS | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
-| 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `b5851ab` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
+| 15 | DAB-198 | **DONE** (Phase 1, `4fb091c`) — PDF resource bomb: a 3.6 KB upload could cost 107 s of CPU and 1.63 GB RSS. Page rasterisation is clamped, and the useless PNG round-trip was deleted first so the budget is not sized against wasted work | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
+| 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `f0938a8` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | **DONE** (Phase 3b) — Unguarded `change_presence()` sits before `setup_commands`. Reproduced: with presence raising, `setup_commands` was awaited 0 times. `_start_automatic_rag_backlog` is guarded in the same change. The `DAB-002` edge was discharged, not exercised: DAB-002's presence-badge half never landed | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |
-| 18 | DAB-029 | Six never-evicting in-memory containers | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
+| 18 | DAB-029 | **OPEN.** Six never-evicting in-memory containers; still six. `161ff5d` deliberately kept the DAB-019 retry state worker-local rather than adding a seventh | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
 | 19 | DAB-083 | **DONE** (Phase 4) — `rag_migrations` is not owned by `_ensure_schema`. Both halves landed: the DDL moved into the schema, and a fresh install no longer records a migration that copied nothing. `DAB-077` is unblocked but was not in Phase 4's scope | BUG | S3 | XS | **4.0** | — | [DAB-083](analysis-tickets/DAB-083.md) |
-| 20 | DAB-032 | Rate limiter rebuilds every user's history on every call | IMPROVEMENT | p95 22.1 ms -> 0.003 ms (6320x) | S | **4.0** | — | [DAB-032](analysis-tickets/DAB-032.md) |
+| 20 | DAB-032 | **OPEN**, and now with a second caller: `b9a4514` added `expensive_command_limiter`, a second `TextRateLimiter` instance with the same O(n) rebuild | IMPROVEMENT | p95 22.1 ms -> 0.003 ms (6320x) | S | **4.0** | — | [DAB-032](analysis-tickets/DAB-032.md) |
 
 Two S1 defects are deliberately **not** in Tier 0: `DAB-065` (transient DB error tombstones a
 message) and `DAB-066` (legacy migration discards all rows). Both are real S1 data loss, but
@@ -105,7 +120,7 @@ change, and `DAB-066`'s precondition is not reachable from any schema this repos
 ever produced. They sit at the head of Tier 1 with their prerequisites.
 
 Row 16 is retained rather than deleted so that the `#` numbering stays stable across the whole
-document. `DAB-157` shipped as `b5851ab` (`.gitignore` now ignores `logs/` wholesale plus
+document. `DAB-157` shipped as `f0938a8` (`.gitignore` now ignores `logs/` wholesale plus
 `*.log.[0-9]*`, and the dead `!data/.gitkeep` negation is gone), guarded by
 `tests/test_repo_hygiene.py`.
 
@@ -119,17 +134,17 @@ an afternoon or that need a Tier-0 item first.
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
 |---|---|---|---|---|---|---|---|---|
 | 21 | DAB-040 | **DONE** (Phase 3b) — Retry classification is substring matching on `str(error)`. Measured 11 flips, all corrections, zero regressions over a 29-case corpus. The ticket's placement (structured pass first) and its anchored regex are both wrong; see the inline correction | BUG | S2 | S | **9.0** | DAB-041 | [DAB-040](analysis-tickets/DAB-040.md) |
-| 22 | DAB-180 | `grok-prompts` is a dangling gitlink; `/deepresearch` silently degrades | BUG | S2 | S | **8.0** | DAB-203 | [DAB-180](analysis-tickets/DAB-180.md) |
-| 23 | DAB-213 | No cooldown on any slash command | IMPROVEMENT | worst case $3,247/h -> ~$0.90/h | S | **8.0** | DAB-203 | [DAB-213](analysis-tickets/DAB-213.md) |
-| 24 | DAB-096 | Synchronous SQLite on the asyncio event loop (13 call sites) | IMPROVEMENT | 4997 ms -> 3.1 ms max loop stall | M | **6.0** | DAB-095 | [DAB-096](analysis-tickets/DAB-096.md) |
+| 22 | DAB-180 | **OPEN.** `grok-prompts` is a dangling gitlink; `/deepresearch` silently degrades | BUG | S2 | S | **8.0** | DAB-203 | [DAB-180](analysis-tickets/DAB-180.md) |
+| 23 | DAB-213 | **DONE** (Phase 2/3, `b9a4514`) — landed as a dedicated `expensive_command_limiter` on `/deepresearch` and `/summarize` (1/min, 4/h), measured 5.13e9 -> 2.42e7 tokens/h worst case for one unprivileged user. Two corrections: `/summarize` is ~2.5x worse than `/deepresearch`, not the reverse, and the title's premise is false — those commands were governed by **no** rate limiter at all, not by the 60/h text limit. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 17 | IMPROVEMENT | worst case $3,247/h -> ~$0.90/h | S | **8.0** | DAB-203 | [DAB-213](analysis-tickets/DAB-213.md) |
+| 24 | DAB-096 | **OPEN.** Synchronous SQLite on the asyncio event loop. The per-call payoff is refuted — re-measured like-for-like, `to_thread` is 0.144 -> 0.225 ms, i.e. *slower*; the loop-stall figure stands. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 14 | IMPROVEMENT | 4997 ms -> 3.1 ms max loop stall | M | **6.0** | DAB-095 | [DAB-096](analysis-tickets/DAB-096.md) |
 | 25 | DAB-166 | **DONE** (Phase 3b) — `/config debug` is a no-op; handler levels pinned at startup. Landed as option 1 plus `perf_logger.propagate = False`, which option 1 needs to be safe. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 10 | BUG | S2 | S | **6.0** | — | [DAB-166](analysis-tickets/DAB-166.md) |
-| 26 | DAB-073 | Pins have absolute priority and starve retrieval to zero slots | BUG | S2 | S | **6.0** | — | [DAB-073](analysis-tickets/DAB-073.md) |
-| 27 | DAB-150 | `/pin` is uncapped, unsanitised, and evicts all retrieved context | BUG | S2 | S | **6.0** | DAB-073 | [DAB-150](analysis-tickets/DAB-150.md) |
+| 26 | DAB-073 | **DONE** (Phase 2/3, `36bf261`) — pins no longer have absolute priority; a retrieval floor is reserved before pins are allocated | BUG | S2 | S | **6.0** | — | [DAB-073](analysis-tickets/DAB-073.md) |
+| 27 | DAB-150 | **DONE** (Phase 2/3, `417e468`) — `/pin` is capped at 25 per channel and 40,000 chars per channel, 4,000 per pin, with prompt-delimiter defusal. Landed with DAB-073's floor, as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 7 required. **Note:** the 25-pin cap does not make `/pins` safe — at 25 pins the embed exceeds Discord's 6,000-character cap once display names reach 9 characters. See the post-programme findings below | BUG | S2 | S | **6.0** | DAB-073 | [DAB-150](analysis-tickets/DAB-150.md) |
 | 28 | DAB-065 | **DONE** (Phase 4) — A transient DB error during an edit permanently tombstones the message. Closed by separating a write failure from a business decision, NOT by adding `deleted_at = NULL` to the `ON CONFLICT` list (that reintroduces BUG-0004 and does not work anyway — `mark_deleted` also sets `hidden = 1`). See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 15 | BUG | **S1** | M | **4.0** | DAB-095 | [DAB-065](analysis-tickets/DAB-065.md) |
 | 29 | DAB-066 | **DONE** (Phase 4) — Legacy migration silently discards all rows, then records success. Landed as a count assertion that logs and returns, NOT the prescribed raise, which would abort DiscordBot.__init__ on every boot forever. Latent-trap guard: the precondition is unreachable across all nine revisions of the schema. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 16 | BUG | **S1** | S | **4.0** | — | [DAB-066](analysis-tickets/DAB-066.md) |
-| 30 | DAB-203 | `test_command_registration.py` pins the degraded 22-command tree | BUG | S3 | S | **4.0** | — | [DAB-203](analysis-tickets/DAB-203.md) |
-| 31 | DAB-042 | No whole-sequence deadline: one message can occupy the bot ~488 s | BUG | S2 | M | **3.0** | DAB-204 | [DAB-042](analysis-tickets/DAB-042.md) |
-| 32 | DAB-204 | A regression test actively blocks the whole-sequence-deadline fix | BUG | S2 | S | **3.0** | — | [DAB-204](analysis-tickets/DAB-204.md) |
+| 30 | DAB-203 | **OPEN**, and more load-bearing than before. `tests/test_command_registration.py` still pins the tree positionally: `== 22` (`:147`), `== 35` (`:148`) and the `[5:10]` slice (`:323`, was `:239`). It survived the programme unchanged and correctly caught nothing wrongly, but five landed commits had to reason about it | BUG | S3 | S | **4.0** | — | [DAB-203](analysis-tickets/DAB-203.md) |
+| 31 | DAB-042 | **OPEN.** No whole-sequence deadline: one message can occupy the bot ~488 s. Still blocked by DAB-204 | BUG | S2 | M | **3.0** | DAB-204 | [DAB-042](analysis-tickets/DAB-042.md) |
+| 32 | DAB-204 | **OPEN.** `test_main_response_path_does_not_wrap_client_retry_timeout` (`tests/test_bug_regressions.py:118`) still patches the singleton `asyncio.wait_for` and still fails any correct whole-sequence deadline | BUG | S2 | S | **3.0** | — | [DAB-204](analysis-tickets/DAB-204.md) |
 
 ---
 
@@ -141,11 +156,11 @@ review window.
 
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
 |---|---|---|---|---|---|---|---|---|
-| 33 | DAB-028 | `search_semantic` copies the whole matrix and recomputes norms | IMPROVEMENT | 2225 ms -> 62 ms (35.8x); 2056 -> 8.4 MiB | M | **3.0** | DAB-027 | [DAB-028](analysis-tickets/DAB-028.md) |
-| 34 | DAB-087 | Hybrid RAG is blind to every non-Latin script | BUG | S2 | S | **3.0** | DAB-077 | [DAB-087](analysis-tickets/DAB-087.md) |
+| 33 | DAB-028 | **OPEN.** `search_semantic` still copies the whole matrix and recomputes norms | IMPROVEMENT | 2225 ms -> 62 ms (35.8x); 2056 -> 8.4 MiB | M | **3.0** | DAB-027 | [DAB-028](analysis-tickets/DAB-028.md) |
+| 34 | DAB-087 | **OPEN**, and still blocked: DAB-077's reconcile fingerprint does not exist yet, so there is nothing to bump | BUG | S2 | S | **3.0** | DAB-077 | [DAB-087](analysis-tickets/DAB-087.md) |
 | 35 | DAB-194 | **DONE** — Dead code: 2,027 removable lines, verified twice. Landed in `9894bcc` / `4baa29c` | IMPROVEMENT | delivered **-2,111 lines** across 25 files; `constraints.txt` 57 -> 51 pins | S | **3.0** | — (landed ahead of DAB-203) | [DAB-194](analysis-tickets/DAB-194.md) |
-| 36 | DAB-027 | `_vector_lock` held across CPU-bound numpy scoring | IMPROVEMENT | 244x concurrent throughput | M | **2.0** | — | [DAB-027](analysis-tickets/DAB-027.md) |
-| 37 | DAB-106 | 40-43 of 96 config fields have no validation | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
+| 36 | DAB-027 | **OPEN.** `_vector_lock` is still held across CPU-bound numpy scoring | IMPROVEMENT | 244x concurrent throughput | M | **2.0** | — | [DAB-027](analysis-tickets/DAB-027.md) |
+| 37 | DAB-106 | **OPEN**, re-measured as **43 of 99**. The programme added three fields (`expensive_command_limit_per_minute`, `expensive_command_limit_per_hour`, `sqlite_busy_timeout_ms`) and all three arrived with a validation rule, so the unvalidated count did not move | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
 
 Row 35 is retained rather than deleted so that the `#` numbering stays stable across the whole
 document. `DAB-194` shipped as `9894bcc` (dead code: `src/services/help_system.py` deleted, four
@@ -191,19 +206,19 @@ here.
 | DAB-121 | Overlapping block/inline LaTeX spans corrupt the surrounding text | rendering |
 | DAB-122 | Currency amounts are eaten by `INLINE_LATEX_RE` | rendering |
 | DAB-125 | LaTeX and table rewriting are not code-fence-aware | rendering |
-| DAB-128 | `fig_height` is unbounded: an already-live DoS, **not** contingent on DAB-114 — one expression with 300 `\\` row separators measures 2,558 MB peak RSS on the unfixed tree. Needs its own ticket and commit, not a rider on DAB-114. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 2 | rendering |
+| DAB-128 | **DONE** (Phase 1, `dce7510`) — `fig_height` was unbounded: an already-live DoS, **not** contingent on DAB-114. Capped in the same commit as DAB-114, which corrections item 2 said it must not simply ride on; it got its own cap and its own tests. The published 2,558 MB peak RSS did not reproduce — **270 MB** — and the mechanism was real | rendering |
 | DAB-129 | matplotlib rendering and message splitting both run on the event loop | rendering |
 | DAB-131 | `validate_image` accepts a 144 MP decompression bomb from 449 KB | media |
 | DAB-138 | PIL PNG encoding on the event loop, up to 26 images per request | media |
-| DAB-140 | The command layer has effectively no authorization model (1 of 35 gated) | security |
-| DAB-142 | `/dev` is ungated and turns stack traces into public Discord messages | security |
-| DAB-143 | Report web UI serves every guild's reports with no authentication | security |
-| DAB-144 | `ReportWebServer.url` rewrites a `0.0.0.0` bind to `127.0.0.1` | security |
-| DAB-147 | `/report-status` reads any report by enumerable id, unscoped | security |
+| DAB-140 | **PARTIAL.** The headline count is out of date: measured at `922e899` by building the tree and reading `to_dict()`, **11 of the 35 registered entries** are behind at least one gate, not 1, and 3 of the 22 top-level entities carry a payload permission (`/clear-cache` 8, `/dev` 8, `/rag` 32). There is still no *model* — the gates are per-command decisions. Three holes are open and listed under "Post-programme findings": `/live`, `/clear-cache` in DMs, and the two commands that still echo `str(exc)`. Tracked as TD-012 | security |
+| DAB-142 | **DONE** (Phase 2/3, `d4b91a5`) — `/dev` is gated three ways: payload `default_permissions(administrator=True)`, `guild_only()` (Discord does not evaluate payload permissions in a DM), and a runtime administrator check, because `default_member_permissions` is a default a guild admin can re-grant | security |
+| DAB-143 | **OPEN.** Report web UI serves every guild's reports with no authentication. Untouched by the programme; residual risk on a public repo | security |
+| DAB-144 | **OPEN.** `ReportWebServer.url` still rewrites a `0.0.0.0` bind to `127.0.0.1` (`report_web_server.py:28`), so the URL the bot prints understates the exposure of the DAB-143 surface. The two compound: read them together | security |
+| DAB-147 | **OPEN.** `/report-status` still reads any report by enumerable id with no guild scope (`reports_usage.py:103` calls `report_service.get_report(report_id)` on the raw integer) | security |
 | DAB-148 | **DONE** — Every `/config` subcommand mutates process-global state, ungated. Promoted out of Tier 3 and landed in Phase 3: runtime Manage Server guards on the five mutating subcommands, `/config info` deliberately left open | security |
-| DAB-153 | Raw exception text echoed to Discord by default, no secret scrubbing | security |
-| DAB-159 | Indirect prompt injection: retrieved content can forge the RAG context fence | security |
-| DAB-163 | `/pins` breaks permanently at 26 pins (Discord's 25-field embed cap) | security |
+| DAB-153 | **PARTIAL** (Phase 2/3, `d4b91a5`) — raw exception text no longer reaches unprivileged users through `error_manager`. Three call sites outside that scope still echo `str(exc)` directly and were not covered: `/deepresearch` (`research.py:120`), `/summarize` (`:493`) — both **non-ephemeral** — and `/rag status`'s DEGRADED embed (`:228`, ephemeral, manage_guild callers only). Listed under "Post-programme findings" | security |
+| DAB-159 | **OPEN.** Indirect prompt injection: retrieved content can forge the RAG context fence. Partially mitigated for *pins* only — `417e468` defuses the prompt delimiters in pinned text (`pin_service.py:45-48`) — but retrieved messages are untouched | security |
+| DAB-163 | **OPEN, and it reads as closed when it is not.** `417e468` capped pins at 25 per channel, which looks like it closes the 25-field embed limit by construction. It does not: at the permitted 25 pins the embed **exceeds Discord's 6,000-character total cap** as soon as display names reach 9 characters. Measured below | security |
 | DAB-167 | `send_error_response` raises out of its own `except` block | observability |
 | DAB-168 | **DONE** (Phase 3b) — Live-mode RAG retrieval failure is logged at DEBUG. Now WARNING with `exc_info`, matching the mention path | observability |
 | DAB-169 | 39 of 237 `except` handlers are invisible at the default log level | observability |
@@ -215,6 +230,15 @@ here.
 ---
 
 ## SUGGESTED SPRINT PLAN
+
+> **Historical as of 2026-07-31.** This plan was executed. The phases that ran did not map
+> one-to-one onto the four sprints below — see
+> [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for what actually happened, in which
+> order, and in which commit. The reasoning below is kept because it explains *why* the ordering
+> mattered, and the "Suite count changes here" notes are kept because they are what the
+> programme's per-commit accounting was checked against. Every estimate ("3-4 days", "1 week",
+> "Programme total: 35 remaining tickets ... 4.5 weeks") is spent: 24 of the 37 tickets are
+> closed and 12 remain.
 
 Four sprints, each with one causally coherent theme. The ordering is not arbitrary: you cannot
 usefully measure the effect of a performance fix while a duplicate-response bug is doubling your
@@ -228,7 +252,7 @@ implementations of it.
 the one-line changes that share a file with them. Seven of the nine S1 findings close here.
 
 `DAB-041` · `DAB-001` · `DAB-115` · `DAB-114` · `DAB-039` · `DAB-141` · `DAB-157` (**DONE**,
-`b5851ab`) · `DAB-019` · `DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
+`f0938a8`) · `DAB-019` · `DAB-197` · `DAB-198` · `DAB-002` · `DAB-009`
 
 - 11 tickets remaining of 12: 6 XS, 5 S. **Rough total: 3-4 days.** `DAB-157` has already landed.
 - Five are independent one-file diffs and can land in the first hour: `DAB-041`, `DAB-001`,
@@ -306,6 +330,14 @@ should not exist and bound what is unbounded.
 
 ## DEPENDENCY GRAPH
 
+> **Mostly discharged as of 2026-07-31.** Of the roots and edges below, only these still bind:
+> `DAB-204 --> DAB-042` (the obstructing test is still in place), `DAB-077 --> DAB-087` (the
+> fingerprint DAB-087 must bump does not exist yet, because DAB-077 was not taken), and
+> `DAB-027 --> DAB-028`. `DAB-083 --> DAB-077` and `DAB-095 --> DAB-065` are discharged — both
+> prerequisites landed. `DAB-203 -?> DAB-141` was refuted and DAB-141 landed without it.
+> The remaining open tickets — DAB-029, DAB-032, DAB-096, DAB-106, DAB-180, DAB-203 — have no
+> live inbound edge and can start today.
+
 Read `A --> B` as "A must land before B". Items with no inbound edge are independent and can start
 immediately.
 
@@ -367,15 +399,232 @@ VECTOR CHAIN
 ### Cross-cutting hazards recorded on the graph
 
 - **`tests/test_command_registration.py` is a chokepoint.** Its `EXPECTED_SIGNATURE` (`:26`), the
-  `== 22` (`:147`) and `== 35` (`:148`) literals, the `[5:10]` slice (`:239`) and the
-  "`/rag delete` has no checks" assertion (`:175-176`) each break independently. Five tickets touch
-  it. `DAB-203` exists to make that stop.
-- **`docs/DEEP_BUG_HUNT_REPORT.md` and `docs/tech-debt-register.md` are stale.** The former cites a
-  build (`8bc80f9`) that is not in this history; the latter has two drifted evidence rows and one
-  false claim. Neither is a dependency, but do not treat either as ground truth while working these
-  tickets.
+  `== 22` (`:147`) and `== 35` (`:148`) literals, the `[5:10]` slice (**`:323`**, was `:239` when
+  this was written) and the "`/rag delete` has no checks" assertion each break independently. Five
+  tickets touch it. `DAB-203` exists to make that stop, and is still open.
+- **`docs/DEEP_BUG_HUNT_REPORT.md` is stale**; it cites a build (`8bc80f9`) that is not in this
+  history. `docs/tech-debt-register.md` was re-assessed on 2026-07-31 and its TD-009 to TD-019
+  rows now carry measured verdicts, so it is usable again — but read the bracketed 2026-07-31
+  note on a row, not just its description, because two descriptions (TD-012, TD-017) are
+  substantially false at HEAD and are corrected only in the note.
 - **`AGENTS.md` contained one verified error, since corrected.** It stated `_pin_service` is
-  attached during command registration; in fact `discord_bot.py:366` constructs it in `__init__`
-  and `personalization.py:126` only reuses it. The current `AGENTS.md` ("Service wiring") now says
-  exactly that, so nothing is outstanding here. Several tickets depend on knowing which services
-  are eagerly constructed, so keep reading that section as authoritative.
+  attached during command registration; in fact `DiscordBot.__init__` constructs it
+  (`discord_bot.py:377` at `922e899`) and `personalization.py:129` only reuses it. The current
+  `AGENTS.md` ("Service wiring") says exactly that. Its `file:line` citations were re-measured at
+  `922e899`; the ones in *this* document and in the ticket bodies were not, and 34 commits have
+  moved most of them.
+
+---
+
+## POST-PROGRAMME FINDINGS (2026-07-31)
+
+Found by reviewing the combined diff of the 34 remediation commits against `c83f740`, before the
+repository was pushed. **None of these existed in the 211-finding register**, so they carry a
+`PPR-` prefix rather than a `DAB-` number: the master register lives outside this repository and
+cannot be extended from here.
+
+Every figure below was measured on 2026-07-31 at `922e899` with `.venv/bin/python` (CPython
+3.12.13), on this machine. **Nothing here has been fixed** — this section is a record.
+
+### PPR-01 (S3) — DAB-078's stated justification is false; three call paths lost their index
+
+`15fc69a` replaced the composite `idx_message_index_scope_time (guild_id, channel_id, created_at
+DESC)` with two **partial** indexes predicated on `WHERE hidden = 0 AND deleted_at IS NULL`
+(`message_index_service.py:180-194`), on the stated grounds that the composite "serves no query
+the two new ones do not". That is not true. Three call paths deliberately touch tombstoned and
+hidden rows and therefore cannot use a partial index:
+
+- `get_status` filters on `WHERE channel_id = ?` alone (`message_index_service.py:1599`) —
+  `/rag status` reports how many messages the index holds, which must include hidden ones.
+- `delete_rag_data(channel_id=...)` deletes `WHERE channel_id = ?` (`:1082`) — `/rag delete
+  scope:channel` must remove tombstones too, or they are orphaned forever.
+- Any bare channel-scoped `COUNT(*)`, which both of the above issue first.
+
+Measured on a synthetic 100k-row index (20 channels, 5% hidden, 5% tombstoned), median of 7,
+comparing the dropped composite against the two partial indexes on the same file:
+
+| Path | With composite | With partial indexes only | |
+|---|---|---|---|
+| channel `COUNT(*)` | 4.97 ms | **11.69 ms** | 2.35x slower; plan drops from `SCAN ... USING COVERING INDEX` to a bare `SCAN` |
+| `/rag status`, channel-scoped (5 queries) | 26.43 ms | **32.88 ms** | 1.24x slower |
+| `/rag delete scope:channel` (median of 5, fresh copy each) | 113.9 ms | **139.4 ms** | 1.22x slower |
+| `search_recent`, channel-scoped — the hot path DAB-078 targets | 21.36 ms | **0.032 ms** | **674x faster**; plan `SCAN` -> `SEARCH ... USING INDEX idx_message_index_channel_time` |
+
+**The swap is still the right trade** — three admin paths a few milliseconds slower against a
+674x win on a per-message path — and the commit's own read-plan and write-cost numbers reproduce.
+What is wrong is the *reason given*, and it matters: a future reader who believes "the composite
+serves no query the two new ones do not" will not think to check the tombstone paths before
+touching these indexes again. This is a correction to a landed commit's rationale, not a request
+to revert it. Recorded as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 18.
+
+### PPR-02 (S3) — one DAB-066 shortfall makes every later boot re-run the whole migration
+
+`922e899` correctly stopped a short legacy copy from recording itself as complete: on a shortfall
+it logs at ERROR, leaves the ledger unwritten and returns, so the migration is retried next boot.
+The retry is not idempotent with respect to its own success test.
+
+`copied` is computed as `after_count - before` (`message_index_service.py:755`) and compared
+against `expected`, the legacy row count. On the *second* boot the rows are already in `main`, so
+`INSERT OR IGNORE` copies nothing: `copied = 0`, `expected = N`, shortfall. A table holding 100%
+of its legacy rows reports itself short, forever. The ledger is never written, so every boot
+re-runs the ATTACH, the copy attempt, `_reconcile_embedding_eligibility` and — because the
+shortfall check sits *after* it (`:772-784`, the `if shortfalls:` gate is at `:785`) — the full `DELETE FROM message_search_fts` plus
+reindex, before returning.
+
+Reproduced by driving the service into the state a shortfall leaves behind (ledger absent, target
+already holding every legacy row), 20,000 legacy rows in `message_index` and 20,000 in
+`message_embeddings`, median of 7 boots:
+
+| | Per boot |
+|---|---|
+| Control — ledger present, early return | **134.1 ms** |
+| Stuck — ledger absent, 100% of rows already copied | **519.8 ms** |
+| Attributable overhead | **+385.8 ms per boot (3.9x)** |
+
+After 7 boots the ledger row was still absent and `message_index` still held exactly 20,000 rows.
+Every boot logged, falsely: `message_index: expected 20000 rows, copied 0; message_embeddings:
+expected 20000 rows, copied 0 ... This usually means the legacy schema lacks a column this version
+declares NOT NULL.` The operator is told to fix a schema that is already fine.
+
+Severity is S3, not higher, because the precondition — a real shortfall — is
+[recorded as unreachable](analysis-tickets/DAB-066.md) across every schema this repository's
+history has produced. It is a latent trap behind a latent trap. The fix is to compare
+`after_count` against `expected + before`, or to count only rows genuinely absent from `main`.
+
+### PPR-03 (S4) — cancellation during the DAB-019 retry backoff double-debits the rate limiter
+
+`run_channel_worker` requeues `owed` into `pending_messages` and clears the receipt *before*
+sleeping (`live_message_coordinator.py:170-179`), which is correct — it stops the `finally` block
+requeuing the same batch twice. But `charged`, the set of user ids the limiter has already
+debited for this turn, is worker-local (`:134`) and is not requeued with the batch. A
+cancellation during `await asyncio.sleep(self.retry_backoff_seconds * attempts)` destroys the
+worker and its `charged` set; the next worker picks the batch out of `pending_messages` with an
+empty `charged` and debits every participant a second time for the same turn.
+
+Gemini is **not** double-billed: the retry only happens because the model call raised, and a call
+that raised produced nothing. The cost is one spurious rate-limit token per participant per
+cancelled retry, which is exactly the property `charged` was introduced to guarantee
+(`M-DAB019F`). Latent: it needs a cancellation inside a 1-3 second window that only opens after a
+failure. Fixing it means moving `charged` somewhere that outlives the worker — which conflicts
+with the deliberate decision in `161ff5d` not to add a seventh never-evicting per-channel
+container (DAB-029). Land those two together.
+
+### PPR-04 (S4) — a live attachment turn that raises notifies nobody
+
+`_answer_batch` clears `owed` before delegating an attachment turn
+(`live_message_coordinator.py:466`, immediately before `await
+self.process_message_with_context(...)`). The comment is right about why: that call owns its own
+generation and billing, so it must not be retried. But the worker's abandonment path is gated on
+the same receipt — `if owed:` at `:181` — so when the delegated call raises, `attempts` is
+incremented, `_abandon_batch` is skipped and `_tell_user_the_turn_failed` is never reached. The
+failure is logged at ERROR and the user who posted the attachment is told nothing at all.
+
+The non-attachment path does not have this shape: it clears `owed` after `generate_response`
+returns and still runs delivery inside the same call, so a delivery failure is notified without
+regeneration. Only the attachment branch loses the receipt and the notification together. S4
+because it needs an exception to escape `process_message_with_context`'s own broad handler.
+
+### PPR-05 (S4) — `/rag status`'s DEGRADED embed echoes raw `str(exc)`
+
+DAB-170's degraded payload sets `"error": f"{type(exc).__name__}: {exc}"`
+(`message_index_service.py:1666`) and `/rag status` renders 900 characters of it into an embed
+field (`research.py:232`). For a SQLite failure that string carries the resolved absolute database
+path. Two mitigations keep this at S4 rather than S3: the embed is `ephemeral=True`, and `/rag` is
+gated behind Manage Server, so only an administrator sees it. It is listed because it is the same
+class as DAB-153 and was outside that fix's scope.
+
+### PPR-06 (S3) — `/pins` exceeds Discord's 6,000-character embed cap at the permitted 25 pins
+
+DAB-163 reads as closed by construction: `417e468` set `MAX_PINS_PER_CHANNEL = 25`
+(`pin_service.py:26`), and Discord's per-embed limit is 25 *fields*. But the field count is not
+the binding constraint. `/pins` builds one field per pin, name `#{i} — {author_name}` and value a
+200-character preview plus `\n*Pinned by {pinned_by}*` (`personalization.py:211-217`), and
+Discord also caps an embed's **total** length at 6,000 characters.
+
+Measured with `discord.py` 2.7.1's own `len(embed)`, 25 pins, content longer than the 200-char
+preview, both names the same length:
+
+| Display-name length | `len(embed)` |
+|---|---|
+| 8 | 5,996 |
+| **9** | **6,046 — over** |
+| 32 (Discord's maximum) | **7,196** |
+
+Each additional name character costs 50 (two occurrences x 25 fields). So `/pins` raises
+`HTTPException: In embeds.0: Embed size exceeds maximum size of 6000` for any channel at the
+permitted cap whose participants have names of 9 characters or more — which is most of them — and
+it stays broken until someone deletes a pin, except that the delete buttons live on the view
+attached to the message that will not send. The pin cap made this reachable at exactly the value
+it permits. Fixes: paginate, shorten the preview, or cap on cumulative embed length rather than
+count.
+
+### PPR-07 (S3) — `/clear-cache` is administrator-gated in guilds and ungated in DMs
+
+Measured from the serialized payload: `/clear-cache` has `default_member_permissions = 8`
+(administrator) and `dm_permission = true`, no `guild_only()`, no `checks`, and no runtime
+permission check in its body (`configuration.py:389-416`). Discord does not evaluate
+`default_member_permissions` in a DM, so any user who shares a guild with the bot can DM
+`/clear-cache` and clear the performance-logger cache regardless of their permissions.
+
+This is precisely the hole `d4b91a5` closed for `/dev`, whose comment spells the mechanism out
+("`guild_only` matters as much as the permission ... without guild_only anyone sharing a guild
+with the bot could DM /dev and flip the flag"). `/dev` got `guild_only()` **and** a runtime check;
+`/clear-cache`, two commands above it in the same file, got neither. Impact is low — a cache
+clear, not a state mutation — which is why it is S3 and not S2.
+
+### PPR-08 (S3) — `/live` is completely ungated, and is the largest remaining spend lever
+
+`/live` (`personalization.py:90-125`) has no payload permission, no `guild_only`, no runtime
+check and no cooldown. Any member can switch a channel into mention-free live mode, after which
+**every message in that channel** is enqueued and answered — `on_message` forks to
+`LiveMessageCoordinator.enqueue` and returns before the mention gate
+(`discord_bot.py:827`). One `/live` turns a channel's entire traffic into Gemini calls billed to
+the operator's personal key, and it persists in `channel_settings` until someone runs `/live`
+again.
+
+Set against the rest of the programme's spend work this is the outstanding gap: `b9a4514` capped
+`/deepresearch` and `/summarize` at 4/hour each on the grounds that they are unbounded spend
+levers reachable without permission, and `/live` is a strictly larger one that was not in scope.
+The per-user text rate limit does apply to the messages the live channel then generates, which is
+the only thing bounding it.
+
+### PPR-09 (S3) — `/deepresearch` and `/summarize` still echo `str(exc)`, non-ephemerally
+
+`research.py:120` and `:493` both do `await interaction.followup.send(f"... {str(e)}")` with no
+`ephemeral=True`, so an arbitrary exception string is posted into the channel for everyone.
+DAB-153's fix (`d4b91a5`) routed unprivileged error reporting through `error_manager`; these two
+call sites format their own message and never reach it. Recorded against DAB-153 above as the
+unfixed remainder rather than as a new defect.
+
+### PPR-10 — residual risks confirmed still open
+
+Verified at `922e899` and unchanged by the programme. Listed together because a public push is
+the moment they matter.
+
+- **DAB-143 / DAB-144 — the report web server.** Still no authentication of any kind, and
+  `ReportWebServer.url` still rewrites a `0.0.0.0` bind to `127.0.0.1` for display
+  (`report_web_server.py:27-28`). The two compound: the surface is unauthenticated and the URL the
+  operator is shown understates who can reach it.
+- **DAB-147 — `/report-status` is unscoped by guild.** `reports_usage.py:103` passes the raw
+  integer to `report_service.get_report(report_id)` with no guild check, so report ids are
+  enumerable across guilds.
+- **DAB-068 — the pin migration burns its one shot and logs a false success.** This is DAB-083's
+  defect, in `PinService`, and it was not fixed there. `_migrate_legacy_pins` writes the
+  `legacy_shared_pins_v1` ledger row unconditionally (`pin_service.py:130-133`, ledger insert at `:131`), even when the
+  legacy database has no `pinned_messages` table. Reproduced: on a fresh install (`TokenTracker`
+  creates `token_usage.db`, which has never held pins) the ledger row is written and
+  `Copied legacy pinned memories from ...` is logged at INFO having copied **0** pins. A later
+  genuine migration is then gated out forever. `922e899` fixed exactly this shape for the RAG
+  tables — `if not legacy_tables_found: return` without writing the ledger — and the same three
+  lines are needed here.
+- **DAB-003 — a routine gateway reconnect emits two CRITICAL records whose text is false.**
+  `on_ready` has no re-entry guard and discord.py re-fires it on every reconnect. Reproduced by
+  calling `setup_commands` twice on one tree: the second call raises
+  `CommandAlreadyRegistered: Command 'ping' already registered.` with the tree left intact at 22
+  top-level commands. `on_ready` then logs CRITICAL "Slash command registration FAILED ... The bot
+  is running with an incomplete command tree" (`discord_bot.py:608`) and, because `registered` is
+  `False`, CRITICAL "Synced only 22 slash command(s) after a registration failure; the command
+  tree is incomplete" (`:621`). Both statements are false; the tree is complete. The mechanism is
+  already described in the comment at `:576-580`. The cost is that the loudest log level in the
+  system now cries wolf on a routine event, which devalues it for the real failure it was added
+  to report.

@@ -10,6 +10,7 @@ from ...services.channel_settings_service import ChannelSettingsService
 from ...services.message_visibility_service import MessageVisibilityService
 from ...services.pin_service import PinService
 from ...services.user_preferences_service import UserPreferencesService
+from .common import require_guild_permission
 from .context import CommandContext
 
 
@@ -89,8 +90,32 @@ def register_personalization_commands(context: CommandContext) -> None:
 
     @bot.tree.command(name="live", description="Toggle mention-free live mode for this channel")
     @app_commands.describe(enabled="Optional explicit setting (on/off). Leave empty to toggle.")
+    @app_commands.default_permissions(manage_channels=True)
+    @app_commands.guild_only()
     async def live(interaction: discord.Interaction, enabled: Optional[bool] = None):
         """Enable/disable channel-isolated mention-free live mode."""
+        # Manage Channels, deliberately -- not Administrator, and not nothing.
+        #
+        # This was completely ungated: no payload permission, no guild_only, no
+        # runtime check, no cooldown. Turning it on makes EVERY message in the
+        # channel a billed Gemini call, with no mention required, until someone
+        # turns it off. Verified by executing the coordinator: six non-mentioning
+        # messages produced six billed generate_response calls, and a member with
+        # zero permissions wrote the channel_settings row that enabled them. It
+        # is the largest remaining spend lever in the bot.
+        #
+        # The bar is set at Manage Channels rather than Administrator because
+        # this is a normal-use feature, not an admin one: it changes how the bot
+        # behaves in one channel, which is exactly what Manage Channels means in
+        # Discord, and moderators are the people who legitimately want it.
+        # Administrator would leave a routine feature usable only by the owner.
+        # Ordinary members keep every other way of talking to the bot -- mention
+        # and reply are untouched.
+        if not await require_guild_permission(
+            interaction, "manage_channels", "toggle live mode for this channel"
+        ):
+            return
+
         channel_id = interaction.channel_id
         if channel_id is None:
             await interaction.response.send_message(

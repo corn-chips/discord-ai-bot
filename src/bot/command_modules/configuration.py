@@ -7,6 +7,7 @@ from discord import app_commands
 
 from .common import (
     _get_model_description,
+    require_guild_permission,
 )
 from .context import CommandContext
 
@@ -388,8 +389,21 @@ def register_admin_commands(context: CommandContext) -> None:
 
     @bot.tree.command(name="clear-cache", description="Clear bot's message cache (Admin only)")
     @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
     async def clear_cache(interaction: discord.Interaction):
         """Clear the bot's internal caches (admin only)."""
+        # The payload permission alone left this open in DMs. Discord does not
+        # evaluate default_member_permissions outside a guild, so before
+        # guild_only the serialised command carried dm_permission: true, and a
+        # caller holding no permissions anywhere could DM /clear-cache and run
+        # it -- verified by executing the callback with a permissionless user.
+        # The runtime check is the enforcement; the payload is a default a guild
+        # admin can re-grant.
+        if not await require_guild_permission(
+            interaction, "administrator", "clear the bot's caches"
+        ):
+            return
+
         try:
             # Clear performance logger cache
             performance_logger.clear_cache()

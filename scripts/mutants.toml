@@ -727,3 +727,48 @@ expect = "killed"
 [[mutant.edit]]
 find = "            response = await asyncio.wait_for(\n                self.gemini_client.client.aio.models.generate_content(\n                    model=router_model,\n                    contents=classification_prompt,\n                    config=types.GenerateContentConfig(\n                        temperature=self.bot.config.router_temperature,\n                        max_output_tokens=self.bot.config.router_max_output_tokens,\n                        response_mime_type=\"application/json\"\n                    )\n                ),\n                timeout=self.bot.config.response_timeout,\n            )\n"
 replace = "            response = await asyncio.to_thread(\n                self.gemini_client.client.models.generate_content,\n                model=router_model,\n                contents=classification_prompt,\n                config=types.GenerateContentConfig(\n                    temperature=self.bot.config.router_temperature,\n                    max_output_tokens=self.bot.config.router_max_output_tokens,\n                    response_mime_type=\"application/json\"\n                )\n            )\n"
+
+[[mutant]]
+id = "M-PPR08"
+bug = "PPR-08"
+# Layer 3: the runtime check is the actual enforcement. default_member_permissions
+# is only a DEFAULT -- a guild admin can re-grant it to @everyone -- so a gate
+# made of decorators alone protects nothing against a server that has done so.
+summary = "Drop /live's runtime permission check, leaving only the re-grantable payload default"
+guard = "test_live_refuses_an_ordinary_member_and_writes_nothing"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not await require_guild_permission(\n            interaction, \"manage_channels\", \"toggle live mode for this channel\"\n        ):\n            return\n\n"
+replace = ""
+
+[[mutant]]
+id = "M-PPR08B"
+bug = "PPR-08"
+# Layer 1: the payload. Without default_permissions the command is offered to
+# every member in the Discord UI, and the guard test must read that from
+# to_dict() rather than from the Python attribute -- DAB-141 is the case where
+# an attribute was set, the payload did not carry it, and the ticket's own test
+# passed on a gate protecting nothing.
+summary = "Drop /live's payload permission so Discord offers it to every member"
+guard = "test_the_serialised_payloads_carry_the_gates_discord_will_enforce"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    @app_commands.default_permissions(manage_channels=True)\n    @app_commands.guild_only()\n    async def live"
+replace = "    @app_commands.guild_only()\n    async def live"
+
+[[mutant]]
+id = "M-PPR07"
+bug = "PPR-07"
+# Layer 2: guild_only. Discord does not evaluate default_member_permissions in
+# a DM at all, so without this the command serialises dm_permission: true and a
+# caller with no permissions anywhere can DM it. This is exactly how
+# /clear-cache stayed reachable while carrying permission 8.
+summary = "Drop /clear-cache's guild_only, restoring the DM bypass around permission 8"
+guard = "test_the_serialised_payloads_carry_the_gates_discord_will_enforce"
+file = "src/bot/command_modules/configuration.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    @app_commands.default_permissions(administrator=True)\n    @app_commands.guild_only()\n    async def clear_cache"
+replace = "    @app_commands.default_permissions(administrator=True)\n    async def clear_cache"

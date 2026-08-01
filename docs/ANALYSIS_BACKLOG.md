@@ -143,8 +143,8 @@ an afternoon or that need a Tier-0 item first.
 | 28 | DAB-065 | **DONE** (Phase 4) — A transient DB error during an edit permanently tombstones the message. Closed by separating a write failure from a business decision, NOT by adding `deleted_at = NULL` to the `ON CONFLICT` list (that reintroduces BUG-0004 and does not work anyway — `mark_deleted` also sets `hidden = 1`). See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 15 | BUG | **S1** | M | **4.0** | DAB-095 | [DAB-065](analysis-tickets/DAB-065.md) |
 | 29 | DAB-066 | **DONE** (Phase 4) — Legacy migration silently discards all rows, then records success. Landed as a count assertion that logs and returns, NOT the prescribed raise, which would abort DiscordBot.__init__ on every boot forever. Latent-trap guard: the precondition is unreachable across all nine revisions of the schema. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 16 | BUG | **S1** | S | **4.0** | — | [DAB-066](analysis-tickets/DAB-066.md) |
 | 30 | DAB-203 | **OPEN**, and more load-bearing than before. `tests/test_command_registration.py` still pins the tree positionally: `== 22` (`:147`), `== 35` (`:148`) and the `[5:10]` slice (`:323`, was `:239`). It survived the programme unchanged and correctly caught nothing wrongly, but five landed commits had to reason about it | BUG | S3 | S | **4.0** | — | [DAB-203](analysis-tickets/DAB-203.md) |
-| 31 | DAB-042 | **OPEN.** No whole-sequence deadline: one message can occupy the bot ~488 s. Still blocked by DAB-204 | BUG | S2 | M | **3.0** | DAB-204 | [DAB-042](analysis-tickets/DAB-042.md) |
-| 32 | DAB-204 | **OPEN.** `test_main_response_path_does_not_wrap_client_retry_timeout` (`tests/test_bug_regressions.py:118`) still patches the singleton `asyncio.wait_for` and still fails any correct whole-sequence deadline | BUG | S2 | S | **3.0** | — | [DAB-204](analysis-tickets/DAB-204.md) |
+| 31 | DAB-042 | **OPEN, now UNBLOCKED** (round 2, Phase 0). No whole-sequence deadline yet, but DAB-204 has landed and a correct 480 s deadline now leaves the suite green. Read the ticket header first: the budget must go **inside** `GeminiClient`, and this ticket's acceptance criterion contradicts DAB-204's unless it does. The 488 s applies only to `medium`/`high`; two adjacent findings outrank it (an untimed router `to_thread`, and four billed calls in 0.0001 s on empty-STOP) | BUG | S2 | M | **3.0** | — (DAB-204 discharged) | [DAB-042](analysis-tickets/DAB-042.md) |
+| 32 | DAB-204 | **DONE** (round 2, Phase 0) — there were **two** obstructing tests, not the one this ticket names; the second was `tests/test_response_generation.py:107-110`. Replaced by `test_main_response_path_preserves_the_full_client_retry_budget`, which records deadlines through a module-scoped `asyncio` shim and asserts the budget instead of banning `wait_for`. `M-BUG0001` was retargeted in the same commit (deleting the test alone takes the harness to 55/56) and `M-BUG0001B` added for the `asyncio.timeout` spelling the old test was blind to | BUG | S2 | S | **3.0** | — | [DAB-204](analysis-tickets/DAB-204.md) |
 
 ---
 
@@ -361,8 +361,12 @@ TEST-INFRASTRUCTURE CHAIN  (one live obstruction, not two -- see below)
       (the DAB-203 --> DAB-194 edge is gone: refuted, and moot now that DAB-194 has
        landed first. See docs/ANALYSIS_CORRECTIONS.md)
 
-  DAB-204 --> DAB-042        test_main_response_path_does_not_wrap_client_retry_timeout
-                             FAILS a correct whole-sequence deadline; rewrite it first
+  DAB-204 --> DAB-042        DISCHARGED, round 2 Phase 0. Both obstructing tests (there
+                             were two; the graph and both tickets each named one) are
+                             replaced by an assertion on the retry BUDGET. A correct
+                             480 s deadline now leaves the suite at 273 OK. DAB-042 can
+                             start today -- but put the budget INSIDE GeminiClient, or
+                             DAB-042's acceptance criterion and DAB-204's contradict
 
 DATA-LAYER CHAIN
   DAB-083 --> DAB-077        rag_migrations must be created by _ensure_schema before

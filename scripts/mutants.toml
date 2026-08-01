@@ -13,7 +13,14 @@
 id = "M-BUG0001"
 bug = "BUG-0001"
 summary = "Outer wait_for reclaims ownership of the Gemini retry budget"
-guard = "test_main_response_path_does_not_wrap_client_retry_timeout"
+# Retargeted 2026-07-31. The previous guard,
+# test_main_response_path_does_not_wrap_client_retry_timeout, was deleted: it
+# banned asyncio.wait_for outright by patching the singleton module, so it also
+# failed every CORRECT whole-sequence deadline and blocked DAB-042. Its
+# replacement asserts the budget instead. Deleting that test without moving this
+# guard would have left M-BUG0001 an unkillable survivor -- 56/56 -> 55/56 -- and
+# turned the mutation gate red on a commit that passes unittest.
+guard = "test_main_response_path_preserves_the_full_client_retry_budget"
 file = "src/bot/response_generation.py"
 expect = "killed"
 [[mutant.edit]]
@@ -22,6 +29,21 @@ replace = "                    api_response = await asyncio.wait_for(self.gemini
 [[mutant.edit]]
 find = "                        language=user_language,\n                    )\n                    await self._delete_status_message(status_message, \"after response\")\n"
 replace = "                        language=user_language,\n                    ), timeout=30)\n                    await self._delete_status_message(status_message, \"after response\")\n"
+
+[[mutant]]
+id = "M-BUG0001B"
+bug = "BUG-0001"
+summary = "The same budget theft spelled `async with asyncio.timeout(...)` rather than wait_for"
+# The spelling the deleted guard could not see. It patched asyncio.wait_for by
+# name, so an outer deadline written as a context manager reintroduced BUG-0001
+# with the suite fully green. This mutant proves the replacement guard is
+# strictly stronger than the test it replaces, not merely different.
+guard = "test_main_response_path_preserves_the_full_client_retry_budget"
+file = "src/bot/response_generation.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    api_response = await self.gemini_client.generate_response(\n"
+replace = "                    async with asyncio.timeout(30):\n                     api_response = await self.gemini_client.generate_response(\n"
 
 [[mutant]]
 id = "M-BUG0002"

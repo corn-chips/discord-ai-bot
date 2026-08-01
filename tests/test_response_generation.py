@@ -3,7 +3,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 from src.bot.response_generation import ResponseGenerationCoordinator
 from src.models.data_models import APIResponse, TokenUsage
@@ -104,20 +104,25 @@ class ResponseGenerationTest(unittest.IsolatedAsyncioTestCase):
         )
         dependencies["extract_audio"].return_value = [audio_file]
 
-        with patch(
-            "src.bot.response_generation.asyncio.wait_for",
-            side_effect=AssertionError("Gemini client owns retry timeouts"),
-        ):
-            await coordinator.generate_and_send_response(
-                message,
-                "question",
-                ["context"],
-                model_override="request-model",
-                prompt_mode_override="fast",
-                search_override=True,
-                apply_user_preferences=True,
-                complexity_level="high",
-            )
+        # This call used to run under
+        # patch("src.bot.response_generation.asyncio.wait_for", side_effect=AssertionError).
+        # That attribute is the singleton asyncio module, so the patch was global
+        # and failed any whole-sequence deadline, correct ones included -- a
+        # second copy of the DAB-204 obstruction, in a file DAB-204 never names.
+        # The retry-budget contract now lives in one place,
+        # test_bug_regressions.test_main_response_path_preserves_the_full_client_retry_budget,
+        # which asserts the budget instead of banning the call. Every assertion
+        # below is unchanged; only the wrapper is gone.
+        await coordinator.generate_and_send_response(
+            message,
+            "question",
+            ["context"],
+            model_override="request-model",
+            prompt_mode_override="fast",
+            search_override=True,
+            apply_user_preferences=True,
+            complexity_level="high",
+        )
 
         dependencies["resolve_request_preferences"].assert_called_once_with(
             user_id=7,

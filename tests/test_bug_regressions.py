@@ -23,6 +23,38 @@ from src.services.message_splitter import MessageSplitter
 from src.services.nano_banana_client import NanoBananaClient
 
 
+class _AsyncioDeadlineRecorder:
+    """Stands in for the ``asyncio`` module and records every deadline imposed.
+
+    Patched over a module's ``asyncio`` binding rather than over
+    ``asyncio.wait_for``. Patching the function reaches the singleton module and
+    is therefore global; patching the *name* affects only the module under test,
+    and lets the three spellings of a deadline be recorded rather than banned.
+
+    Everything the module under test does not use for timing is forwarded
+    untouched, so ``asyncio.TimeoutError``, ``sleep``, ``create_task`` and the
+    rest behave normally.
+    """
+
+    def __init__(self):
+        self.deadlines = []
+
+    def __getattr__(self, name):
+        return getattr(asyncio, name)
+
+    def wait_for(self, awaitable, timeout=None, **kwargs):
+        self.deadlines.append(("wait_for", timeout))
+        return asyncio.wait_for(awaitable, timeout, **kwargs)
+
+    def timeout(self, delay):
+        self.deadlines.append(("timeout", delay))
+        return asyncio.timeout(delay)
+
+    def timeout_at(self, when):
+        self.deadlines.append(("timeout_at", when - asyncio.get_running_loop().time()))
+        return asyncio.timeout_at(when)
+
+
 class MessageSplitterRegressionTest(unittest.TestCase):
     def test_long_fenced_line_is_lossless_and_within_discord_limit(self):
         content = "```python\n" + ("x" * 5000) + "\n```"
@@ -115,7 +147,43 @@ class DiscordBotRegressionTest(unittest.IsolatedAsyncioTestCase):
         index_service.index_discord_message_async.assert_not_awaited()
         index_service.mark_deleted_async.assert_not_awaited()
 
-    async def test_main_response_path_does_not_wrap_client_retry_timeout(self):
+    async def test_main_response_path_preserves_the_full_client_retry_budget(self):
+        """BUG-0001 / DAB-204.
+
+        ``GeminiClient`` owns its own retry budget: ``max_retries + 1`` attempts of
+        ``get_timeout_for_model()`` seconds each. An outer deadline *shorter* than
+        that silently reclaims the budget and cancels the client mid-retry, which
+        is the defect BUG-0001 records.
+
+        This asserts the budget. The test it replaces --
+        ``test_main_response_path_does_not_wrap_client_retry_timeout`` -- asserted
+        the *absence* of ``asyncio.wait_for`` by patching it with an
+        ``AssertionError`` side effect. Three things were wrong with that:
+
+        * ``src.bot.discord_bot.asyncio`` is the singleton ``asyncio`` module, so
+          the patch was global and failed **any** whole-sequence deadline,
+          including a correct one. It blocked the DAB-042 repair the code still
+          needs.
+        * The coordinator catches ``Exception``, so the ``AssertionError`` was
+          swallowed and resurfaced as ``TypeError: object Mock can't be used in
+          'await' expression`` -- a failure message pointing nowhere near the
+          cause.
+        * It only knew the ``wait_for`` spelling. ``async with asyncio.timeout(...)``
+          reintroduces exactly the same defect and the old test stayed green
+          (``M-BUG0001B`` now pins that).
+
+        A total budget placed *inside* ``GeminiClient`` -- which is where DAB-042
+        concluded it belongs -- imposes no deadline in this module and is
+        therefore invisible here by design. This test does not object to it. That
+        is what dissolves the contradiction between DAB-204's acceptance criterion
+        (any deadline must be >= the full budget) and DAB-042's (fewer attempts
+        may run when the total budget is smaller); see the note in both tickets.
+        """
+        # config.yaml: response.timeout 30, response.max_retries 3.
+        per_attempt_timeout = 30
+        max_retries = 3
+        full_client_budget = per_attempt_timeout * (max_retries + 1)
+
         class TypingContext:
             async def __aenter__(self):
                 return self
@@ -155,10 +223,8 @@ class DiscordBotRegressionTest(unittest.IsolatedAsyncioTestCase):
             error_manager=Mock(),
         )
 
-        with patch(
-            "src.bot.discord_bot.asyncio.wait_for",
-            side_effect=AssertionError("outer wait_for must not own Gemini retries"),
-        ):
+        recorder = _AsyncioDeadlineRecorder()
+        with patch("src.bot.response_generation.asyncio", recorder):
             await DiscordBot._generate_and_send_response(
                 bot,
                 message,
@@ -167,8 +233,24 @@ class DiscordBotRegressionTest(unittest.IsolatedAsyncioTestCase):
                 show_status_message=False,
             )
 
+        # Asserted out here, not inside the coordinator. The coordinator catches
+        # Exception, so an assertion raised under it is swallowed and reported as
+        # something else entirely -- the exact failure mode that made the previous
+        # version of this test unreadable.
         gemini_client.generate_response.assert_awaited_once()
         bot._send_response_safely.assert_awaited_once()
+
+        for spelling, budget in recorder.deadlines:
+            self.assertGreaterEqual(
+                budget,
+                full_client_budget,
+                f"asyncio.{spelling}({budget}) in the response path is shorter "
+                f"than the client's own retry budget of {full_client_budget}s "
+                f"({per_attempt_timeout}s x {max_retries + 1} attempts), so the "
+                f"client would be cancelled mid-retry. Put a whole-sequence "
+                f"deadline inside GeminiClient._run_response_attempts, where it "
+                f"can shorten each attempt and still return a structured error.",
+            )
 
     async def test_live_attachment_retains_later_messages(self):
         channel = SimpleNamespace(id=50)

@@ -296,14 +296,17 @@ citations in *this* file were re-measured at `922e899` and are current.
    `test_router_complexity_never_hardens_into_a_model_override` asserts the contract at the
    caller. `python scripts/mutation_check.py M-BUG0002` now reports KILLED; the full run is
    56/56.
-  - **`test_main_response_path_does_not_wrap_client_retry_timeout`
-   (`test_bug_regressions.py:118`) obstructs a repair the code still needs.** It patches
-   `src.bot.discord_bot.asyncio.wait_for` with an `AssertionError` side effect; since that
-   attribute is the singleton `asyncio` module, the patch is global. Any correct
-   whole-sequence deadline fails it: wrapping the Gemini call in `asyncio.wait_for` turns the
-   test into an ERROR, surfacing as a misleading `TypeError: object Mock can't be used in
-   'await' expression` because `except Exception` swallows the assertion. It must assert the
-   budget, not the absence of `wait_for`.
+  - **BUG-0005's obstructing test is fixed (DAB-204, round 2 Phase 0).** It was
+   `test_main_response_path_does_not_wrap_client_retry_timeout`, which patched
+   `src.bot.discord_bot.asyncio.wait_for` with an `AssertionError` side effect. That attribute
+   is the singleton `asyncio` module, so the patch was global and failed *any* whole-sequence
+   deadline, correct ones included. There was a **second** copy of the same patch at
+   `tests/test_response_generation.py:107-110` that neither DAB-204 nor DAB-042 mentioned.
+   Both are gone, replaced by `test_main_response_path_preserves_the_full_client_retry_budget`,
+   which patches the module's `asyncio` *binding* with a recorder and asserts that no deadline
+   is shorter than `per_attempt x (max_retries + 1)`. DAB-042 is unblocked; put the budget
+   inside `GeminiClient._run_response_attempts`, not in `response_generation.py`, or the two
+   tickets' acceptance criteria contradict each other.
 
  Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
 

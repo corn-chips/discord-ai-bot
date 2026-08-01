@@ -15,6 +15,7 @@ which is the same class of mistake as asserting a permission attribute that
 never reaches the wire.
 """
 
+import logging
 import tempfile
 import unittest
 from pathlib import Path
@@ -132,16 +133,23 @@ class OnReadyResilienceTest(OnReadyHarness):
     async def test_a_presence_failure_does_not_skip_command_registration(self):
         self.change_presence.side_effect = RuntimeError("gateway closed")
 
-        with patch("src.bot.discord_bot.setup_commands", AsyncMock()) as setup:
+        with self.assertLogs("src.bot.discord_bot", level="WARNING") as captured, patch(
+            "src.bot.discord_bot.setup_commands", AsyncMock()
+        ) as setup:
             await self.bot.on_ready()
 
         # The observable end state: the command tree was built. Before the fix
         # this was 0 -- the exception escaped into on_error and the bot ran with
         # no slash commands at all.
         setup.assert_awaited_once()
+        # Degrading quietly would be its own defect, and the capture keeps the
+        # traceback this test provokes out of the suite's stderr.
+        self.assertIn("Could not set the bot presence", captured.output[0])
 
     async def test_a_backlog_failure_does_not_escape_on_ready(self):
-        with patch("src.bot.discord_bot.setup_commands", AsyncMock()) as setup, patch(
+        with self.assertLogs("src.bot.discord_bot", level="WARNING"), patch(
+            "src.bot.discord_bot.setup_commands", AsyncMock()
+        ) as setup, patch(
             "src.bot.discord_bot._start_automatic_rag_backlog",
             side_effect=RuntimeError("permissions cache empty"),
         ):
@@ -156,13 +164,21 @@ class RegistrarFailureTest(OnReadyHarness):
     async def test_live_mode_survives_a_registrar_raising(self):
         # Simulate the exact shape of the defect: setup_commands explodes. With
         # the harness above, on_ready now actually reaches this call.
-        with patch(
+        #
+        # The log capture is not decoration. These two tests provoke a genuine
+        # registration failure, so the two CRITICAL records and their tracebacks
+        # are correct -- and they were being written to the suite's stderr on
+        # every run, where they read exactly like the false DAB-003 pair they
+        # are not. Capturing them turns that noise into the assertion it should
+        # always have been: a real failure must stay loud.
+        with self.assertLogs("src.bot.discord_bot", level="CRITICAL") as captured, patch(
             "src.bot.discord_bot.setup_commands",
             side_effect=RuntimeError("registrar exploded"),
         ) as setup:
             await self.bot.on_ready()
 
         setup.assert_awaited_once()
+        self.assertIn("registration FAILED", captured.output[0])
         self.bot._channel_settings_service.set_live_enabled(99, True)
         self.assertTrue(
             self.bot._is_live_mode_enabled(99),
@@ -170,7 +186,7 @@ class RegistrarFailureTest(OnReadyHarness):
         )
 
     async def test_user_preferences_survive_a_registrar_raising(self):
-        with patch(
+        with self.assertLogs("src.bot.discord_bot", level="CRITICAL"), patch(
             "src.bot.discord_bot.setup_commands",
             side_effect=RuntimeError("registrar exploded"),
         ) as setup:
@@ -183,6 +199,98 @@ class RegistrarFailureTest(OnReadyHarness):
         )
         service.set_language(3, "english")
         self.assertEqual(service.get_preferences(3).preferred_language, "english")
+
+
+class OnReadyReentryTest(OnReadyHarness):
+    """DAB-003: a gateway reconnect must not be reported as a catastrophe.
+
+    discord.py re-fires `on_ready` on every reconnect and `setup_commands` is
+    not idempotent: the second call raises `CommandAlreadyRegistered` on `ping`,
+    the first command it re-declares, leaving the tree intact at 22. `on_ready`
+    then logged two CRITICAL records -- one with a traceback -- both saying the
+    command tree was incomplete when it was complete.
+
+    These run the *real* `setup_commands`, twice, because the defect only exists
+    in the interaction between the two runs. A test with `setup_commands`
+    patched cannot see it at all.
+    """
+
+    def _critical(self, records):
+        return [r.getMessage() for r in records if r.levelno >= logging.CRITICAL]
+
+    async def _run_on_ready(self):
+        with self.assertLogs("src.bot.discord_bot", level="DEBUG") as captured:
+            await self.bot.on_ready()
+        return captured.records
+
+    async def test_a_reconnect_does_not_report_an_intact_tree_as_a_failure(self):
+        first = await self._run_on_ready()
+        self.assertEqual(self._critical(first), [])
+        registered = len(self.bot.tree.get_commands())
+        self.assertEqual(registered, 22)
+
+        second = await self._run_on_ready()
+
+        self.assertEqual(
+            self._critical(second), [],
+            "a routine gateway reconnect still logs at the loudest level",
+        )
+        # The claim those records made, asserted directly: the tree is intact.
+        self.assertEqual(len(self.bot.tree.get_commands()), registered)
+        self.assertEqual(self.bot.tree.sync.await_count, 2)
+
+    async def test_a_registration_failure_stays_critical_on_every_reconnect(self):
+        # The flag must not latch on a run that did not finish, or a genuinely
+        # broken tree goes quiet from the first reconnect onward.
+        with patch(
+            "src.bot.discord_bot.setup_commands",
+            side_effect=RuntimeError("registrar exploded"),
+        ):
+            first = await self._run_on_ready()
+            second = await self._run_on_ready()
+
+        self.assertEqual(len(self._critical(first)), 2)
+        self.assertEqual(len(self._critical(second)), 2)
+        self.assertFalse(self.bot._slash_commands_registered)
+
+    async def test_a_transient_fault_on_reconnect_cannot_shrink_a_working_tree(self):
+        # Why the fix is not `tree.clear_commands()` + rebuild, which is the
+        # other obvious way to make on_ready idempotent. Measured on that
+        # design: a registrar raising on the second run takes the tree from 22
+        # commands to 6, and `tree.sync()` is a full-replace PUT, so the other
+        # 16 are deleted from Discord globally by a fault the current code
+        # survives untouched.
+        await self._run_on_ready()
+        self.assertEqual(len(self.bot.tree.get_commands()), 22)
+
+        with patch(
+            "src.bot.commands.register_feature_commands",
+            side_effect=RuntimeError("transient fault on reconnect"),
+        ):
+            await self._run_on_ready()
+
+        self.assertEqual(len(self.bot.tree.get_commands()), 22)
+
+    async def test_a_partially_registered_tree_is_not_reported_as_healthy(self):
+        # The reason this is a flag rather than `bool(tree.get_commands())`:
+        # register_ping_command runs first, so a registrar failing after it
+        # leaves a NON-EMPTY, genuinely incomplete tree. Seeding from the tree
+        # would call that healthy from the first reconnect.
+        with patch(
+            "src.bot.commands.register_feature_commands",
+            side_effect=RuntimeError("boom"),
+        ):
+            first = await self._run_on_ready()
+            partial = len(self.bot.tree.get_commands())
+            second = await self._run_on_ready()
+
+        self.assertGreater(partial, 0, "the tree must be non-empty for this to bite")
+        self.assertLess(partial, 22)
+        self.assertEqual(len(self._critical(first)), 2)
+        self.assertEqual(
+            len(self._critical(second)), 2,
+            "an incomplete tree went quiet on reconnect",
+        )
 
 
 if __name__ == "__main__":

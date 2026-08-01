@@ -731,17 +731,41 @@ the moment they matter.
   character cap is applied at its full 40,000 rather than at a fraction: a channel left at
   39,946/40,000 is a state `add_pin` permits, and inventing a migration-only sub-budget would be an
   undocumented second rule.
-- **DAB-003 — a routine gateway reconnect emits two CRITICAL records whose text is false.**
-  `on_ready` has no re-entry guard and discord.py re-fires it on every reconnect. Reproduced by
-  calling `setup_commands` twice on one tree: the second call raises
-  `CommandAlreadyRegistered: Command 'ping' already registered.` with the tree left intact at 22
-  top-level commands. `on_ready` then logs CRITICAL "Slash command registration FAILED ... The bot
-  is running with an incomplete command tree" (`discord_bot.py:608`) and, because `registered` is
-  `False`, CRITICAL "Synced only 22 slash command(s) after a registration failure; the command
-  tree is incomplete" (`:621`). Both statements are false; the tree is complete. The mechanism is
-  already described in the comment at `:576-580`. The cost is that the loudest log level in the
-  system now cries wolf on a routine event, which devalues it for the real failure it was added
-  to report.
+- ~~**DAB-003 — a routine gateway reconnect emits two CRITICAL records whose text is false.**~~
+  **Closed in round 2 Phase 3.** Reproduced first: `setup_commands` called twice on one tree
+  raises `CommandAlreadyRegistered: Command 'ping' already registered.` with the tree left intact
+  at 22, after which `on_ready` logged CRITICAL "registration FAILED ... running with an
+  incomplete command tree" *and* CRITICAL "Synced only 22 ... the command tree is incomplete",
+  both false. Registration is now skipped outright on a reconnect, guarded by
+  `bot._slash_commands_registered`.
+
+  **The obvious fix — seed `registered` from `bool(self.tree.get_commands())` — was rejected on
+  measurement, and it is worth recording why, because it reads as equivalent.** It silences only
+  the *second* record: `registered` is consumed in the sync branch alone, while the `except` arm
+  is unconditional, so a reconnect still logs "registration FAILED" with a traceback at CRITICAL.
+  Worse, it mutes a **true** warning in ten of the eleven places a registrar can fail.
+  `register_ping_command` is unconditionally first, so a fault anywhere after it leaves a
+  non-empty, genuinely incomplete tree — swept across every registrar, ten of them leave 1-16
+  commands and none self-heals, because the retry stops at `ping` every time. Seeding from the
+  tree reports those as `Synced 6 slash command(s) globally` at INFO from the first reconnect on.
+  `M-DAB003B` and `M-DAB003C` reintroduce both spellings.
+
+  Clearing the tree and rebuilding it was rejected too, and it is the dangerous option:
+  measured, a registrar raising on the second run takes the tree from 22 commands to 6, and
+  `tree.sync()` is a full-replace `PUT /applications/{id}/commands`, so the other 16 are deleted
+  from Discord globally by a transient fault the shipped code survives untouched. A degraded
+  image backend on reconnect does the same thing at 24 → 22, silently un-publishing
+  `/edit-image` and `/image-queue`. `M-DAB003E`.
+
+  Two residuals, recorded not fixed. `tree.sync()` still runs on every reconnect — one
+  full-replace PUT of an identical 8,695-byte payload — which the guard neither adds nor removes;
+  moving registration and sync into `Client.setup_hook` would remove it, and discord.py's own
+  docstring recommends exactly that ("only called once, in `login()` ... a better solution than
+  doing such setup in the `on_ready` event"), with `application_id` assigned before `setup_hook`
+  runs so `tree.sync()` works there. That is a startup restructure rather than a log-correctness
+  fix, so it is a separate change. And every variant, including the shipped one, is racy if any
+  registrar ever awaits: `on_ready` is dispatched as its own task and two can overlap. The flag is
+  claimed *before* the await for that reason, but nothing enforces the no-await property.
 
 ### PPR-11 (S3) — the report web UI accepted a cross-site form POST — **CLOSED, Phase 2.3**
 

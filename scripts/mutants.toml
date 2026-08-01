@@ -1309,3 +1309,87 @@ expect = "killed"
 [[mutant.edit]]
 find = "                channel_pins[:DISCORD_VIEW_CHILD_LIMIT], start=1\n"
 replace = "                channel_pins[:20], start=1\n"
+
+[[mutant]]
+id = "M-DAB003"
+bug = "DAB-003"
+# The defect. discord.py re-fires on_ready on every gateway reconnect and
+# setup_commands is not idempotent: the second call raises
+# CommandAlreadyRegistered on `ping`, the first command it re-declares, leaving
+# the tree intact at 22. on_ready then logged CRITICAL "registration FAILED ...
+# running with an incomplete command tree" with a traceback, and CRITICAL
+# "Synced only 22 ... the command tree is incomplete". Both false. The loudest
+# level in the system cried wolf on a routine event.
+summary = "Report a routine gateway reconnect as a failed registration"
+guard = "test_a_reconnect_does_not_report_an_intact_tree_as_a_failure"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        registered = self._slash_commands_registered\n        if registered:\n"
+replace = "        registered = False\n        if False:\n"
+
+[[mutant]]
+id = "M-DAB003B"
+bug = "DAB-003"
+# The fix the ticket implies, applied literally. It silences the SECOND
+# CRITICAL and not the first: `registered` is read only in the sync branch,
+# while the except arm is unconditional, so a reconnect still logs
+# "registration FAILED" with a traceback at CRITICAL. Measured over three runs
+# before this mutant was written; the guard rejects it on that alone.
+summary = "Seed `registered` from the tree but still re-run setup_commands"
+guard = "test_a_reconnect_does_not_report_an_intact_tree_as_a_failure"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        registered = self._slash_commands_registered\n        if registered:\n"
+replace = "        registered = bool(self.tree.get_commands())\n        if False:\n"
+
+[[mutant]]
+id = "M-DAB003C"
+bug = "DAB-003"
+# Right structure, wrong predicate, and this is the one worth pinning.
+# register_ping_command runs first, so a registrar failing anywhere after it
+# leaves a NON-EMPTY but genuinely incomplete tree -- swept across all eleven
+# registrars, ten leave 1-16 commands and none self-heals. Seeding from the
+# tree reports exactly those states as healthy from the first reconnect
+# onward, so the change's only effect is to delete a true warning.
+summary = "Guard the re-registration on tree emptiness rather than on an explicit flag"
+guard = "test_a_partially_registered_tree_is_not_reported_as_healthy"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        registered = self._slash_commands_registered\n"
+replace = "        registered = bool(self.tree.get_commands())\n"
+
+[[mutant]]
+id = "M-DAB003D"
+bug = "DAB-003"
+# Claiming the flag before the await is what keeps two overlapping on_ready
+# tasks from both registering; releasing it on failure is what keeps a broken
+# tree loud. Drop the release and a partial registration goes quiet from the
+# first reconnect -- the same muting as M-DAB003C, reached the other way.
+summary = "Let the registered flag latch even when setup_commands raised"
+guard = "test_a_registration_failure_stays_critical_on_every_reconnect"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                self._slash_commands_registered = False\n                logger.critical("
+replace = "                logger.critical("
+
+[[mutant]]
+id = "M-DAB003E"
+bug = "DAB-003"
+# The other obvious way to make on_ready idempotent, and the dangerous one.
+# Measured: a registrar raising on the second run takes the tree from 22
+# commands to 6, and tree.sync() is a full-replace
+# PUT /applications/{id}/commands, so the other 16 are deleted from Discord
+# globally -- by a transient fault the shipped code survives untouched. A
+# degraded image backend on reconnect triggers it too: 24 -> 22, silently
+# un-publishing /edit-image and /image-queue.
+summary = "Make on_ready idempotent by clearing the tree and rebuilding it"
+guard = "test_a_transient_fault_on_reconnect_cannot_shrink_a_working_tree"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            self._slash_commands_registered = True\n            try:\n"
+replace = "            self.tree.clear_commands(guild=None)\n            try:\n"

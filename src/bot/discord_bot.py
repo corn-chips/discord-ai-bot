@@ -470,6 +470,13 @@ class DiscordBot(discord.Client):
         # Set up command tree for slash commands
         self.tree = discord.app_commands.CommandTree(self)
 
+        # Whether setup_commands has run to completion on this tree. discord.py
+        # re-fires on_ready on every gateway reconnect and setup_commands is not
+        # idempotent, so without this the second run reports an intact tree as a
+        # catastrophe (DAB-003). See on_ready for why this is an explicit flag
+        # and not `bool(self.tree.get_commands())`.
+        self._slash_commands_registered = False
+
         # Live mode (channel-isolated, mention-free) runtime state
         self._live_model_name = config.router_model_name
         self._live_cooldown_seconds = 2.0
@@ -583,9 +590,13 @@ class DiscordBot(discord.Client):
         # rolling gateway restarts -- used to escape on_ready into on_error,
         # skipping setup_commands, tree.sync() and the RAG backlog entirely.
         # The bot then ran with ZERO registered commands, which is a strictly
-        # worse version of DAB-002, and could not self-heal: the reconnect that
-        # re-fires on_ready hits CommandAlreadyRegistered instead (DAB-003).
-        # A stale presence badge is a much cheaper failure than that.
+        # worse version of DAB-002, and at the time could not self-heal: the
+        # reconnect that re-fires on_ready hit CommandAlreadyRegistered instead
+        # (DAB-003). It can now -- an escape before this point leaves
+        # _slash_commands_registered False and an empty tree, and the next
+        # on_ready registers all 22 cleanly (measured) -- but a stale presence
+        # badge is still a much cheaper failure than a lost startup, so the
+        # guard stays.
         try:
             activity = discord.Activity(
                 type=discord.ActivityType.listening,
@@ -607,18 +618,54 @@ class DiscordBot(discord.Client):
         # as "Failed to sync slash commands" -- sending the operator to look at
         # Discord when the fault was in their own code -- and the bot then
         # carried on serving with a partial or empty command tree.
-        registered = False
-        try:
-            await setup_commands(self, self.config, self.gemini_client, self.performance_logger, self.token_tracker)
-            registered = True
-        except Exception as e:
-            logger.critical(
-                "Slash command registration FAILED: %s. The bot is running with an "
-                "incomplete command tree; anything registered after the failure point "
-                "does not exist. This is a code fault, not a Discord outage.",
-                e,
-                exc_info=True,
+        #
+        # Skipped outright on a reconnect. discord.py re-fires on_ready every
+        # time the gateway reconnects, and setup_commands is not idempotent: the
+        # second call raises CommandAlreadyRegistered on `ping`, the first
+        # command it re-declares, with the tree left intact at 22. That used to
+        # produce two CRITICAL records -- "registration FAILED ... running with
+        # an incomplete command tree" with a traceback, and "Synced only 22
+        # ... the command tree is incomplete" -- both false, on a routine event.
+        # The loudest level in the system cried wolf on every reconnect, which
+        # devalues it for the failure it exists to report (DAB-003).
+        #
+        # The guard is an explicit flag, NOT `bool(self.tree.get_commands())`.
+        # The tree-state predicate looks equivalent and is measurably worse:
+        # register_ping_command runs first, so a registrar failing anywhere
+        # after it leaves a non-empty but genuinely incomplete tree, and seeding
+        # from the tree would then report that state as healthy from the first
+        # reconnect onward. Swept across all eleven registrars, ten of them
+        # leave 1-16 commands and none self-heals -- so the tree predicate would
+        # mute a true warning in ten cases out of eleven and silence a false one
+        # in one.
+        #
+        # Set before the await, not after. setup_commands contains no await
+        # today, so two overlapping on_ready tasks cannot interleave inside it;
+        # claiming the flag first means that stays true if one is ever added.
+        # Clearing the tree and rebuilding it was rejected outright: measured, a
+        # transient fault on the second run takes the tree from 22 commands to
+        # 6, and tree.sync() is a full-replace PUT, so it deletes the other 16
+        # from Discord globally.
+        registered = self._slash_commands_registered
+        if registered:
+            logger.info(
+                "Slash commands are already registered on this tree; skipping "
+                "re-registration after the gateway reconnect."
             )
+        else:
+            self._slash_commands_registered = True
+            try:
+                await setup_commands(self, self.config, self.gemini_client, self.performance_logger, self.token_tracker)
+                registered = True
+            except Exception as e:
+                self._slash_commands_registered = False
+                logger.critical(
+                    "Slash command registration FAILED: %s. The bot is running with an "
+                    "incomplete command tree; anything registered after the failure point "
+                    "does not exist. This is a code fault, not a Discord outage.",
+                    e,
+                    exc_info=True,
+                )
 
         try:
             synced = await self.tree.sync()

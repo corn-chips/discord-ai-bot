@@ -100,10 +100,15 @@ never hand-edit a version in it.
     breaks it independently of `EXPECTED_SIGNATURE`.
 
 
-Commands do not exist until `on_ready` (`discord_bot.py:509`) runs `setup_commands` +
-`tree.sync()`. `on_ready` re-fires on every gateway reconnect and has no re-entry guard, so
-the second run hits `CommandAlreadyRegistered` — see DAB-003 in `docs/ANALYSIS_BACKLOG.md`
-before you read those two CRITICAL log records as a real failure.
+Commands do not exist until `on_ready` (`discord_bot.py:516`) runs `setup_commands` +
+`tree.sync()`. `on_ready` re-fires on every gateway reconnect, so registration is guarded by
+`bot._slash_commands_registered`, set only when `setup_commands` has run to completion and
+released again if it raised (DAB-003). Do not replace that flag with
+`bool(self.tree.get_commands())`: `register_ping_command` runs first, so a registrar failing
+after it leaves a non-empty but genuinely incomplete tree, and ten of the eleven registrars
+produce exactly that. `M-DAB003C` reintroduces it. Do not clear the tree and rebuild either —
+`M-DAB003E` — because `tree.sync()` is a full-replace PUT, so a transient second-run fault
+deletes the surviving commands from Discord globally.
 
 
 ## Service wiring

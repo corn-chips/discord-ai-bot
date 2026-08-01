@@ -1546,3 +1546,84 @@ expect = "killed"
 [[mutant.edit]]
 find = "        if conn.execute(\"SELECT EXISTS(SELECT 1 FROM message_search_fts)\").fetchone()[0]:\n            return\n"
 replace = "        conn.execute(\"DELETE FROM message_search_fts\")\n"
+
+[[mutant]]
+id = "M-DAB077"
+bug = "DAB-077"
+# The defect: a full-table scan joined across message_index and
+# message_embeddings on every construction. Measured at ~132-character bodies,
+# median of 7: 6.9 ms at 1k rows, 64.7 ms at 10k, 741.8 ms at 100k -- 50-65% of
+# MessageIndexService.__init__ -- and it ran twice per boot until PPR-02's
+# early return landed, because _migrate_legacy_database re-entered on every
+# normal install.
+summary = "Reconcile embedding eligibility unconditionally on every construction"
+guard = "test_an_unchanged_second_construction_does_not_rescan"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                fingerprint = self._eligibility_fingerprint()\n                stored = conn.execute(\n                    \"SELECT eligibility_fingerprint FROM rag_state WHERE id = 1\"\n                ).fetchone()\n                if stored is None or stored[0] != fingerprint:\n                    self._reconcile_embedding_eligibility(conn)\n                    conn.execute(\n                        \"INSERT INTO rag_state(id, eligibility_fingerprint) \"\n                        \"VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET \"\n                        \"eligibility_fingerprint = excluded.eligibility_fingerprint\",\n                        (fingerprint,),\n                    )\n"
+replace = "                self._reconcile_embedding_eligibility(conn)\n"
+
+[[mutant]]
+id = "M-DAB077B"
+bug = "DAB-077"
+# Gate on the fingerprint's mere existence rather than on its value: fast,
+# and permanently wrong the first time a threshold or the rule changes. A
+# wrongly skipped reconcile is silent and unrecoverable -- the row stays
+# `skipped`, get_pending_embeddings never returns it, and an identical
+# re-upsert does not repair it; only a real edit does.
+summary = "Run the reconcile only when no fingerprint has ever been written"
+guard = "test_changing_a_threshold_re_runs_the_reconcile"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if stored is None or stored[0] != fingerprint:\n"
+replace = "                if stored is None:\n"
+
+[[mutant]]
+id = "M-DAB077C"
+bug = "DAB-077"
+# Drop the rule's own source from the fingerprint, leaving only the model and
+# the two thresholds -- which is what a hand-maintained version constant
+# degrades into the first time somebody edits a regex and forgets to bump it.
+# DAB-087 is exactly that edit.
+summary = "Fingerprint the eligibility config but not the eligibility rule"
+guard = "test_editing_the_eligibility_rule_re_runs_the_reconcile"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                self.embedding_model,\n                str(self.embedding_min_words),\n                str(self.embedding_min_alphanumeric_chars),\n                rules,\n"
+replace = "                self.embedding_model,\n                str(self.embedding_min_words),\n                str(self.embedding_min_alphanumeric_chars),\n"
+
+[[mutant]]
+id = "M-DAB077D"
+bug = "DAB-077"
+# Drop the embedding model. It reads like an eligibility-rule input that is
+# not one -- but a model change resets EVERY row to `pending` elsewhere in
+# _ensure_schema, and the reconcile is the only thing that puts the trivial
+# ones back. Without it, one config edit queues the whole history for a paid
+# embedding, trivia included. The guard needs a TRIVIAL row to see this: a
+# substantial one reaches `pending` either way, which is how the first draft of
+# that test passed over this mutant.
+summary = "Leave the embedding model out of the reconcile fingerprint"
+guard = "test_changing_the_embedding_model_re_runs_the_reconcile"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                self.embedding_model,\n                str(self.embedding_min_words),\n"
+replace = "                str(self.embedding_min_words),\n"
+
+[[mutant]]
+id = "M-DAB077E"
+bug = "DAB-077"
+# Gate the legacy migration's reconcile as well. Tempting -- it is the same
+# call -- and wrong: rows it has just imported have never been through the
+# reconcile, and the fingerprint already matches by then, so those rows stay
+# whatever the legacy database said forever.
+summary = "Gate the legacy migration's reconcile on the same fingerprint"
+guard = "test_a_legacy_migration_still_reconciles_what_it_imported"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                self._reconcile_embedding_eligibility(conn)\n                if self.fts_enabled:\n                    conn.execute(\"DELETE FROM message_search_fts\")\n"
+replace = "                if self.fts_enabled:\n                    conn.execute(\"DELETE FROM message_search_fts\")\n"

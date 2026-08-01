@@ -7,12 +7,14 @@ stores message metadata, a local FTS5 index, and optional Gemini embeddings.
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
 import re
 import sqlite3
 import threading
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -356,8 +358,55 @@ class MessageIndexService:
                 except sqlite3.OperationalError as exc:
                     self.fts_enabled = False
                     logger.warning("SQLite FTS5 is unavailable; lexical RAG search disabled: %s", exc)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS rag_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        eligibility_fingerprint TEXT
+                    )
+                    """
+                )
                 self._repair_empty_fts(conn)
-                self._reconcile_embedding_eligibility(conn)
+
+                # The eligibility reconcile is a full-table scan joined across
+                # message_index and message_embeddings, and it ran on every
+                # construction (DAB-077). Measured here at ~132-character
+                # bodies, median of 7: 6.9 ms at 1k rows, 64.7 ms at 10k,
+                # 741.8 ms at 100k -- 50-65% of MessageIndexService.__init__ --
+                # and until the previous commit it ran TWICE per boot, because
+                # _migrate_legacy_database re-entered on every normal install
+                # and called it again.
+                #
+                # It has work to do only when something that decides its answer
+                # has changed, so it is gated on a fingerprint of exactly those
+                # inputs. The fingerprint lives in a one-row `rag_state` table
+                # rather than in `rag_migrations`, deliberately: five tests in
+                # tests/test_rag_query_plans.py assert the whole ledger with
+                # assertEqual and they are the DAB-066 and DAB-083 guards. The
+                # only rewrite that admits a fingerprint row is `assertNotIn`,
+                # which stops them catching a spurious ledger row -- putting it
+                # there would trade two real guards for a table.
+                #
+                # A wrongly SKIPPED reconcile is permanent and silent: the row
+                # stays `skipped`, `get_pending_embeddings` never returns it, it
+                # never becomes `done`, and it is invisible to search_semantic
+                # and to the vector cache forever. An identical re-upsert does
+                # not repair it; only a real edit does. A wrongly RUN reconcile
+                # costs one boot's scan. That asymmetry is why the rule inputs
+                # are hashed from their own source rather than tracked by a
+                # hand-maintained version constant somebody can forget to bump.
+                fingerprint = self._eligibility_fingerprint()
+                stored = conn.execute(
+                    "SELECT eligibility_fingerprint FROM rag_state WHERE id = 1"
+                ).fetchone()
+                if stored is None or stored[0] != fingerprint:
+                    self._reconcile_embedding_eligibility(conn)
+                    conn.execute(
+                        "INSERT INTO rag_state(id, eligibility_fingerprint) "
+                        "VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET "
+                        "eligibility_fingerprint = excluded.eligibility_fingerprint",
+                        (fingerprint,),
+                    )
             logger.info("Message RAG index schema ready")
         except Exception as exc:
             logger.error("Failed to initialize message RAG index: %s", exc, exc_info=True)
@@ -907,6 +956,48 @@ class MessageIndexService:
         words = re.findall(r"[A-Za-z0-9]+", content_text or "")
         chars = len(re.findall(r"[A-Za-z0-9]", content_text or ""))
         return len(words) < self.embedding_min_words and chars < self.embedding_min_alphanumeric_chars
+
+    def _eligibility_fingerprint(self) -> str:
+        """Everything that can change what `_reconcile_embedding_eligibility` decides.
+
+        Four inputs, and the fourth is the one a version constant gets wrong.
+
+        `embedding_model` already carries the dimensions -- it is
+        `rag_embedding_model` and `rag_embedding_dimensions` joined by `@` --
+        and it belongs here for a reason beyond the eligibility rule: a model
+        change resets **every** row to `pending`, and the reconcile is the only
+        thing that puts the trivial ones back. Leave it out and one config edit
+        bills the entire history.
+
+        The rule itself lives in two places, not one: `_embedding_is_trivial`,
+        whose Latin-only character classes DAB-087 exists to widen, and the
+        `[Message type: ...]` strip inside `_reconcile_embedding_eligibility`
+        that runs when `embedding_eligibility_text` is NULL. That second regex
+        genuinely changes answers -- `"hi [Message type: default]"` is not
+        trivial before the strip and is after it -- and it is easy to miss.
+        Both are covered by hashing their own source rather than a constant,
+        because the failure mode of forgetting to bump a constant is a
+        permanently and silently unembeddable corpus, while the failure mode of
+        hashing a comment change is one extra scan.
+        """
+        try:
+            rules = inspect.getsource(type(self)._embedding_is_trivial) + inspect.getsource(
+                type(self)._reconcile_embedding_eligibility
+            )
+        except (OSError, TypeError):
+            # No source to read (frozen or zipped install). Fall back to a value
+            # that never matches, so the reconcile runs every boot: slow is the
+            # safe direction here, silence is not.
+            rules = uuid.uuid4().hex
+        material = "\u0000".join(
+            (
+                self.embedding_model,
+                str(self.embedding_min_words),
+                str(self.embedding_min_alphanumeric_chars),
+                rules,
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def _repair_empty_fts(self, conn: sqlite3.Connection) -> None:
         """Rebuild the FTS table when it is empty and the index is not.

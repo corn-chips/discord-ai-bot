@@ -1157,3 +1157,71 @@ expect = "killed"
 [[mutant.edit]]
 find = "            embed.add_field(name=\"Error\", value=f\"```{status_error[:900]}```\", inline=False)\n"
 replace = "            embed.add_field(name=\"Error\", value=\"See the bot log for detail.\", inline=False)\n"
+
+[[mutant]]
+id = "M-DAB068"
+bug = "DAB-068"
+# The ledger recorded the attempt rather than the work. On a fresh install
+# TokenTracker creates token_usage.db before PinService is constructed and it
+# has never held a pin, so the one shot was burned having copied nothing --
+# and logged at INFO as "Copied legacy pinned memories from ...". Any later
+# genuine migration was gated out forever. Reproduced before the fix: ledger
+# row present after boot 1, 0 of 61 real legacy pins copied on boot 2.
+summary = "Write the legacy_shared_pins_v1 ledger row even when there is nothing to migrate"
+guard = "test_an_absent_legacy_table_does_not_burn_the_one_shot"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    logger.debug(\n                        \"No legacy pinned_messages in %s; leaving the pin \"\n                        \"migration pending rather than recording it as done.\",\n                        source,\n                    )\n                    return\n"
+replace = "                    conn.execute(\n                        \"INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)\",\n                        (migration_name, datetime.utcnow().isoformat()),\n                    )\n                    return\n"
+
+[[mutant]]
+id = "M-DAB068B"
+bug = "DAB-068"
+# The original bulk copy: the only path in the tree that writes
+# pinned_messages without going through add_pin, and it enforced none of
+# add_pin's ceilings. Measured on 61 legacy pins in one channel: 61 rows
+# against a 25-pin cap, 300,871 characters against a 40,000 cap, a 5,014-char
+# pin against a 4,000 cap. That is also what made the >25-field /pins embed
+# reachable, so this mutant is the upstream half of M-PPR06.
+summary = "Copy legacy pins with the uncapped bulk INSERT ... SELECT"
+guard = "test_the_migration_leaves_a_state_add_pin_could_have_produced"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                copied, dropped = self._copy_legacy_pins(conn, available)\n"
+replace = "                conn.execute(\"INSERT OR IGNORE INTO main.pinned_messages (id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id) SELECT id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id FROM legacy.pinned_messages\")\n                copied, dropped = 0, {}\n"
+
+[[mutant]]
+id = "M-DAB068C"
+bug = "DAB-068"
+# Carrying the legacy id across with INSERT OR IGNORE. This is only reachable
+# because the ledger fix keeps the migration armed across boots: by the time
+# real legacy pins arrive the target may already hold rows with ids 1, 2, 3,
+# and OR IGNORE then swallows exactly those legacy pins while the migration
+# still reports success. A regression the DAB-068 ledger fix would otherwise
+# have created.
+summary = "Preserve the legacy pin id and let INSERT OR IGNORE swallow the collisions"
+guard = "test_a_colliding_legacy_id_does_not_silently_swallow_the_pin"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                INSERT INTO main.pinned_messages\n                    (channel_id, guild_id, content, author_name, pinned_by,\n                     pinned_at, message_id)\n                VALUES (?, ?, ?, ?, ?, ?, ?)\n"
+replace = "                INSERT OR IGNORE INTO main.pinned_messages\n                    (id, channel_id, guild_id, content, author_name, pinned_by,\n                     pinned_at, message_id)\n                VALUES ((SELECT COALESCE(MIN(id),1) FROM main.pinned_messages), ?, ?, ?, ?, ?, ?, ?)\n"
+
+[[mutant]]
+id = "M-DAB068D"
+bug = "DAB-068"
+# The injection half. _sanitise_pin_content defuses the prompt fence the
+# context builder emits (gemini_client.py:1803); the bulk copy skipped it, so
+# a legacy pin containing "--- End Context ---" arrived able to close the
+# block and have everything after it read as top-level instruction. The guard
+# asserts through ContextPackBuilder.build_pinned_context -- the live path --
+# not through get_pins_for_prompt, which has no caller under src/.
+summary = "Copy legacy pin text verbatim instead of defusing the prompt delimiters"
+guard = "test_a_migrated_pin_cannot_forge_the_end_of_the_context_block"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            cleaned = _sanitise_pin_content(content)\n"
+replace = "            cleaned = (content or \"\").strip()\n"

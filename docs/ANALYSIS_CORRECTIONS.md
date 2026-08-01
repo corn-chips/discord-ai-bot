@@ -598,8 +598,10 @@ test that asserts the service is still usable afterwards.
 AUTOINCREMENT primary key and eight `_ensure_column`-added columns, so a hand-declared map there is
 more brittle than the intersection it replaces, and a NOT NULL-with-default column would newly
 raise where it previously worked. The count assertion closes the "0 rows + ledger written"
-criterion without that risk. `DAB-068` — the sibling pin migration with the opposite bug — is
-**not** fixed and stays open.
+criterion without that risk. `DAB-068` — the sibling pin migration with the opposite bug — was
+**not** fixed here; it closed in round 2 Phase 3, along with a second defect in the same method
+that no finding had named: the copy bypassed every ceiling `add_pin` enforces. See the DAB-068
+bullet in [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md).
 
 ## 17. `b9a4514`'s central premise is false: slash commands hit no rate limiter at all
 

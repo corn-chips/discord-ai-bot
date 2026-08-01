@@ -659,15 +659,30 @@ the moment they matter.
   the scope in the SQL (`guild_id = ? OR reporter_id = ?`) rather than in the callback. This bullet
   and the Tier row above it both said OPEN for one commit longer than they were true; corrected in
   Phase 2.3.
-- **DAB-068 — the pin migration burns its one shot and logs a false success.** This is DAB-083's
-  defect, in `PinService`, and it was not fixed there. `_migrate_legacy_pins` writes the
-  `legacy_shared_pins_v1` ledger row unconditionally (`pin_service.py:130-133`, ledger insert at `:131`), even when the
-  legacy database has no `pinned_messages` table. Reproduced: on a fresh install (`TokenTracker`
-  creates `token_usage.db`, which has never held pins) the ledger row is written and
-  `Copied legacy pinned memories from ...` is logged at INFO having copied **0** pins. A later
-  genuine migration is then gated out forever. `922e899` fixed exactly this shape for the RAG
-  tables — `if not legacy_tables_found: return` without writing the ledger — and the same three
-  lines are needed here.
+- ~~**DAB-068 — the pin migration burns its one shot and logs a false success.**~~ **Closed in
+  round 2 Phase 3**, together with a second, independent defect in the same method that the
+  finding does not mention and that turned out to be the upstream cause of PPR-06. The ledger
+  guard landed as described — an absent legacy `pinned_messages` returns without writing
+  `legacy_shared_pins_v1`, so the migration stays armed. The second half: the copy was a bulk
+  `INSERT OR IGNORE ... SELECT`, the **only** path in the tree that writes `pinned_messages`
+  without going through `add_pin`, and it enforced none of `add_pin`'s ceilings. Measured before
+  the fix on 61 legacy pins in one channel: **61 rows** against a 25-pin cap, **300,871
+  characters** against a 40,000 cap, a **5,014-character** pin against a 4,000 cap, and a
+  `--- End Context ---` delimiter copied in undefused. It now admits rows one at a time under the
+  same three ceilings plus `_sanitise_pin_content`, so the table is left in a state `add_pin`
+  itself could have produced.
+
+  Three decisions worth recording, each from an adversarial review that ran the proposed fix
+  rather than reading it. The legacy `id` is **not** preserved: carrying it across with
+  `INSERT OR IGNORE` silently swallows a legacy pin whenever the target already holds that id, and
+  keeping the migration armed across boots is exactly what makes "the target already has rows"
+  reachable — measured, 4 legacy pins in, 0 out, `Copied 4` logged. The ledger name was **not**
+  bumped to `_v2`: it would re-run the copy on deployments that already migrated legitimately, and
+  without a preserved id that duplicates every pin, to recover a population (fresh install, then a
+  legacy database restored on top of it) that does not otherwise exist. And the per-channel
+  character cap is applied at its full 40,000 rather than at a fraction: a channel left at
+  39,946/40,000 is a state `add_pin` permits, and inventing a migration-only sub-budget would be an
+  undocumented second rule.
 - **DAB-003 — a routine gateway reconnect emits two CRITICAL records whose text is false.**
   `on_ready` has no re-entry guard and discord.py re-fires it on every reconnect. Reproduced by
   calling `setup_commands` twice on one tree: the second call raises

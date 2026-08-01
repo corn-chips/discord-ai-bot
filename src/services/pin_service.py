@@ -27,6 +27,13 @@ MAX_PINS_PER_CHANNEL = 25
 MAX_PIN_CHARS_PER_CHANNEL = 40_000
 MAX_PIN_CHARS = 4_000
 
+#: Columns the legacy copy cannot synthesise. `guild_id` and `message_id` are
+#: nullable in `pinned_messages` and are filled with NULL when a legacy schema
+#: lacks them; everything here is NOT NULL, or is the ordering key.
+_REQUIRED_LEGACY_PIN_COLUMNS = frozenset(
+    {"id", "channel_id", "content", "author_name", "pinned_by", "pinned_at"}
+)
+
 #: Delimiters the prompt builder uses to fence the context block. A pin
 #: containing one of these can forge the end of the block and inject text that
 #: reads as system-level instruction.
@@ -91,7 +98,35 @@ class PinService:
             logger.error(f"Failed to create pinned_messages table: {e}")
 
     def _migrate_legacy_pins(self, legacy_db_path: str) -> None:
-        """Copy legacy pins once into the dedicated RAG database."""
+        """Copy legacy pins once into the dedicated RAG database.
+
+        Two properties this has to get right, both of them learned the hard way
+        from the sibling migration in `MessageIndexService` (DAB-083, DAB-066).
+
+        **The ledger records work, not attempts.** The row used to be written
+        unconditionally, so a fresh install -- where `TokenTracker` has created
+        `token_usage.db` and it has never held a pin -- burned the one shot
+        having copied nothing, and logged it as a success. Any later genuine
+        migration was then gated out forever. An absent legacy table now returns
+        without writing the ledger, so the migration stays armed. Measured cost
+        of staying armed: +0.12 ms per boot, and no FTS rebuild on this path,
+        so nothing like PPR-02's +385.8 ms.
+
+        **Every pin admitted here goes through the ceilings `/pin` enforces.**
+        This is the only code path that writes `pinned_messages` without going
+        through `add_pin`, and it used to be a bulk `INSERT ... SELECT`.
+        Measured on 61 legacy pins in one channel: 61 rows stored against a
+        25-pin cap, 300,871 characters against a 40,000 cap, a single 5,014-char
+        pin against a 4,000 cap, and a `--- End Context ---` delimiter copied in
+        undefused. The invariant restored here is precisely *the table is left
+        in a state `add_pin` itself could have produced* -- which is also what
+        makes the >25-field `/pins` embed unreachable going forward.
+
+        Pins beyond a cap are dropped rather than truncated away, oldest first,
+        matching `add_pin`: once a channel is at the cap it is the *newer* pin
+        that is refused. Nothing deletes the legacy rows, so a dropped memory is
+        still readable in the legacy database, and the WARNING says so.
+        """
         source = Path(legacy_db_path).expanduser()
         target = Path(self.db_path).expanduser()
         if not source.exists() or source.resolve() == target.resolve():
@@ -113,27 +148,139 @@ class PinService:
                 ).fetchone():
                     return
                 conn.execute("ATTACH DATABASE ? AS legacy", (str(source),))
-                if conn.execute(
-                    "SELECT 1 FROM legacy.sqlite_master WHERE type='table' AND name='pinned_messages'"
+                # A view is as migratable as a table, and excluding one would
+                # leave the migration permanently pending now that "nothing to
+                # do" no longer writes the ledger.
+                if not conn.execute(
+                    "SELECT 1 FROM legacy.sqlite_master "
+                    "WHERE type IN ('table', 'view') AND name = 'pinned_messages'"
                 ).fetchone():
-                    conn.execute(
-                        """
-                        INSERT OR IGNORE INTO main.pinned_messages (
-                            id, channel_id, guild_id, content, author_name,
-                            pinned_by, pinned_at, message_id
-                        )
-                        SELECT id, channel_id, guild_id, content, author_name,
-                               pinned_by, pinned_at, message_id
-                        FROM legacy.pinned_messages
-                        """
+                    logger.debug(
+                        "No legacy pinned_messages in %s; leaving the pin "
+                        "migration pending rather than recording it as done.",
+                        source,
                     )
+                    return
+
+                available = {
+                    row[1]
+                    for row in conn.execute("PRAGMA legacy.table_info(pinned_messages)")
+                }
+                missing = sorted(_REQUIRED_LEGACY_PIN_COLUMNS - available)
+                if missing:
+                    logger.error(
+                        "Legacy pinned_messages in %s is missing %s; no pins were "
+                        "copied and the migration is left pending, so it will run "
+                        "again once the legacy schema is repaired.",
+                        source, ", ".join(missing),
+                    )
+                    return
+
+                copied, dropped = self._copy_legacy_pins(conn, available)
                 conn.execute(
                     "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
                     (migration_name, datetime.utcnow().isoformat()),
                 )
-            logger.info("Copied legacy pinned memories from %s", source)
+            logger.info(
+                "Copied %d legacy pinned memor%s from %s",
+                copied, "y" if copied == 1 else "ies", source,
+            )
+            for channel_id, count in sorted(dropped.items()):
+                logger.warning(
+                    "Dropped %d legacy pin(s) for channel %s: the channel was "
+                    "already at the %d-pin / %d-character ceiling. They remain "
+                    "readable in %s.",
+                    count, channel_id, MAX_PINS_PER_CHANNEL,
+                    MAX_PIN_CHARS_PER_CHANNEL, source,
+                )
         except Exception as exc:
             logger.error("Failed to copy legacy pinned memories from %s: %s", source, exc)
+
+    def _copy_legacy_pins(self, conn, available: set) -> Tuple[int, dict]:
+        """Admit legacy rows one at a time, under `add_pin`'s ceilings.
+
+        Returns `(copied, {channel_id: dropped})`.
+        """
+        guild_expr = "guild_id" if "guild_id" in available else "NULL"
+        message_expr = "message_id" if "message_id" in available else "NULL"
+
+        # substr bounds the read. Everything past MAX_PIN_CHARS is truncated by
+        # _sanitise_pin_content anyway, and the pins this migration exists to
+        # move are precisely the ones created before any length cap existed:
+        # on 2,000 x 100 KB legacy pins, an unbounded fetchall costs +192 MB
+        # inside DiscordBot.__init__ against +11 MB with the substr.
+        #
+        # ORDER BY id, not pinned_at. `pinned_at` is TEXT and carries two
+        # formats -- add_pin's isoformat "T" separator and the column default's
+        # CURRENT_TIMESTAMP space -- so a same-day default row sorts before
+        # every ISO row (0x20 < 0x54). `id` is INTEGER PRIMARY KEY AUTOINCREMENT
+        # and therefore is insertion order, with no format variants.
+        rows = conn.execute(
+            f"""
+            SELECT channel_id, {guild_expr}, substr(content, 1, ?), author_name,
+                   pinned_by, pinned_at, {message_expr}
+            FROM legacy.pinned_messages
+            ORDER BY channel_id, id
+            """,
+            (MAX_PIN_CHARS + 1,),
+        ).fetchall()
+
+        state = {}
+        copied = 0
+        dropped = {}
+
+        for channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id in rows:
+            if channel_id is None:
+                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+                continue
+
+            cleaned = _sanitise_pin_content(content)
+            if not cleaned:
+                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+                continue
+
+            if channel_id not in state:
+                state[channel_id] = list(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*), COALESCE(SUM(LENGTH(content)), 0)
+                        FROM main.pinned_messages WHERE channel_id = ?
+                        """,
+                        (channel_id,),
+                    ).fetchone()
+                )
+            count, chars = state[channel_id]
+
+            if (
+                count >= MAX_PINS_PER_CHANNEL
+                or chars + len(cleaned) > MAX_PIN_CHARS_PER_CHANNEL
+            ):
+                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+                continue
+
+            # The legacy `id` is deliberately NOT preserved. Carrying it over
+            # with INSERT OR IGNORE means a target row that already holds that
+            # id silently swallows the legacy pin and still counts as copied --
+            # and now that the ledger stays unwritten until there is something
+            # to copy, "the target already has rows" is a reachable state. A
+            # plain INSERT also means a genuine constraint failure aborts the
+            # transaction and is retried next boot, rather than being ignored.
+            conn.execute(
+                """
+                INSERT INTO main.pinned_messages
+                    (channel_id, guild_id, content, author_name, pinned_by,
+                     pinned_at, message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    channel_id, guild_id, cleaned, author_name, pinned_by,
+                    pinned_at or datetime.utcnow().isoformat(), message_id,
+                ),
+            )
+            state[channel_id] = [count + 1, chars + len(cleaned)]
+            copied += 1
+
+        return copied, dropped
 
     def add_pin(
         self,

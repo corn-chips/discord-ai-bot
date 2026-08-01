@@ -212,9 +212,10 @@ here.
 | DAB-138 | PIL PNG encoding on the event loop, up to 26 images per request | media |
 | DAB-140 | **PARTIAL.** The headline count is out of date: measured at `922e899` by building the tree and reading `to_dict()`, **11 of the 35 registered entries** are behind at least one gate, not 1, and 3 of the 22 top-level entities carry a payload permission (`/clear-cache` 8, `/dev` 8, `/rag` 32). There is still no *model* — the gates are per-command decisions. Three holes are open and listed under "Post-programme findings": `/live`, `/clear-cache` in DMs, and the two commands that still echo `str(exc)`. Tracked as TD-012 | security |
 | DAB-142 | **DONE** (Phase 2/3, `d4b91a5`) — `/dev` is gated three ways: payload `default_permissions(administrator=True)`, `guild_only()` (Discord does not evaluate payload permissions in a DM), and a runtime administrator check, because `default_member_permissions` is a default a guild admin can re-grant | security |
-| DAB-143 | **OPEN.** Report web UI serves every guild's reports with no authentication. Untouched by the programme; residual risk on a public repo | security |
-| DAB-144 | **OPEN.** `ReportWebServer.url` still rewrites a `0.0.0.0` bind to `127.0.0.1` (`report_web_server.py:28`), so the URL the bot prints understates the exposure of the DAB-143 surface. The two compound: read them together | security |
-| DAB-147 | **OPEN.** `/report-status` still reads any report by enumerable id with no guild scope (`reports_usage.py:103` calls `report_service.get_report(report_id)` on the raw integer) | security |
+| DAB-145 | **DONE** (round 2 Phase 2.3) — cross-origin form POST against the report web UI. Named once in `BUG_ANALYSIS_2026-07-29.md:1260` and never carried into this register, which is why no earlier pass saw it; written up as PPR-11 below, where the three shapes beyond the headline one are recorded | security |
+| DAB-143 | **DONE** (round 2 Phase 2.3) — the off-box surface is closed at the socket, not in `validate_config`: `ReportWebServer.start` reads the addresses actually bound back off the runner and refuses anything that is not all-loopback, logging and returning rather than raising so the bot still boots. No opt-in flag; a port forward is the supported remote path. Residual: a local process still reads everything — see PPR-11 | security |
+| DAB-144 | **DONE** (round 2 Phase 2.3) — the display rewrite is gone. A running server reports the addresses it actually bound (both of them, when a name binds two), IPv6 bracketed; `on_ready`'s status line now distinguishes "Unavailable" from "Disabled" so a refusal no longer reads as an operator choice | security |
+| DAB-147 | **DONE** (round 2, `7e2dcf1`) — `get_report` takes a `visible_to_guild` / `visible_to_reporter` scope enforced in the SQL, so the web UI and any future caller inherit it. The `OR reporter_id` half keeps DM-filed reports readable by their author. This row said OPEN for one commit after it was fixed; corrected in Phase 2.3 | security |
 | DAB-148 | **DONE** — Every `/config` subcommand mutates process-global state, ungated. Promoted out of Tier 3 and landed in Phase 3: runtime Manage Server guards on the five mutating subcommands, `/config info` deliberately left open | security |
 | DAB-153 | **PARTIAL** (Phase 2/3, `d4b91a5`) — raw exception text no longer reaches unprivileged users through `error_manager`. Three call sites outside that scope still echo `str(exc)` directly and were not covered: `/deepresearch` (`research.py:120`), `/summarize` (`:493`) — both **non-ephemeral** — and `/rag status`'s DEGRADED embed (`:228`, ephemeral, manage_guild callers only). Listed under "Post-programme findings" | security |
 | DAB-159 | **OPEN.** Indirect prompt injection: retrieved content can forge the RAG context fence. Partially mitigated for *pins* only — `417e468` defuses the prompt delimiters in pinned text (`pin_service.py:45-48`) — but retrieved messages are untouched | security |
@@ -612,13 +613,17 @@ unfixed remainder rather than as a new defect.
 Verified at `922e899` and unchanged by the programme. Listed together because a public push is
 the moment they matter.
 
-- **DAB-143 / DAB-144 — the report web server.** Still no authentication of any kind, and
-  `ReportWebServer.url` still rewrites a `0.0.0.0` bind to `127.0.0.1` for display
-  (`report_web_server.py:27-28`). The two compound: the surface is unauthenticated and the URL the
-  operator is shown understates who can reach it.
-- **DAB-147 — `/report-status` is unscoped by guild.** `reports_usage.py:103` passes the raw
-  integer to `report_service.get_report(report_id)` with no guild check, so report ids are
-  enumerable across guilds.
+- ~~**DAB-143 / DAB-144 — the report web server.**~~ **Closed in round 2 Phase 2.3.** The socket
+  refuses any bind whose *actually bound* addresses are not all loopback, the URL reports the
+  address in use, and a state-changing request must carry a matching `Origin` from an allowlisted
+  loopback `Host`. Residual, recorded rather than fixed: any process on the same machine can still
+  read every guild's reports and change their status. Closing that needs a token, and a token is
+  only worth its operator cost for a deployment reachable off-box — which is now impossible by
+  construction.
+- ~~**DAB-147 — `/report-status` is unscoped by guild.**~~ **Closed in round 2 by `7e2dcf1`**, with
+  the scope in the SQL (`guild_id = ? OR reporter_id = ?`) rather than in the callback. This bullet
+  and the Tier row above it both said OPEN for one commit longer than they were true; corrected in
+  Phase 2.3.
 - **DAB-068 — the pin migration burns its one shot and logs a false success.** This is DAB-083's
   defect, in `PinService`, and it was not fixed there. `_migrate_legacy_pins` writes the
   `legacy_shared_pins_v1` ledger row unconditionally (`pin_service.py:130-133`, ledger insert at `:131`), even when the
@@ -639,3 +644,64 @@ the moment they matter.
   already described in the comment at `:576-580`. The cost is that the loudest log level in the
   system now cries wolf on a routine event, which devalues it for the real failure it was added
   to report.
+
+### PPR-11 (S3) — the report web UI accepted a cross-site form POST — **CLOSED, Phase 2.3**
+
+**This is `DAB-145`**, which `BUG_ANALYSIS_2026-07-29.md:1260` names in one line — "No CSRF
+protection: a cross-origin form POST mutates report state" — and which never reached this
+register, so it was invisible to every pass that worked from the backlog. It is written up here
+because it was the one part of the web-server surface that was live on the **shipped loopback
+default** rather than on a misconfiguration, and because three of its four exploitable shapes
+are not in that line. `_update_status` reads `await request.post()`, an
+`application/x-www-form-urlencoded` body. That is a *simple* content type: a browser submits it
+cross-origin with no CORS preflight, and there was no CSRF token, no `Origin` check and no session
+cookie to make `SameSite`. Any page the operator visited while the bot was running could silently
+reclassify or annotate any report by id. Measured before the fix, against `127.0.0.1`:
+`Origin: https://evil.example` → `303`, row `('open', None)` → `('done', 'drive-by from
+evil.example')`.
+
+Three further shapes, all found by executing the guard rather than by reading it, all now refused
+and each pinned by its own mutant:
+
+- **DNS rebinding defeats an Origin-equals-Host check.** Point `evil.example` at `127.0.0.1` and
+  the victim's form POST carries `Host: evil.example` *and* `Origin: http://evil.example`. They
+  agree, so the check passes: measured 303, row mutated. Closed by allowlisting the `Host` to
+  loopback names and answering `421` otherwise.
+- **A missing `Origin` is not a browser.** Per Fetch Standard §3.2 the `Origin` append is
+  unconditional for any method that is not `GET`/`HEAD`, and a suppressing referrer policy sets it
+  to the literal `null` rather than omitting it. So refusing the absent case cannot reject a
+  browser form, and allowing it made the guard optional for everything else.
+- **A parsed comparison is not an exact one.** A trailing slash, a path, `HTTP://`, and an embedded
+  tab all yield the right netloc and all mutated a row. The comparison is now an exact string
+  match against `http://{Host}`.
+
+### PPR-12 (S4) — a partial POST to the report UI silently wipes the admin notes
+
+`_update_status` reads `admin_notes = str(data.get("admin_notes", ""))`
+(`report_web_server.py`), so a request that omits the field is indistinguishable from one that
+sends it empty, and `update_status` writes the empty string over whatever was there. Measured:
+a body of `status=done` alone turned `('open', 'IMPORTANT OPERATOR NOTES')` into `('done', '')`
+with a 303. The served form always sends both fields, so this needs a hand-made request; it is
+recorded rather than fixed because it is data loss, not a security boundary, and folding it into
+the Phase 2.3 security commit would have muddied both. Two riders in the same handler: an
+`admin_notes` arriving as a multipart file field stores `str(FileField(...))` — a repr containing a
+file descriptor number — and the field length is unbounded (900 KB accepted and stored).
+
+### PPR-13 (S4) — `GET /` renders 200 reports for a `HEAD`, on the event loop
+
+`app.router.add_get` defaults to `allow_head=True`, so a `HEAD /` runs `list_reports(limit=200)`
+and the full HTML render synchronously on the bot's event loop and then discards the body.
+Measured directly, driving the real handler against a database of 200 reports: **2.2 ms of
+uninterrupted event-loop time per request** (median of 21, min 2.1, max 2.9). Quoted that way on
+purpose — an earlier review reported 232 requests/s for this shape and a re-run of it reported
+397/s, so the rate is not a number worth carrying; the per-request cost is.
+
+**The TCP client must be local; the party driving it need not be.** A remote page cannot read the
+response — there are no CORS headers, so the browser withholds it — but it does not need to:
+`new Image().src = "http://127.0.0.1:8080/"` is a no-cors GET, carries no `Origin`, and makes the
+bot do the work anyway. The `Host` allowlist does not see it, because the `Host` genuinely is
+`127.0.0.1`. Recorded rather than fixed: `Sec-Fetch-Site: cross-site` would identify it, but that
+header can only ever be used to reject and never to allow, and a second, weaker guard beside the
+one that already protects every state change is not a trade worth making for a request that
+changes nothing. Same event-loop-blocking class as DAB-178, which already covers the synchronous
+SQLite in these two handlers.

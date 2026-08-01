@@ -562,10 +562,17 @@ class DiscordBot(discord.Client):
             "  - Hybrid Message RAG: %s",
             "Active" if self.config.rag_enabled else "Disabled",
         )
-        logger.info(
-            "  - Report Web UI: %s",
-            "Active" if self.report_web_server and self.report_web_server.is_running else "Disabled",
-        )
+        # Three states, not two. "Disabled" used to cover both "the operator
+        # turned it off" and "it was configured on and did not start", so a
+        # loopback refusal read as a deliberate choice. This is the wording
+        # _get_service_status already uses further down this file.
+        if self.report_web_server and self.report_web_server.is_running:
+            report_web_state = "Active"
+        elif self.config.report_web_enabled:
+            report_web_state = "Unavailable"
+        else:
+            report_web_state = "Disabled"
+        logger.info("  - Report Web UI: %s", report_web_state)
 
         # Set bot status.
         #

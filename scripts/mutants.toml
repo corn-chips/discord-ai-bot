@@ -786,3 +786,187 @@ expect = "killed"
 [[mutant.edit]]
 find = "        clauses = [\"id = ?\"]\n        params: list = [int(report_id)]\n"
 replace = "        clauses = [\"id = ?\"]\n        params: list = [int(report_id)]\n        visible_to_guild = visible_to_reporter = None\n"
+
+[[mutant]]
+id = "M-DAB143"
+bug = "DAB-143"
+# Removes both loopback refusals at once. They are individually redundant for
+# an address literal -- the pre-check refuses `0.0.0.0` before a socket exists,
+# and the post-bind check would refuse it again -- so neither alone is killable
+# on that input. M-DAB143B and M-DAB143C pin them separately, each on an input
+# only one of them can see.
+summary = "Bind whatever reports.web_host names, restoring the off-box report surface"
+guard = "test_a_wildcard_bind_is_refused_and_leaves_nothing_listening"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(self.host or \"<empty>\")\n            return\n"
+replace = ""
+[[mutant.edit]]
+find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\", \".join(exposed) or \"no readable address\")\n            return\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB143B"
+bug = "DAB-143"
+# Keeps the pre-check and deletes only the authoritative post-bind
+# verification, which is the half that survives predicting a bind and
+# performing it disagreeing. Its guard uses `web_host: "0"`: not an address
+# literal, so the pre-check has nothing to judge, but it resolves to 0.0.0.0
+# and binds every interface. The machine's own host name would also work and
+# would self-skip on any host without a non-loopback address, which would leave
+# this mutant alive for an environment reason rather than a code one.
+summary = "Trust the configured host string instead of the address actually bound"
+guard = "test_a_host_the_pre_check_cannot_judge_is_refused_after_binding"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\", \".join(exposed) or \"no readable address\")\n            return\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB144"
+bug = "DAB-144"
+# The original display rewrite: a service listening on every interface
+# described itself to the operator as loopback-only, at the one moment they
+# were looking at it.
+#
+# A unit pin on the property, not on a live scenario: with DAB-143 landed a
+# wildcard bind never reaches the logger.info that reads `url`, and nothing
+# outside this class reads it. It is kept because the rewrite is what a future
+# reader would re-add to make the log line "tidier".
+summary = "Rewrite a wildcard bind to 127.0.0.1 for display"
+guard = "test_a_wildcard_bind_is_never_displayed_as_loopback"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        return self.urls[0]\n"
+replace = "        host = \"127.0.0.1\" if self.host in {\"0.0.0.0\", \"::\"} else self.host\n        return _format_url(host, self.port)\n"
+
+[[mutant]]
+id = "M-DAB144B"
+bug = "DAB-144"
+# runner.addresses yields a 2-tuple for IPv4 and a 4-tuple for IPv6, so the
+# obvious spelling raises ValueError -- after the socket is bound -- for the
+# entirely legal `web_host: "::1"`. Reading the bind back is only an
+# improvement if it survives the shapes the bind can take.
+summary = "Unpack a bound address instead of indexing it, crashing on IPv6"
+guard = "test_an_ipv6_address_is_bracketed_rather_than_crashing"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        bound = [(str(address[0]), int(address[1])) for address in runner.addresses]\n"
+replace = "        bound = [(str(host), int(port)) for host, port in runner.addresses]\n"
+
+[[mutant]]
+id = "M-PPR11"
+bug = "PPR-11"
+# The shipped state before this landed: `_update_status` reads a
+# form-urlencoded body, which a browser submits cross-origin with no preflight,
+# and there is no cookie to make SameSite. Any page the operator visited could
+# reclassify any report by id.
+summary = "Accept a state-changing request from any origin"
+guard = "test_a_cross_origin_form_post_cannot_change_a_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if request.method not in SAFE_METHODS:\n            if request.headers.get(\"Origin\") != f\"http://{host_header}\":\n"
+replace = "        if request.method not in SAFE_METHODS:\n            if False:\n"
+
+[[mutant]]
+id = "M-PPR11B"
+bug = "PPR-11"
+# The obvious way to write the check, and the one that breaks the UI: an
+# operator who reaches the page at localhost, or through a port forward on
+# another local port, has their own form rejected. A guard that does that gets
+# switched off, which leaves the hole open with the code still in the tree.
+#
+# It is also killed by test_the_page_own_form_post_still_changes_the_report,
+# incidentally rather than on the merits: the fixture configures port 0 and
+# `self.port` is never updated to the bound port, so the expected origin
+# becomes `http://127.0.0.1:0`. The named guard is the one that fails for the
+# stated reason, and it fails on a fixed port too.
+summary = "Compare the Origin against the configured host instead of the one the client used"
+guard = "test_reaching_the_page_by_name_still_changes_the_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if request.headers.get(\"Origin\") != f\"http://{host_header}\":\n"
+replace = "            if request.headers.get(\"Origin\") != f\"http://{self.host}:{self.port}\":\n"
+
+[[mutant]]
+id = "M-PPR11C"
+bug = "PPR-11"
+# Without the Host allowlist, DNS rebinding makes the Origin check
+# self-defeating: the attacker points a name they control at 127.0.0.1, so
+# their page's form POST carries Host: evil.example AND Origin:
+# http://evil.example. Those agree, so an Origin-equals-Host comparison passes
+# them. Measured at 303 with the row mutated.
+summary = "Answer to any Host, reopening DNS rebinding against the Origin check"
+guard = "test_a_rebound_dns_name_cannot_change_a_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        hostname = _hostname_of(host_header).lower().rstrip(\".\")\n        if not hostname:\n            return False\n"
+replace = "        hostname = _hostname_of(host_header).lower().rstrip(\".\")\n        return True\n"
+
+[[mutant]]
+id = "M-PPR11D"
+bug = "PPR-11"
+# "Check the Origin when one is present" is the widely-published form of this
+# defence and it is a hole here: anything that is not a browser simply omits
+# the header. Fetch Standard section 3.2 appends Origin unconditionally for any
+# method that is not GET or HEAD, so refusing the absent case cannot reject a
+# browser form.
+summary = "Allow a state-changing request that carries no Origin at all"
+guard = "test_a_post_with_no_origin_at_all_cannot_change_a_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if request.headers.get(\"Origin\") != f\"http://{host_header}\":\n"
+replace = "            origin = request.headers.get(\"Origin\")\n            if origin is not None and origin != f\"http://{host_header}\":\n"
+
+[[mutant]]
+id = "M-PPR11E"
+bug = "PPR-11"
+# Parsing the Origin instead of matching it exactly. A netloc comparison
+# accepts a trailing slash, a path, an uppercased scheme and an embedded tab --
+# none of which a browser can produce, all of which mutated a row.
+summary = "Compare the Origin's host part rather than the whole serialised origin"
+guard = "test_an_origin_that_only_looks_right_cannot_change_a_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if request.headers.get(\"Origin\") != f\"http://{host_header}\":\n"
+replace = "            netloc = (request.headers.get(\"Origin\") or \"\").split(\"://\")[-1].split(\"/\")[0].strip()\n            if netloc != host_header:\n"
+
+[[mutant]]
+id = "M-DAB143C"
+bug = "DAB-143"
+# The other half: deletes only the pre-check, so a wildcard literal reaches the
+# bind and is caught a moment later by the post-bind check. Almost invisible --
+# the refusal still happens -- except that the socket has existed in between,
+# and a connection arriving in that window is accepted. The guard makes the
+# difference observable by occupying the port first: refusing early is silent,
+# reaching the bind is EADDRINUSE out of start().
+summary = "Open the socket first and judge it afterwards, so a wildcard bind briefly exists"
+guard = "test_a_wildcard_literal_is_refused_before_any_socket_operation"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(self.host or \"<empty>\")\n            return\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB143D"
+bug = "DAB-143"
+# config_helpers strips reports.web_host only for its emptiness test and stores
+# the value as written, so " 127.0.0.1 " arrives here intact, misses the
+# literal pre-check, and reaches getaddrinfo as a host name.
+summary = "Take reports.web_host as written, so a stray space makes a loopback host unresolvable"
+guard = "test_a_host_that_needs_stripping_still_starts"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        self.host = str(host).strip()\n"
+replace = "        self.host = host\n"

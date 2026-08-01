@@ -708,6 +708,68 @@ recovery story wrong. Compare `after_count` against `expected + before`, or coun
 genuinely absent from `main`. Full detail as `PPR-02` in
 [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md).
 
+## 20. The security-residuals report's own recommendation is refuted on both halves
+
+**Not a corpus claim.** Before Phase 2.3 the seven open security findings were re-verified at
+`5552724`, each against a real HTTP response, a real SQLite row or an executed callback. That
+verification is far better evidenced than the tickets it re-checks and its findings all hold. Its
+two *recommendations* for the report web server do not, and both failed only when someone tried to
+implement them. Recorded here for the same reason as items 11, 12 and 17: this programme's own
+work gets the corpus's treatment. (The report itself is a working note that lives outside the
+checkout, so nothing below rests on it -- every counter-claim was re-measured here and the command
+is given.)
+
+**a. "Refusing a non-loopback bind belongs in config validation, not in `ReportWebServer.start`",**
+on the grounds that `validate_config` "fails the boot loudly, whereas a check inside `start()` is
+swallowed by the `except Exception` at `discord_bot.py:546` and degrades to a log line". Both
+halves of that are true. The conclusion does not follow, for a reason of proportion rather than
+mechanism.
+
+`validate_config`'s errors reach `load_and_validate_config`, which calls `sys.exit(1)`
+(verified at `config.py:267`, via `BotConfig.validate`). So the rule would not fail one feature,
+it would stop the bot -- every message, every command -- over the address of an auxiliary web
+page, deterministically, on every start until someone edits the file. That is item 16's shape
+without item 16's excuse: there the trapped operator had no escape at all, here they do, and the
+disproportion is the objection on its own.
+
+The distinction from the rules already there is worth stating, because `config_helpers.py:514`
+does fail the boot on an empty `reports.web_host` and that is correct. An empty host is a value
+that cannot work; `0.0.0.0` is a value that works perfectly and is merely unsafe. Refusing to
+start over the first is a typo check. Refusing to start over the second is a policy disagreement,
+and a policy disagreement should cost the operator the feature it is about.
+
+The report's actual objection -- that a socket-level refusal degrades to a log line -- is answered
+rather than dismissed: the refusal logs at ERROR with the remedy in the message, and `on_ready`'s
+status line went from a two-state `Active`/`Disabled`, where a refusal was indistinguishable from
+the operator having switched the feature off, to the three-state wording `_get_service_status`
+already used further down the same file.
+
+**b. "Origin/Referer check on POST -- reject a state-changing request whose `Origin` is not the
+server's own", ~6 lines of middleware.** Implemented literally, that is bypassed three ways, each
+measured against a real server with a real SQLite row read back afterwards:
+
+| Request shape | Against the recommended check | Why |
+|---|---|---|
+| `Host: evil.example:P` + `Origin: http://evil.example:P` | **303, row mutated** | DNS rebinding. The two headers agree with each other, so comparing them to each other passes. Needs a loopback allowlist on `Host`, answering 421 |
+| no `Origin`, no `Referer` | **303, row mutated** | "Check it when present" is the published form of this defence and it is optional for anything that is not a browser |
+| `Origin: http://127.0.0.1:P/`, `.../path`, `HTTP://...`, embedded tab | **303, row mutated** | A netloc comparison accepts six shapes the Fetch ABNF forbids |
+
+Two consequences worth carrying forward. The `Referer` fallback is **not** needed and was dropped:
+per Fetch Standard §3.2 the `Origin` append is unconditional for a method that is not `GET`/`HEAD`,
+and a suppressing referrer policy sets the value to the literal `null` rather than omitting the
+header, so a browser form always carries one and the fallback only widens the surface. And the
+comparison must be against the `Host` the client used rather than the configured `web_host`,
+because an operator reaching the page at `localhost` or through a port forward on another local
+port must not have their own form refused -- but that is only safe *with* the allowlist, which is
+what stops the same leniency becoming the rebinding hole in row 1.
+
+**c. One thing the report does not mention at all**, and the Origin check cannot see by
+construction: there was no `X-Frame-Options` or CSP, so a framed copy of the page submits its own
+form and the `Origin` is genuinely correct. Three response headers, added in the same middleware.
+`Referrer-Policy: no-referrer` is the tempting fourth and is deliberately **absent**: by the same
+§3.2 it would make this page's own form send `Origin: null` and the server would then 403 every
+save. That trap is pinned by a test.
+
 ## The pattern across the corpus's measured claims
 
 Collected in one place because the individual corrections above make each look like a one-off, and

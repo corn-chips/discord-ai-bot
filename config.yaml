@@ -19,6 +19,17 @@ bot:
 # --- Report Tracking ---
 reports:
   web_enabled: true
+  # web_host must be a loopback address, and this is enforced at the socket:
+  # ReportWebServer.start reads back what it actually bound and refuses to serve
+  # anything else. The page has no authentication and shows every guild's
+  # reports, including raw Discord user ids, so there is no setting that makes
+  # exposing it safe. To reach it from another machine, leave this alone and
+  # forward the port: ssh -L 8080:127.0.0.1:8080 <host>. That works, because the
+  # request guard deliberately does not care which local port you arrive on.
+  #
+  # A non-loopback value does not stop the bot; it disables this one feature and
+  # logs why. Enforcing it in validate_config would be sys.exit(1) -- a boot loop
+  # for a deployment that is otherwise fine.
   web_host: "127.0.0.1"
   web_port: 8080
 

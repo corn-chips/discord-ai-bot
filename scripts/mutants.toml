@@ -1096,3 +1096,64 @@ expect = "killed"
 [[mutant.edit]]
 find = "    name = value if isinstance(value, str) else str(value or \"\")\n"
 replace = "    name = str(value or \"\")\n"
+
+[[mutant]]
+id = "M-PPR09"
+bug = "PPR-09"
+# The shipped state: str(exc) interpolated into a PUBLIC channel message under
+# a bare `except Exception`. Measured before the fix -- absolute filesystem
+# paths including the OS username, SQL and table names, and a 343-character
+# provider error posted in full, which is longer than the 200-character cap
+# error_manager applies to the same class of text.
+summary = "Post the raw exception from /deepresearch into the channel again"
+guard = "test_deepresearch_does_not_post_the_exception_into_the_channel"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            await interaction.followup.send(\n                \"❌ Deep research failed due to an unexpected error. \"\n                \"Check the bot logs for details.\",\n                ephemeral=True,\n            )\n"
+replace = "            await interaction.followup.send(f\"❌ An error occurred during deep research: {str(e)}\")\n"
+
+[[mutant]]
+id = "M-PPR09B"
+bug = "PPR-09"
+# The same site with the text sanitised but the reply left public. Kept
+# separate because "stop echoing the exception" and "stop announcing the
+# failure to the channel" are two decisions, and the first is the one an
+# implementer notices.
+summary = "Sanitise the /summarize failure but leave the reply public"
+guard = "test_summarize_does_not_post_the_exception_into_the_channel"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                \"❌ Summarizing failed due to an unexpected error. \"\n                \"Check the bot logs for details.\",\n                ephemeral=True,\n"
+replace = "                \"❌ Summarizing failed due to an unexpected error. \"\n                \"Check the bot logs for details.\",\n"
+
+[[mutant]]
+id = "M-PPR05"
+bug = "PPR-05"
+# The resolved absolute database path, back in the healthy embed. This is the
+# branch the finding did not mention: there is no exception here at all, so
+# every successful /rag status disclosed the path -- including the OS username
+# -- to anyone with Manage Server.
+summary = "Render the resolved database path in the /rag status embed again"
+guard = "test_the_healthy_status_embed_does_not_carry_the_database_path"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        embed.add_field(name=\"Indexed Messages\""
+replace = "        embed.add_field(name=\"Local Database\", value=status[\"database_path\"], inline=False)\n        embed.add_field(name=\"Indexed Messages\""
+
+[[mutant]]
+id = "M-PPR05B"
+bug = "PPR-05"
+# Over-correction in the other direction: strip the exception text the
+# administrator actually needs. PPR-05 was filed against exactly this, and it
+# was the wrong target -- the embed is ephemeral, /rag is gated on Manage
+# Server, and none of the three realistic failures carries a path.
+summary = "Strip the exception text from the DEGRADED embed as well as the path"
+guard = "test_the_degraded_embed_still_tells_the_admin_what_broke"
+file = "src/bot/command_modules/research.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            embed.add_field(name=\"Error\", value=f\"```{status_error[:900]}```\", inline=False)\n"
+replace = "            embed.add_field(name=\"Error\", value=\"See the bot log for detail.\", inline=False)\n"

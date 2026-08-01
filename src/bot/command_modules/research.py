@@ -116,8 +116,24 @@ def register_deepresearch_command(context: CommandContext) -> None:
             await interaction.followup.send(f"✅ **Deep Research Complete!**\nHere is your report on: *{topic}*", file=discord_file)
 
         except Exception as e:
+            # PPR-09. This used to interpolate str(e) into a PUBLIC channel
+            # message. Every exception type reaches here, so that posted
+            # absolute filesystem paths including the OS username
+            # ("[Errno 2] ... /home/<user>/discord-ai-bot/data/token_usage.db")
+            # and internal identifiers ("no such table: message_index") to
+            # everyone in the channel. It was also strictly more permissive
+            # than error_manager, which suppresses raw text by default and
+            # caps it at 200 characters even when enabled: a 343-character
+            # provider error was posted here in full.
+            #
+            # The operator loses nothing -- exc_info=True above keeps the whole
+            # traceback in the log, which is where it belongs.
             logger.error(f"Deep research error: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ An error occurred during deep research: {str(e)}")
+            await interaction.followup.send(
+                "❌ Deep research failed due to an unexpected error. "
+                "Check the bot logs for details.",
+                ephemeral=True,
+            )
 
 
 
@@ -229,8 +245,17 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
                 color=discord.Color.red(),
                 timestamp=datetime.now(),
             )
+            # str(exc) is kept: this embed is ephemeral and /rag is gated on
+            # Manage Server, so the only possible reader is the administrator
+            # the detail is for, and none of the three realistic failures
+            # ("file is not a database", "unable to open database file", "no
+            # such table: message_index") carries a path.
+            #
+            # The resolved absolute database path used to be rendered in the
+            # very next field, and that is the actual disclosure -- it carries
+            # the OS username. It is gone from both branches of this embed.
+            # get_status still returns it, for logs and tests.
             embed.add_field(name="Error", value=f"```{status_error[:900]}```", inline=False)
-            embed.add_field(name="Local Database", value=status["database_path"], inline=False)
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
@@ -246,7 +271,6 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
             value=f"{status['embedding_model']} ({status['embedding_dimensions']} dimensions)",
             inline=False,
         )
-        embed.add_field(name="Local Database", value=status["database_path"], inline=False)
         embed.add_field(name="Indexed Messages", value=f"{status['messages']:,}", inline=True)
         embed.add_field(name="Embedded", value=f"{status['embedded']:,}", inline=True)
         embed.add_field(name="Pending", value=f"{status['pending_embeddings']:,}", inline=True)
@@ -321,7 +345,7 @@ def create_rag_group(context: CommandContext) -> app_commands.Group:
         )
         await interaction.followup.send(
             f"Started RAG pre-generation for {scope}. Data is saved incrementally to "
-            f"`{index_service.db_path}`. Use `/rag status` to monitor it.",
+            "the database named by `rag.database_path`. Use `/rag status` to monitor it.",
             ephemeral=True,
         )
 
@@ -489,7 +513,12 @@ def register_summarize_command(context: CommandContext) -> None:
                 await interaction.followup.send(f"❌ Failed to generate summary: {response.content}")
 
         except Exception as e:
+            # PPR-09, the second of the two sites. See /deepresearch above.
             logger.error(f"Summarize error: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ An error occurred while summarizing: {str(e)}")
+            await interaction.followup.send(
+                "❌ Summarizing failed due to an unexpected error. "
+                "Check the bot logs for details.",
+                ephemeral=True,
+            )
 
     # ── Personality / Tone Command ────────────────────────────────────

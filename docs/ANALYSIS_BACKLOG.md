@@ -218,7 +218,7 @@ here.
 | DAB-144 | **DONE** (round 2 Phase 2.3) — the display rewrite is gone. A running server reports the addresses it actually bound (both of them, when a name binds two), IPv6 bracketed; `on_ready`'s status line now distinguishes "Unavailable" from "Disabled" so a refusal no longer reads as an operator choice | security |
 | DAB-147 | **DONE** (round 2, `7e2dcf1`) — `get_report` takes a `visible_to_guild` / `visible_to_reporter` scope enforced in the SQL, so the web UI and any future caller inherit it. The `OR reporter_id` half keeps DM-filed reports readable by their author. This row said OPEN for one commit after it was fixed; corrected in Phase 2.3 | security |
 | DAB-148 | **DONE** — Every `/config` subcommand mutates process-global state, ungated. Promoted out of Tier 3 and landed in Phase 3: runtime Manage Server guards on the five mutating subcommands, `/config info` deliberately left open | security |
-| DAB-153 | **PARTIAL** (Phase 2/3, `d4b91a5`) — raw exception text no longer reaches unprivileged users through `error_manager`. Three call sites outside that scope still echo `str(exc)` directly and were not covered: `/deepresearch` (`research.py:120`), `/summarize` (`:493`) — both **non-ephemeral** — and `/rag status`'s DEGRADED embed (`:228`, ephemeral, manage_guild callers only). Listed under "Post-programme findings" | security |
+| DAB-153 | **DONE** (round 2 Phase 3) — raw exception text no longer reaches unprivileged users through `error_manager` (`d4b91a5`), and the three call sites outside that scope are now closed too. `/deepresearch` and `/summarize` reply with a fixed string, ephemeral (PPR-09). `/rag status`'s DEGRADED embed **keeps** its `str(exc)` deliberately — ephemeral, Manage Server only, and no path in any realistic failure — while the resolved database path beside it, which was the actual disclosure and was in the healthy embed as well, is gone (PPR-05) | security |
 | DAB-159 | **OPEN.** Indirect prompt injection: retrieved content can forge the RAG context fence. Partially mitigated for *pins* only — `417e468` defuses the prompt delimiters in pinned text (`pin_service.py:45-48`) — but retrieved messages are untouched | security |
 | DAB-163 | **OPEN, and it reads as closed when it is not.** `417e468` capped pins at 25 per channel, which looks like it closes the 25-field embed limit by construction. It does not: at the permitted 25 pins the embed **exceeds Discord's 6,000-character total cap** as soon as display names reach 9 characters. Measured below | security |
 | DAB-167 | `send_error_response` raises out of its own `except` block | observability |
@@ -537,7 +537,24 @@ returns and still runs delivery inside the same call, so a delivery failure is n
 regeneration. Only the attachment branch loses the receipt and the notification together. S4
 because it needs an exception to escape `process_message_with_context`'s own broad handler.
 
-### PPR-05 (S4) — `/rag status`'s DEGRADED embed echoes raw `str(exc)`
+### PPR-05 (S4) — `/rag status` discloses the resolved database path — **CLOSED, Phase 3**
+
+**Closed, but not at the target the finding named, and the difference is the point.** PPR-05 was
+filed against the `str(exc)` in the `Error` field. Executing the real command against a real
+corrupt database showed that text carries no path in any of the three realistic failure modes
+(`DatabaseError: file is not a database`, `OperationalError: unable to open database file`,
+`OperationalError: no such table: message_index`), and the embed is `ephemeral=True` behind a
+Manage Server gate — so it reaches exactly the administrator it is for. Stripping it would have
+cost real diagnostic value and closed nothing, and `M-PPR05B` now reintroduces that over-correction.
+
+The disclosure was the **next field**: `status["database_path"]`, a resolved absolute path
+carrying the OS username. It was rendered in the *healthy* embed too, where there is no exception
+at all, so every successful `/rag status` leaked it. Both fields are gone, along with the same
+path in `/rag backfill`'s reply. `get_status` still returns it, for logs and tests.
+
+<details><summary>The finding as originally filed</summary>
+
+
 
 DAB-170's degraded payload sets `"error": f"{type(exc).__name__}: {exc}"`
 (`message_index_service.py:1666`) and `/rag status` renders 900 characters of it into an embed
@@ -545,6 +562,8 @@ field (`research.py:232`). For a SQLite failure that string carries the resolved
 path. Two mitigations keep this at S4 rather than S3: the embed is `ephemeral=True`, and `/rag` is
 gated behind Manage Server, so only an administrator sees it. It is listed because it is the same
 class as DAB-153 and was outside that fix's scope.
+
+</details>
 
 ### PPR-06 (S3) — `/pins` exceeds Discord's 6,000-character embed cap at the permitted 25 pins
 
@@ -601,13 +620,28 @@ levers reachable without permission, and `/live` is a strictly larger one that w
 The per-user text rate limit does apply to the messages the live channel then generates, which is
 the only thing bounding it.
 
-### PPR-09 (S3) — `/deepresearch` and `/summarize` still echo `str(exc)`, non-ephemerally
+### PPR-09 (S3) — `/deepresearch` and `/summarize` echoed `str(exc)` publicly — **CLOSED, Phase 3**
+
+Both now reply with a fixed string and `ephemeral=True`; `logger.error(..., exc_info=True)` was
+already on both lines, so the operator loses nothing. Worse than the finding states, measured by
+raising real exceptions through the real callbacks: the interpolation was unconditional *and*
+uncapped, where `error_manager` suppresses raw text by default and appends it only when shorter
+than 200 characters. A 343-character provider error was posted in full. So these two sites were
+strictly more permissive than the path DAB-153 hardened, not merely outside it.
+
+Two mutants, because there are two decisions here and only the first is obvious: `M-PPR09`
+restores the echo, `M-PPR09B` keeps the sanitised text but leaves the reply public.
+
+<details><summary>The finding as originally filed</summary>
+
 
 `research.py:120` and `:493` both do `await interaction.followup.send(f"... {str(e)}")` with no
 `ephemeral=True`, so an arbitrary exception string is posted into the channel for everyone.
 DAB-153's fix (`d4b91a5`) routed unprivileged error reporting through `error_manager`; these two
 call sites format their own message and never reach it. Recorded against DAB-153 above as the
 unfixed remainder rather than as a new defect.
+
+</details>
 
 ### PPR-10 — residual risks confirmed still open
 

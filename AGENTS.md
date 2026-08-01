@@ -3,7 +3,16 @@
 
 Discord bot on Google Gemini. Entry point `main.py`; Discord orchestration in `src/bot/`,
 business logic in `src/services/`, dataclasses in `src/models/`, helpers in `src/utils/`.
-Work on the `dev` branch â€” do not target `main`.
+
+**Branches.** Work on `remediation/2026-07-30`. It carries the 2026-07-29/30 remediation programme
+and everything since. Do **not** commit to `dev`: it sits at `c83f740`, the pre-programme state,
+**deliberately** - it is not behind by accident, and it must not be "restored". `main` is off
+limits, and a local `pre-push` hook enforces that. Never push; pushing is on the owner's explicit
+request only.
+
+> Because `dev` is frozen, the copy of this file on `dev` still says "work on the `dev` branch".
+> That cannot be corrected from here without committing to `dev`. If you arrived via `dev`, this
+> paragraph is the authority.
 
 
 ## Environment

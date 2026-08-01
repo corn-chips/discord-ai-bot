@@ -102,11 +102,11 @@ plus every quick win whose payoff was measured on a prototype. Fourteen of the t
 | 8 | DAB-002 | **DONE** (Phase 3b, `82b38a3`) — `on_ready` swallowed a `setup_commands` failure. The three personalization services are now built eagerly in `DiscordBot.__init__` (`discord_bot.py:394-405`), so a registrar raising can no longer decide whether they exist; the registrars reuse the eager instances | BUG | **S1** | S | **8.0** | — | [DAB-002](analysis-tickets/DAB-002.md) |
 | 9 | DAB-039 | **DONE** (Phase 1, `7955652`) — Chain-of-thought could be posted to Discord as the answer. The `_get_response_text` fallback now honours `part.thought` | BUG | **S1** | XS | **8.0** | — | [DAB-039](analysis-tickets/DAB-039.md) |
 | 10 | DAB-141 | **DONE** (Phase 2/3, `eb9daaf`) — `/rag delete scope:all` was ungated, cross-guild, irreversible. Gated at the **group** level (`Permissions(manage_guild=True)` plus `guild_only`), which is the only placement discord.py 2.7.1 serialises, with a runtime `_has_rag_admin` check on `/rag delete`. The ticket's prescribed subcommand-level gate does not work; see [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 3 | BUG | **S1** | XS | **8.0** | DAB-203 | [DAB-141](analysis-tickets/DAB-141.md) |
-| 11 | DAB-197 | **DONE** (Phase 1, `4fb091c`) — PDF PNG encode/decode round-trip deleted, in the same commit as DAB-198 and in the corrected order (`ANALYSIS_CORRECTIONS.md` item 6) | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | — | [DAB-197](analysis-tickets/DAB-197.md) |
+| 11 | DAB-197 | **DONE** (Phase 1, `4fb091c`) — PDF PNG encode/decode round-trip deleted, in the same commit as DAB-198 and in the corrected order — **after** DAB-198's clamp, not before (`ANALYSIS_CORRECTIONS.md` item 6) | IMPROVEMENT | 11.7x-16.5x, pixel-identical | XS | **8.0** | DAB-198 | [DAB-197](analysis-tickets/DAB-197.md) |
 | 12 | DAB-077 | **OPEN.** Startup eligibility reconcile still full-scans on every boot: `_reconcile_embedding_eligibility` is called unconditionally from `_ensure_schema` (`message_index_service.py:322`). `DAB-083` unblocked it in Phase 4 and Phase 4 did not take it. Quote the absolute saving at your corpus size, not the ratio — see [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) "Restated figures" | IMPROVEMENT | 1938 ms -> 0.034 ms (57,000x) | S | **8.0** | DAB-083 | [DAB-077](analysis-tickets/DAB-077.md) |
 | 13 | DAB-165 | **DONE** (Phase 3b) — A `%` in any log extra silently drops the record. The `%` trigger turned out unreachable from any current call site; the live half was DAB-164, the extras doubling, which one `RotatingFileHandler` is enough to cause. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 9 | BUG | S2 | XS | **8.0** | — | [DAB-165](analysis-tickets/DAB-165.md) |
 | 14 | DAB-019 | **DONE** (Phase 3b) — Live batch silently destroyed when `process_messages` raises. Landed with an unanswered-messages receipt, **not** the ticket's requeue-the-popped-batch expression, which duplicates the attachment suffix, re-debits the rate limiter and re-bills Gemini. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 8 | BUG | **S1** | S | **6.0** | — | [DAB-019](analysis-tickets/DAB-019.md) |
-| 15 | DAB-198 | **DONE** (Phase 1, `4fb091c`) — PDF resource bomb: a 3.6 KB upload could cost 107 s of CPU and 1.63 GB RSS. Page rasterisation is clamped, and the useless PNG round-trip was deleted first so the budget is not sized against wasted work | BUG | **S1** | S | **6.0** | DAB-197 | [DAB-198](analysis-tickets/DAB-198.md) |
+| 15 | DAB-198 | **DONE** (Phase 1, `4fb091c`) — PDF resource bomb: a 3.6 KB upload could cost 107 s of CPU and 1.63 GB RSS. Page rasterisation is clamped. **This lands first**, and DAB-197's PNG round-trip deletion follows it in the same commit — the reverse order removes the only guard against a 256 MP allocation ([`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 6) | BUG | **S1** | S | **6.0** | — (blocks DAB-197) | [DAB-198](analysis-tickets/DAB-198.md) |
 | 16 | DAB-157 | **DONE** — Rotated log files are not gitignored. Landed in `f0938a8` | BUG | S2 | XS | **6.0** | — | [DAB-157](analysis-tickets/DAB-157.md) |
 | 17 | DAB-009 | **DONE** (Phase 3b) — Unguarded `change_presence()` sits before `setup_commands`. Reproduced: with presence raising, `setup_commands` was awaited 0 times. `_start_automatic_rag_backlog` is guarded in the same change. The `DAB-002` edge was discharged, not exercised: DAB-002's presence-badge half never landed | BUG | S2 | XS | **6.0** | DAB-002 | [DAB-009](analysis-tickets/DAB-009.md) |
 | 18 | DAB-029 | **OPEN.** Six never-evicting in-memory containers; still six. `161ff5d` deliberately kept the DAB-019 retry state worker-local rather than adding a seventh | IMPROVEMENT | 699.5 MiB -> 1.9 MiB (373x) | S | **6.0** | — | [DAB-029](analysis-tickets/DAB-029.md) |
@@ -380,8 +380,15 @@ ERROR-HANDLING CHAIN
                              dispatch first, then replace the substring chain
 
 PDF CHAIN
-  DAB-197 --> DAB-198        delete the 11.7x round-trip before setting a timeout budget,
-                             or the budget is sized against wasted work
+  DAB-198 --> DAB-197        REVERSED 2026-07-31; the direction printed here until then was
+                             hazardous. Clamp page rasterisation FIRST. Pillow's
+                             DecompressionBombError -- raised by the very Image.open that
+                             DAB-197 deletes -- is the only thing stopping a 256 MP
+                             allocation, so deleting the round-trip first makes the bomb
+                             worse. The old note ("delete the round-trip before setting a
+                             timeout budget, or the budget is sized against wasted work")
+                             is about the budget's value, not safety, and is subordinate.
+                             See docs/ANALYSIS_CORRECTIONS.md item 6
 
 STARTUP CHAIN
   DAB-002 --> DAB-009        eager service construction makes the presence-guard fix a

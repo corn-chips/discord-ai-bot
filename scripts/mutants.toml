@@ -970,3 +970,129 @@ expect = "killed"
 [[mutant.edit]]
 find = "        self.host = str(host).strip()\n"
 replace = "        self.host = host\n"
+
+[[mutant]]
+id = "M-DAB052"
+bug = "DAB-052"
+# The original four-entry map. One key, BLOCK_HIGH_AND_ABOVE, is a name the SDK
+# has never defined; and because `.get` defaulted to BLOCK_NONE, every value
+# the map did not know turned the filter completely off -- including the real
+# SDK names BLOCK_ONLY_HIGH and OFF, and HARM_BLOCK_THRESHOLD_UNSPECIFIED.
+summary = "Resolve safety thresholds through the invented map that failed open to BLOCK_NONE"
+guard = "test_every_real_sdk_name_survives_to_the_request"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        safety_settings = [\n            types.SafetySetting(category=cat, threshold=resolve_safety_threshold(thresh))\n            for cat, thresh in safety_mapping.values()\n        ]\n"
+replace = "        threshold_map = {\n            'BLOCK_NONE': types.HarmBlockThreshold.BLOCK_NONE,\n            'BLOCK_LOW_AND_ABOVE': types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,\n            'BLOCK_MEDIUM_AND_ABOVE': types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,\n            'BLOCK_HIGH_AND_ABOVE': types.HarmBlockThreshold.BLOCK_ONLY_HIGH,\n        }\n        safety_settings = [\n            types.SafetySetting(\n                category=cat,\n                threshold=threshold_map.get(thresh, types.HarmBlockThreshold.BLOCK_NONE)\n            )\n            for cat, thresh in safety_mapping.values()\n        ]\n"
+
+[[mutant]]
+id = "M-DAB052B"
+bug = "DAB-052"
+# Accepts every real SDK name -- so the headline guard still passes -- and
+# points the unresolvable case back at the most permissive threshold. This is
+# the half that is easy to lose: recognising more names is the visible fix, and
+# which way the remaining unknown falls is the one that decides whether a typo
+# silently disables filtering.
+summary = "Keep the fallback permissive, so an unrecognised threshold still means BLOCK_NONE"
+guard = "test_an_unresolvable_threshold_does_not_disable_the_filter"
+file = "src/constants.py"
+expect = "killed"
+[[mutant.edit]]
+find = "SAFETY_THRESHOLD_FALLBACK = \"BLOCK_LOW_AND_ABOVE\"\n"
+replace = "SAFETY_THRESHOLD_FALLBACK = \"BLOCK_NONE\"\n"
+
+[[mutant]]
+id = "M-DAB052C"
+bug = "DAB-052"
+# Removes the boot-time check, leaving the runtime fallback as the only
+# defence. That is strictly better than what shipped, and still wrong: the
+# operator learns their config is not doing what it says only by reading a log
+# line during a request, if they read it at all.
+summary = "Accept any safety threshold at startup, deferring the problem to request time"
+guard = "test_each_of_the_four_settings_is_checked"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not canonical_safety_threshold(value):\n"
+replace = "        if False:\n"
+
+[[mutant]]
+id = "M-DAB052D"
+bug = "DAB-052"
+# Drops the compatibility alias. BLOCK_HIGH_AND_ABOVE is not an SDK name, so
+# deleting it looks like tidying -- but config.yaml's own comment advertised it
+# while listing neither BLOCK_ONLY_HIGH nor OFF, so it is the name an operator
+# following the shipped documentation would have written, and it worked.
+# Removing it turns their working config into a boot error.
+summary = "Delete the legacy alias, so a config that worked before now fails to boot"
+guard = "test_the_legacy_alias_validates"
+file = "src/constants.py"
+expect = "killed"
+[[mutant.edit]]
+find = "SAFETY_THRESHOLD_ALIASES = {\"BLOCK_HIGH_AND_ABOVE\": \"BLOCK_ONLY_HIGH\"}\n"
+replace = "SAFETY_THRESHOLD_ALIASES = {}\n"
+
+[[mutant]]
+id = "M-DAB052E"
+bug = "DAB-052"
+# Tightens the SHIPPED default while fixing the map -- the drift the guard
+# exists to stop. What this bot filters is a product decision taken in
+# config.yaml and the system prompts, not something a correctness fix to the
+# lookup underneath it gets to make.
+#
+# Edits config.yaml, not the dataclass field. The field is only what applies
+# when the key is absent, and the key is never absent: with the guard reading
+# only src/config.py, every one of the four config.yaml values could be
+# rewritten with the whole suite green. Measured before this was retargeted.
+summary = "Tighten the shipped BLOCK_NONE default on the back of the map fix"
+guard = "test_the_shipped_default_still_sends_block_none"
+file = "config.yaml"
+expect = "killed"
+[[mutant.edit]]
+find = "  harassment: \"BLOCK_NONE\"\n"
+replace = "  harassment: \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+
+[[mutant]]
+id = "M-DAB052F"
+bug = "DAB-052"
+# The dataclass field, which is the other half of "the default". Kept separate
+# from M-DAB052E because the two are different defaults with different
+# reachability, and collapsing them would let either drift behind the other.
+summary = "Tighten the BotConfig field default used when the config key is absent"
+guard = "test_the_shipped_default_still_sends_block_none"
+file = "src/config.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    safety_harassment: str = \"BLOCK_NONE\"\n"
+replace = "    safety_harassment: str = \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+
+[[mutant]]
+id = "M-DAB052G"
+bug = "DAB-052"
+# An unquoted OFF in config.yaml is a YAML 1.1 boolean, so what reaches the
+# canonicaliser is False. Without this branch the boot fails with
+# "must be one of ..., OFF (got False)" -- an error that lists the value the
+# operator meant as valid while refusing what they wrote.
+summary = "Reject the boolean YAML makes of an unquoted OFF"
+guard = "test_a_yaml_boolean_off_is_read_as_the_threshold_it_spells"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    if value is False:\n        return \"OFF\"\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB052H"
+bug = "DAB-052"
+# HarmBlockThreshold is a str subclass whose str() is the repr form
+# 'HarmBlockThreshold.BLOCK_ONLY_HIGH', so passing every value through str()
+# turns a real enum member into an unrecognised one -- which then falls back,
+# safely but wrongly, to a threshold the caller did not ask for.
+summary = "Stringify the value, so an SDK enum member stops being recognised"
+guard = "test_an_sdk_enum_member_is_accepted_as_itself"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    name = value if isinstance(value, str) else str(value or \"\")\n"
+replace = "    name = str(value or \"\")\n"

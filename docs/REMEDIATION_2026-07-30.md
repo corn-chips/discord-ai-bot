@@ -102,7 +102,7 @@ priority score:
 | DAB-042 / DAB-204 | No whole-sequence deadline, and the regression test that blocks a correct one is still in place. |
 | DAB-027 / DAB-028 | `_vector_lock` still spans CPU-bound numpy scoring; `search_semantic` still copies the matrix. |
 | DAB-087 | Hybrid RAG is still blind to non-Latin scripts. |
-| DAB-106 | 43 of 99 `BotConfig` fields still have no validation rule. |
+| DAB-106 | 39 of 99 `BotConfig` fields still have no validation rule (43 until round 2 Phase 2.4 validated the four `safety_*` enums). |
 | DAB-180 | `grok-prompts` is still a dangling gitlink. |
 | DAB-203 | `tests/test_command_registration.py` still pins the tree positionally. |
 | DAB-212 | **Refuted.** Not work; a trap. |

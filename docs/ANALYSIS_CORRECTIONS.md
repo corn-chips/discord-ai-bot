@@ -770,6 +770,68 @@ form and the `Origin` is genuinely correct. Three response headers, added in the
 §3.2 it would make this page's own form send `Origin: null` and the server would then 403 every
 save. That trap is pinned by a test.
 
+## 21. `DAB-052`'s valid-value set contains a name the SDK does not define, and half of it targets a function that does not exist
+
+Two errors in the same finding, both settled by running the SDK and grepping the tree.
+
+**a. `BLOCK_HIGH_AND_ABOVE` is not a Gemini threshold.**
+`IMPROVEMENT_ANALYSIS_2026-07-29.md:2210` gives the permitted set as
+`{BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_HIGH_AND_ABOVE, BLOCK_ONLY_HIGH, OFF}`
+and prescribes validating against it. Five of those six are right. `BLOCK_HIGH_AND_ABOVE` is not a
+member of `types.HarmBlockThreshold` and never has been -- it was invented by this repo's own
+lookup table -- and the set omits `HARM_BLOCK_THRESHOLD_UNSPECIFIED`, which is. Executed against
+google-genai 2.11.0:
+
+```
+[m.name for m in types.HarmBlockThreshold]
+['HARM_BLOCK_THRESHOLD_UNSPECIFIED', 'BLOCK_LOW_AND_ABOVE', 'BLOCK_MEDIUM_AND_ABOVE',
+ 'BLOCK_ONLY_HIGH', 'BLOCK_NONE', 'OFF']
+```
+
+Validating against the published set would have rejected a legal config and accepted an illegal
+one. What landed validates against the enum's real names and keeps `BLOCK_HIGH_AND_ABOVE` as an
+explicit **alias** rather than as a valid name. The reason is not that it was the only threshold
+that worked -- `BLOCK_LOW_AND_ABOVE` and `BLOCK_MEDIUM_AND_ABOVE` were in the old map too and were
+honoured correctly. It is that `config.yaml`'s own comment read
+`# Options: BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_HIGH_AND_ABOVE`,
+advertising the invented name and listing neither `BLOCK_ONLY_HIGH` nor `OFF`. An operator who
+followed the shipped documentation to ask for the strictest-but-one setting wrote the one name
+that does not exist, and it worked. Removing it would turn their working config into a boot
+error.
+`tests/test_safety_thresholds.py` asserts the declared set equals the SDK enum exactly, so the
+next SDK release is a test failure rather than a silent divergence.
+
+**b. The "unknown category" half was accurate when written, and this programme deleted its
+subject.** The entry states that "`get_safety_threshold()` even `.get(category, 'BLOCK_NONE')`
+-defaults an unknown *category* to the most permissive value". Grepping the tree today finds no
+such function, and an earlier revision of this item said so and called the corpus wrong. **That
+correction was itself wrong**, and is retracted here rather than quietly edited, because it is the
+exact failure this file exists to catch. At the corpus's own baseline the method was there:
+
+```
+$ git show c83f740:src/config.py | sed -n '236,244p'
+    def get_safety_threshold(self, category: str) -> str:
+        ...
+        return mapping.get(category, 'BLOCK_NONE')
+```
+
+It was removed by `9894bcc`, this programme's dead-code pass -- and the corpus had already
+identified it as dead (`IMPROVEMENT_ANALYSIS_2026-07-29.md:630`), which is how it came to be
+deleted. So the category half is closed, by deletion rather than by repair, and no live code ever
+looked a category up by name: `safety_mapping` is four literal entries iterated with `.values()`.
+The permissive default that survived to Phase 2.4 was the one on the **threshold**.
+
+The lesson is the one item 1 records, in the other direction: a claim checked against the *current*
+tree says nothing about a corpus written against a different commit. `git show <baseline>:<file>`
+before calling a finding imaginary.
+
+The corpus's own severity assessment of this finding is sound and worth repeating, because it is
+what keeps the fix honest: `config.yaml` ships `BLOCK_NONE` for all four categories and the system
+prompts instruct the model to apply no content restrictions, so a typo changed nothing relative to
+the shipped posture. **The victim is the operator who deliberately tightens safety, mistypes or
+uses the SDK's own name, and is told nothing.** That is why the shipped default was left exactly
+as it is: changing it is a product decision, and it is not one a lookup-table repair gets to make.
+
 ## The pattern across the corpus's measured claims
 
 Collected in one place because the individual corrections above make each look like a one-off, and

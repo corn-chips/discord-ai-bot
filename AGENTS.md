@@ -208,7 +208,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 - Adding a setting touches four places: the `config.yaml` key, a parser in
  `src/config_helpers.py`, a field on `BotConfig` in `src/config.py`, and a rule in the
  matching `_validate_*` helper (the four are aggregated by `validate_config`,
- `config_helpers.py:754`). `tests/test_config.py` asserts parsed defaults. 43 of the 99
+ `config_helpers.py:754`). `tests/test_config.py` asserts parsed defaults. 39 of the 99
  annotated `BotConfig` fields are still mentioned by no `_validate_*` helper (TD-011).
 - Fixed protocol limits go in `src/constants.py`; anything tunable goes in `config.yaml`.
 - Config loading and startup diagnostics use `print` on purpose (visible before logging is

@@ -153,7 +153,22 @@ generation:
   router_max_output_tokens: 100
 
 # --- Safety Settings ---
-# Options: BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_HIGH_AND_ABOVE
+# One of: BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE,
+# BLOCK_ONLY_HIGH, OFF, HARM_BLOCK_THRESHOLD_UNSPECIFIED. Case and surrounding
+# space are ignored; anything else fails validation at startup and names the
+# values that would have worked. Keep the quotes -- an unquoted OFF is a YAML
+# boolean, not a string.
+#
+# BLOCK_HIGH_AND_ABOVE is accepted too, as an alias for BLOCK_ONLY_HIGH. It is
+# not a name the SDK defines: it was invented by this bot's own lookup table,
+# and the line that used to sit here advertised it while listing neither
+# BLOCK_ONLY_HIGH nor OFF -- which the same table silently turned into
+# BLOCK_NONE. An operator following the shipped documentation would have
+# written the invented name, so it keeps working.
+#
+# These four apply to the main response path. The intent router, the context
+# selector and image generation build their own request configs and send no
+# safety settings at all, so they take the provider defaults (PPR-14).
 safety:
   harassment: "BLOCK_NONE"
   hate_speech: "BLOCK_NONE"

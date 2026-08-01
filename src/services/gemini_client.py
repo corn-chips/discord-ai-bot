@@ -18,6 +18,8 @@ from google import genai
 from google.genai import types
 
 from ..config import BotConfig
+from ..config_helpers import canonical_safety_threshold
+from ..constants import SAFETY_THRESHOLD_FALLBACK
 from ..models.data_models import APIResponse, MessageContext, TokenUsage
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger
@@ -33,6 +35,44 @@ from .gemini_response_pipeline import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_safety_threshold(value) -> "types.HarmBlockThreshold":
+    """Turn a configured `safety:` value into the enum member it names.
+
+    This used to be a four-entry dict with `.get(value, BLOCK_NONE)`, and both
+    halves of that were wrong. One of its four keys, `BLOCK_HIGH_AND_ABOVE`,
+    is not a name the SDK has ever defined; and because anything missing from
+    the dict answered `BLOCK_NONE`, every unrecognised value turned the filter
+    the operator was configuring completely off. That silently included two
+    genuine SDK names -- `BLOCK_ONLY_HIGH` and `OFF` -- as well as
+    `HARM_BLOCK_THRESHOLD_UNSPECIFIED` and every typo:
+
+        BLOCK_ONLY_HIGH        -> BLOCK_NONE
+        OFF                    -> BLOCK_NONE
+        block_medium_and_above -> BLOCK_NONE
+
+    Accepting the real names is the substance of the fix. Failing closed alone
+    would not have been one: with `BLOCK_ONLY_HIGH` still unrecognised, a
+    correct config would merely have gone from silently permissive to loudly
+    broken.
+
+    The shipped default of BLOCK_NONE everywhere is untouched. That is a
+    product decision about what this bot is for, and it is unaffected by the
+    map underneath it having been unable to express anything else.
+    """
+
+    name = canonical_safety_threshold(value)
+    if not name:
+        logger.error(
+            "safety threshold %r is not a Gemini HarmBlockThreshold; sending %s "
+            "instead. This should have been refused at startup -- a BotConfig "
+            "that did not go through validate_config has reached the client.",
+            value,
+            SAFETY_THRESHOLD_FALLBACK,
+        )
+        name = SAFETY_THRESHOLD_FALLBACK
+    return types.HarmBlockThreshold[name]
 
 
 class GeminiClient:
@@ -1408,17 +1448,8 @@ Candidate messages:
             'sexually_explicit': (types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, self.config.safety_sexually_explicit),
             'dangerous_content': (types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, self.config.safety_dangerous_content),
         }
-        threshold_map = {
-            'BLOCK_NONE': types.HarmBlockThreshold.BLOCK_NONE,
-            'BLOCK_LOW_AND_ABOVE': types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-            'BLOCK_MEDIUM_AND_ABOVE': types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            'BLOCK_HIGH_AND_ABOVE': types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-        }
         safety_settings = [
-            types.SafetySetting(
-                category=cat,
-                threshold=threshold_map.get(thresh, types.HarmBlockThreshold.BLOCK_NONE)
-            )
+            types.SafetySetting(category=cat, threshold=resolve_safety_threshold(thresh))
             for cat, thresh in safety_mapping.values()
         ]
 

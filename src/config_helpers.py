@@ -7,7 +7,44 @@ from typing import Any, Dict, List
 
 import yaml
 
-from .constants import DISCORD_MESSAGE_LIMIT
+from .constants import (
+    DISCORD_MESSAGE_LIMIT,
+    SAFETY_THRESHOLD_ALIASES,
+    SAFETY_THRESHOLD_NAMES,
+)
+
+
+def canonical_safety_threshold(value: Any) -> str:
+    """Return the SDK ``HarmBlockThreshold`` name a configured value means.
+
+    Returns an empty string when the value names no threshold at all, which is
+    what both callers treat as the error: ``_validate_feature_values`` refuses
+    the boot, and ``GeminiClient`` sends the strictest threshold rather than
+    the most permissive one.
+
+    Tolerant of case and surrounding whitespace, because neither can make a
+    value ambiguous. Tolerant of nothing else: the defect this exists to close
+    is that an unrecognised threshold used to resolve to ``BLOCK_NONE``, so a
+    near-miss silently disabled the filter the operator was configuring.
+
+    Two input shapes get special handling, both because they are what a correct
+    intention looks like after it has been through something else:
+
+    * ``False``, which is what YAML 1.1 makes of an unquoted ``OFF`` (and of
+      ``no`` and ``false``). Every spelling that produces it means the same
+      threshold, so it resolves rather than being reported as ``got False``
+      next to an error message listing ``OFF`` as valid.
+    * a ``HarmBlockThreshold`` member, which is a ``str`` subclass whose
+      ``str()`` is ``'HarmBlockThreshold.BLOCK_NONE'``. Using it directly reads
+      the value.
+    """
+
+    if value is False:
+        return "OFF"
+    name = value if isinstance(value, str) else str(value or "")
+    name = name.strip().upper()
+    name = SAFETY_THRESHOLD_ALIASES.get(name, name)
+    return name if name in SAFETY_THRESHOLD_NAMES else ""
 
 
 DEFAULT_LANGUAGES = [
@@ -748,6 +785,24 @@ def _validate_feature_values(config: Any) -> List[str]:
         errors.append("system_prompts.medium_complexity must not be empty")
     if config.max_pdf_pages <= 0:
         errors.append("validation.max_pdf_pages must be positive")
+    # Refused at boot, and this is the right boundary for these four -- unlike
+    # reports.web_host, which is refused at the socket so that one auxiliary
+    # feature fails rather than the bot. There is no equivalent partial failure
+    # here: an unresolvable threshold applies to every request the bot makes,
+    # and it used to apply as BLOCK_NONE, so the failure mode was the filter
+    # being off while the config said it was on. A one-word edit fixes it.
+    for setting, value in (
+        ("harassment", config.safety_harassment),
+        ("hate_speech", config.safety_hate_speech),
+        ("sexually_explicit", config.safety_sexually_explicit),
+        ("dangerous_content", config.safety_dangerous_content),
+    ):
+        if not canonical_safety_threshold(value):
+            errors.append(
+                f"safety.{setting} must be one of "
+                f"{', '.join(sorted(SAFETY_THRESHOLD_NAMES))} "
+                f"(got {value!r})"
+            )
     return errors
 
 

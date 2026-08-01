@@ -160,7 +160,7 @@ review window.
 | 34 | DAB-087 | **OPEN**, and still blocked: DAB-077's reconcile fingerprint does not exist yet, so there is nothing to bump | BUG | S2 | S | **3.0** | DAB-077 | [DAB-087](analysis-tickets/DAB-087.md) |
 | 35 | DAB-194 | **DONE** — Dead code: 2,027 removable lines, verified twice. Landed in `9894bcc` / `4baa29c` | IMPROVEMENT | delivered **-2,111 lines** across 25 files; `constraints.txt` 57 -> 51 pins | S | **3.0** | — (landed ahead of DAB-203) | [DAB-194](analysis-tickets/DAB-194.md) |
 | 36 | DAB-027 | **OPEN.** `_vector_lock` is still held across CPU-bound numpy scoring | IMPROVEMENT | 244x concurrent throughput | M | **2.0** | — | [DAB-027](analysis-tickets/DAB-027.md) |
-| 37 | DAB-106 | **OPEN**, re-measured as **43 of 99**. The programme added three fields (`expensive_command_limit_per_minute`, `expensive_command_limit_per_hour`, `sqlite_busy_timeout_ms`) and all three arrived with a validation rule, so the unvalidated count did not move | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
+| 37 | DAB-106 | **OPEN**, re-measured as **39 of 99**. The programme added three fields (`expensive_command_limit_per_minute`, `expensive_command_limit_per_hour`, `sqlite_busy_timeout_ms`) and all three arrived with a validation rule, so the count did not move for those; round 2 Phase 2.4 then took it from 43 to 39 by validating the four `safety_*` enums, which is this ticket's first acceptance box. The remaining 39 are untouched | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
 
 Row 35 is retained rather than deleted so that the `#` numbering stays stable across the whole
 document. `DAB-194` shipped as `9894bcc` (dead code: `src/services/help_system.py` deleted, four
@@ -212,6 +212,7 @@ here.
 | DAB-138 | PIL PNG encoding on the event loop, up to 26 images per request | media |
 | DAB-140 | **PARTIAL.** The headline count is out of date: measured at `922e899` by building the tree and reading `to_dict()`, **11 of the 35 registered entries** are behind at least one gate, not 1, and 3 of the 22 top-level entities carry a payload permission (`/clear-cache` 8, `/dev` 8, `/rag` 32). There is still no *model* — the gates are per-command decisions. Three holes are open and listed under "Post-programme findings": `/live`, `/clear-cache` in DMs, and the two commands that still echo `str(exc)`. Tracked as TD-012 | security |
 | DAB-142 | **DONE** (Phase 2/3, `d4b91a5`) — `/dev` is gated three ways: payload `default_permissions(administrator=True)`, `guild_only()` (Discord does not evaluate payload permissions in a DM), and a runtime administrator check, because `default_member_permissions` is a default a guild admin can re-grant | security |
+| DAB-052 | **DONE** (round 2 Phase 2.4) — the safety threshold lookup was a four-entry map whose `.get` defaulted to `BLOCK_NONE`, and one of the four keys was a name the SDK does not define. Measured: `BLOCK_ONLY_HIGH`, `OFF` and `HARM_BLOCK_THRESHOLD_UNSPECIFIED` — all real — plus every typo arrived as `BLOCK_NONE`. Now resolved against the real enum, with `BLOCK_HIGH_AND_ABOVE` kept as an alias because `config.yaml`'s own comment advertised it and listed neither of the two real names the map ate, validated at boot, and failing to the strictest threshold rather than the most permissive if it is ever reached. Like DAB-145, this row did not exist until the fix landed: the finding was in `BUG_ANALYSIS_2026-07-29.md:1224` and never reached the register | correctness |
 | DAB-145 | **DONE** (round 2 Phase 2.3) — cross-origin form POST against the report web UI. Named once in `BUG_ANALYSIS_2026-07-29.md:1260` and never carried into this register, which is why no earlier pass saw it; written up as PPR-11 below, where the three shapes beyond the headline one are recorded | security |
 | DAB-143 | **DONE** (round 2 Phase 2.3) — the off-box surface is closed at the socket, not in `validate_config`: `ReportWebServer.start` reads the addresses actually bound back off the runner and refuses anything that is not all-loopback, logging and returning rather than raising so the bot still boots. No opt-in flag; a port forward is the supported remote path. Residual: a local process still reads everything — see PPR-11 | security |
 | DAB-144 | **DONE** (round 2 Phase 2.3) — the display rewrite is gone. A running server reports the addresses it actually bound (both of them, when a name binds two), IPv6 bracketed; `on_ready`'s status line now distinguishes "Unavailable" from "Disabled" so a refusal no longer reads as an operator choice | security |
@@ -705,3 +706,28 @@ header can only ever be used to reject and never to allow, and a second, weaker 
 one that already protects every state change is not a trade worth making for a request that
 changes nothing. Same event-loop-blocking class as DAB-178, which already covers the synchronous
 SQLite in these two handlers.
+
+### PPR-14 (S4) — three of the four request configs send no safety settings at all
+
+`config.yaml`'s `safety:` block reads as though it governs the bot. It governs one request path.
+Measured by locating every `types.GenerateContentConfig(` under `src/` and checking each for a
+`safety_settings` argument:
+
+| Site | `safety_settings` |
+|---|---|
+| `gemini_client.py:1474` — the main response path | **yes** |
+| `gemini_client.py:723` — the intent/complexity router | no |
+| `enhanced_command_handler.py:222` — the LLM command router | no |
+| `nano_banana_client.py:297` — image generation | no |
+
+The three without it take the provider's defaults, so an operator who tightens `safety:` tightens
+the answer the bot writes and nothing else — and an operator who reads the config believes
+otherwise. Embeddings are correctly absent from the table: there is no safety surface on an
+embedding call.
+
+Not fixed in Phase 2.4, which was about the four thresholds resolving to what they say. Whether
+the router and the image path *should* carry the same thresholds is a product question -- the
+router sees the user's text and the image path sees a prompt, and the right answer for each may
+not be the one configured for responses. Recorded so the question gets asked rather than
+inherited. The `safety:` comment in `config.yaml` now states the scope, so the config no longer
+overstates its own reach.

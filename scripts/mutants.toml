@@ -772,3 +772,17 @@ expect = "killed"
 [[mutant.edit]]
 find = "    @app_commands.default_permissions(administrator=True)\n    @app_commands.guild_only()\n    async def clear_cache"
 replace = "    @app_commands.default_permissions(administrator=True)\n    async def clear_cache"
+
+[[mutant]]
+id = "M-DAB147"
+bug = "DAB-147"
+# Neutralises both scopes while keeping the SQL well-formed, reproducing the
+# original enumeration: report ids are small sequential integers, so an
+# unscoped lookup walks every report the bot ever received, across every guild.
+summary = "Ignore the visibility scope on get_report, restoring cross-guild report enumeration"
+guard = "test_a_member_of_another_guild_cannot_read_the_report"
+file = "src/services/report_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        clauses = [\"id = ?\"]\n        params: list = [int(report_id)]\n"
+replace = "        clauses = [\"id = ?\"]\n        params: list = [int(report_id)]\n        visible_to_guild = visible_to_reporter = None\n"

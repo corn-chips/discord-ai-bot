@@ -128,17 +128,57 @@ class ReportService:
             raise RuntimeError(f"Report {report_id} was not persisted")
         return report
 
-    def get_report(self, report_id: int) -> Optional[Report]:
-        """Return one report by ID, or None if it does not exist."""
+    def get_report(
+        self,
+        report_id: int,
+        *,
+        visible_to_guild: Optional[int] = None,
+        visible_to_reporter: Optional[int] = None,
+    ) -> Optional[Report]:
+        """Return one report by ID, or None if it does not exist or is out of scope.
+
+        Report ids are small sequential integers, so an unscoped lookup by id is
+        an enumeration of every report the bot has ever received, across every
+        guild -- descriptions, reporter display names and raw Discord user ids
+        included. That is DAB-147. Any caller acting on behalf of a Discord user
+        must pass a scope.
+
+        The two scopes are OR-ed, and both are needed:
+
+        * ``visible_to_guild`` -- the report was filed in a guild the caller is
+          currently in. ``guild_id`` is nullable, and SQL never matches
+          ``NULL = ?``, so a DM-filed report is correctly invisible to guilds.
+        * ``visible_to_reporter`` -- the caller filed it themselves, wherever
+          they filed it. Without this, DM-filed reports (``guild_id IS NULL``)
+          would become permanently unreadable by anyone, including their author,
+          which would silently break the follow-up flow ``/report`` advertises.
+          ``reporter_id`` is ``INTEGER NOT NULL`` and has been since the table
+          was created, so this predicate is reliable on old rows as well as new.
+
+        Passing neither is an unscoped read and is reserved for the operator's
+        own admin surface.
+        """
+
+        clauses = ["id = ?"]
+        params: list = [int(report_id)]
+        scopes = []
+        if visible_to_guild is not None:
+            scopes.append("guild_id = ?")
+            params.append(int(visible_to_guild))
+        if visible_to_reporter is not None:
+            scopes.append("reporter_id = ?")
+            params.append(int(visible_to_reporter))
+        if scopes:
+            clauses.append("(" + " OR ".join(scopes) + ")")
 
         with sqlite_connection(self.db_path, row_factory=sqlite3.Row) as conn:
             row = conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM bot_reports
-                WHERE id = ?
+                WHERE {" AND ".join(clauses)}
                 """,
-                (int(report_id),),
+                tuple(params),
             ).fetchone()
         return self._row_to_report(row) if row else None
 

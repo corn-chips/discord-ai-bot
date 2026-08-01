@@ -100,7 +100,25 @@ def register_report_commands(context: CommandContext) -> None:
             )
             return
 
-        existing = report_service.get_report(report_id)
+        # Scoped, because report ids are small sequential integers: an unscoped
+        # lookup let any member of any guild walk 1, 2, 3... through every report
+        # the bot has ever received, reading descriptions, reporter display names
+        # and raw Discord user ids from guilds they are not in (DAB-147).
+        #
+        # Deliberately NOT guild_only(). /report can be filed in a DM and tells
+        # the user to check back with /report-status; requiring a guild would
+        # break that flow. The reporter_id half of the scope is what keeps
+        # DM-filed reports (guild_id IS NULL) readable by their author, and
+        # reporter_id is NOT NULL on every row ever written.
+        #
+        # The out-of-scope reply is identical to the not-found reply on purpose:
+        # distinguishing them would confirm that a given id exists, which is the
+        # enumeration this fixes.
+        existing = report_service.get_report(
+            report_id,
+            visible_to_guild=interaction.guild_id,
+            visible_to_reporter=interaction.user.id,
+        )
         if not existing:
             await interaction.response.send_message(
                 f"Report #{report_id} was not found.",

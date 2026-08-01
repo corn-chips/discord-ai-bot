@@ -707,3 +707,23 @@ expect = "killed"
 [[mutant.edit]]
 find = "            if attempt < self.config.max_retries:\n                if retry_delay is None:\n                    retry_delay = self._calculate_backoff_delay(attempt)\n                await asyncio.sleep(retry_delay)\n"
 replace = "            if attempt < self.config.max_retries and retry_delay is not None:\n                await asyncio.sleep(retry_delay)\n"
+
+[[mutant]]
+id = "M-DAB024"
+bug = "DAB-024"
+# Restores the original: the SYNCHRONOUS SDK on the loop's default
+# ThreadPoolExecutor, with no deadline. That pool is shared with every other
+# to_thread in the process -- ~20 SQLite calls across message_index_service,
+# token_tracker and the pin loads -- and is min(32, cpu_count + 4), so 6-8
+# threads on a small host. A hung provider call held a worker until the TCP
+# connection died. Note that wrapping the to_thread in wait_for does NOT undo
+# this: cancelling the await leaves the worker running (measured, 32/32 threads
+# alive after cancelling every await), which is why the guard asserts that
+# nothing is scheduled on the executor rather than that a timeout exists.
+summary = "Run the router on the shared default executor via to_thread, with no deadline"
+guard = "test_the_router_schedules_no_work_on_the_shared_default_executor"
+file = "src/bot/enhanced_command_handler.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            response = await asyncio.wait_for(\n                self.gemini_client.client.aio.models.generate_content(\n                    model=router_model,\n                    contents=classification_prompt,\n                    config=types.GenerateContentConfig(\n                        temperature=self.bot.config.router_temperature,\n                        max_output_tokens=self.bot.config.router_max_output_tokens,\n                        response_mime_type=\"application/json\"\n                    )\n                ),\n                timeout=self.bot.config.response_timeout,\n            )\n"
+replace = "            response = await asyncio.to_thread(\n                self.gemini_client.client.models.generate_content,\n                model=router_model,\n                contents=classification_prompt,\n                config=types.GenerateContentConfig(\n                    temperature=self.bot.config.router_temperature,\n                    max_output_tokens=self.bot.config.router_max_output_tokens,\n                    response_mime_type=\"application/json\"\n                )\n            )\n"

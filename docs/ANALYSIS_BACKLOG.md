@@ -184,7 +184,7 @@ here.
 | DAB-020 | Live queue silently destroyed on toggle-off, on `close()`, and after `close()` | concurrency |
 | DAB-021 | `pending_messages` uncapped -> a single 1.5 M-character prompt | concurrency |
 | DAB-022 | Router cache key is a 200-char prefix -> cross-user routing collisions | routing |
-| DAB-024 | Router / selector / embedding Gemini calls have no timeout | gemini |
+| DAB-024 | Router / selector / embedding Gemini calls have no timeout — **router half DONE** (round 2, Phase 1): the router was the severe one and it was worse than "no timeout". It called the *synchronous* SDK through `asyncio.to_thread`, i.e. on the loop's shared default executor, so a hung provider starved every SQLite `to_thread` in the process (measured: unrelated `to_thread` unscheduled after 1.5 s with the pool saturated). Moved to `client.aio` + a `response_timeout` deadline. **`asyncio.wait_for` around a `to_thread` would NOT have fixed it** — measured, 32/32 worker threads still alive after cancelling every await. Selector (`gemini_client.py:680`) and embeddings (`:768`) are already on `aio`, so they cost no thread; they remain deadline-less and are the open remainder | gemini |
 | DAB-025 | Router failure silently downgrades every request to complexity=low | gemini |
 | DAB-035 | `get_live_enabled()` is a blocking SQLite read per message on the loop | persistence |
 | DAB-048 | Thinking tokens never billed: `thoughts_token_count` never read | cost |

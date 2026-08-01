@@ -185,16 +185,47 @@ does not benefit from conversation history. When uncertain, return true.
                 logger.warning("Gemini client not initialized, skipping router")
                 return RoutingDecision()
 
-            # Generate response using the new SDK
-            response = await asyncio.to_thread(
-                self.gemini_client.client.models.generate_content,
-                model=router_model,
-                contents=classification_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=self.bot.config.router_temperature,
-                    max_output_tokens=self.bot.config.router_max_output_tokens,
-                    response_mime_type="application/json"
-                )
+            # The async SDK, deliberately, and NOT asyncio.to_thread.
+            #
+            # This used to call the synchronous SDK through asyncio.to_thread,
+            # which runs on the loop's DEFAULT ThreadPoolExecutor -- the pool
+            # every other to_thread in the process shares, including all ~20
+            # SQLite calls in message_index_service, token_tracker and the pin
+            # loads. It is sized min(32, cpu_count + 4), so 6-8 threads on a
+            # typical small host. A hung provider call held a worker for as long
+            # as the TCP connection lasted, and this call had no deadline at all,
+            # so a handful of them starved every database operation in the bot.
+            # Measured: with the pool saturated, an unrelated to_thread was still
+            # unscheduled after 1.5 s.
+            #
+            # Wrapping the to_thread in asyncio.wait_for does NOT fix that.
+            # Cancelling the await abandons the coroutine and leaves the worker
+            # running -- measured, 32/32 threads still alive after every await
+            # was cancelled. Only leaving the executor removes the hazard.
+            #
+            # This is already the house idiom: gemini_client.py:680 makes the
+            # identical call, same options and the same JSON response_mime_type,
+            # for the context selector. The error surface is unchanged -- the
+            # SDK's raise_for_response and raise_for_async_response construct the
+            # same ClientError/ServerError from google.genai.errors -- and in any
+            # case the handler below classifies nothing and never retries, so a
+            # differing transport exception cannot change behaviour here.
+            #
+            # The deadline is what the executor could never give us: cancelling
+            # this await genuinely aborts the request. asyncio.TimeoutError is an
+            # Exception, so it lands in the same handler and degrades to the
+            # default RoutingDecision like any other router failure.
+            response = await asyncio.wait_for(
+                self.gemini_client.client.aio.models.generate_content(
+                    model=router_model,
+                    contents=classification_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.bot.config.router_temperature,
+                        max_output_tokens=self.bot.config.router_max_output_tokens,
+                        response_mime_type="application/json"
+                    )
+                ),
+                timeout=self.bot.config.response_timeout,
             )
             
             # Extract and normalize the response

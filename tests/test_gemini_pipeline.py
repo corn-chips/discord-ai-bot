@@ -289,6 +289,40 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         client._calculate_backoff_delay.assert_not_called()
         sleep_mock.assert_awaited_once_with(3)
 
+    async def test_an_empty_stop_response_backs_off_before_each_retry(self):
+        """B3-03 / DAB-042.
+
+        A STOP finish reason carrying no usable text makes
+        ``_interpret_provider_response`` return ``None``, so the attempt loop goes
+        round again. Nothing on that path slept, so every one of
+        ``max_retries + 1`` attempts fired back to back: four fully billed
+        provider calls -- images and the whole assembled context included --
+        inside 0.0001 s, ending in a generic ``unknown_error``.
+
+        That is a live 4x cost multiplier with a real trigger, which is why it is
+        separated from the rest of DAB-042 (a latency ceiling with a theoretical
+        one) and landed first.
+        """
+        client = self._make_client(max_retries=3)
+        client._generate_response_async = AsyncMock(
+            return_value=self._response(finish_reason="STOP", text="")
+        )
+
+        with patch(
+            "src.services.gemini_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep_mock:
+            result = await client.generate_response("hello")
+
+        self.assertFalse(result.success)
+        self.assertEqual(client._generate_response_async.await_count, 4)
+        # Three gaps between four attempts. Without a backoff this is 0.
+        self.assertEqual(sleep_mock.await_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in sleep_mock.await_args_list],
+            [0.25, 0.25, 0.25],
+        )
+
     async def test_timeout_is_applied_to_each_attempt(self):
         client = self._make_client(max_retries=1)
         client.get_timeout_for_model.return_value = 0.001
@@ -301,7 +335,11 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
 
         client._generate_response_async = never_finishes
 
-        result = await client.generate_response("hello")
+        with patch(
+            "src.services.gemini_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep_mock:
+            result = await client.generate_response("hello")
 
         self.assertFalse(result.success)
         self.assertEqual(result.error_type, "timeout")
@@ -310,6 +348,11 @@ class GeminiPipelineTest(unittest.IsolatedAsyncioTestCase):
         timeout_logs = client.performance_logger.log_api_call.call_args_list
         self.assertEqual(len(timeout_logs), 2)
         self.assertTrue(all(call.kwargs["error_type"] == "timeout" for call in timeout_logs))
+        # Added with the B3-03 backoff. The timeout branch used to loop with no
+        # delay too; harmless while an attempt costs a real 120 s, but a hammer
+        # the moment response.timeout is set small -- as it is here, at 0.001 s,
+        # which is precisely the shape nothing in validate_config rejects.
+        self.assertEqual(sleep_mock.await_count, 1)
 
     async def test_cancelled_error_propagates_without_retry_or_error_conversion(self):
         client = self._make_client(max_retries=2)

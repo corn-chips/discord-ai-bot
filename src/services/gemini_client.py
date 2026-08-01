@@ -12,7 +12,7 @@ import logging
 import random
 import re
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -1175,8 +1175,19 @@ Candidate messages:
         self,
         error: Exception,
         attempt: int,
-    ) -> Optional[APIResponse]:
-        """Classify a failed attempt, back off when retryable, or return an error."""
+    ) -> Tuple[Optional[APIResponse], Optional[float]]:
+        """Classify a failed attempt and say whether to retry, and after how long.
+
+        Returns ``(final_response, retry_delay)``, of which at most one is not
+        ``None``: a response means give up and report it, a delay means try
+        again after waiting that long.
+
+        This deliberately does NOT sleep. It used to, and it was the only one of
+        the loop's three retry paths that did -- the timeout branch and the
+        empty-STOP fall-through both went straight round again with no delay at
+        all. Handing the delay back to the caller puts every retry decision
+        through a single backoff. See ``_run_response_attempts``.
+        """
         logger.error(
             "Exception during API call: %s: %s",
             type(error).__name__,
@@ -1209,13 +1220,12 @@ Candidate messages:
                 wait_time,
                 attempt + 1,
             )
-            await asyncio.sleep(wait_time)
-            return None
+            return None, wait_time
 
         return build_error_response(
             error_context.error_type.value,
             error_context.user_message,
-        )
+        ), None
 
     async def _run_response_attempts(
         self,
@@ -1225,6 +1235,9 @@ Candidate messages:
     ) -> APIResponse:
         """Own retry, timeout, cancellation, and response interpretation flow."""
         for attempt in range(self.config.max_retries + 1):
+            # Only the exception path can name its own delay, via the provider's
+            # Retry-After. The other two fall back to exponential backoff.
+            retry_delay: Optional[float] = None
             try:
                 attempt_result = await self._execute_response_attempt(
                     request_content,
@@ -1238,14 +1251,38 @@ Candidate messages:
                 )
                 if interpreted_response is not None:
                     return interpreted_response
+                logger.warning(
+                    "Gemini returned STOP with no usable content (attempt %s of %s); "
+                    "retrying. Every one of these attempts is billed in full.",
+                    attempt + 1,
+                    self.config.max_retries + 1,
+                )
             except asyncio.TimeoutError:
                 timeout_response = self._handle_response_timeout(attempt, plan)
                 if timeout_response is not None:
                     return timeout_response
             except Exception as error:
-                error_response = await self._handle_response_exception(error, attempt)
+                error_response, retry_delay = await self._handle_response_exception(
+                    error,
+                    attempt,
+                )
                 if error_response is not None:
                     return error_response
+
+            # One backoff for every retry decision, reached only when this
+            # attempt produced no final answer and another will follow.
+            #
+            # This used to live inside _handle_response_exception, so it covered
+            # exactly one of the three ways round this loop. The empty-STOP
+            # fall-through above had no delay at all: measured, four fully billed
+            # provider calls in 0.0001 s. The timeout branch had none either --
+            # harmless while an attempt costs a real 120 s, but a hammer the
+            # moment response.timeout is configured small, which nothing
+            # validates.
+            if attempt < self.config.max_retries:
+                if retry_delay is None:
+                    retry_delay = self._calculate_backoff_delay(attempt)
+                await asyncio.sleep(retry_delay)
 
         return build_error_response(
             "unknown_error",

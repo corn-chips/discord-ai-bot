@@ -690,3 +690,20 @@ expect = "killed"
 [[mutant.edit]]
 find = "                        \"; \".join(shortfalls),\n                    )\n                    return\n"
 replace = "                        \"; \".join(shortfalls),\n                    )\n                    raise RuntimeError(\"; \".join(shortfalls))\n"
+
+[[mutant]]
+id = "M-DAB042A"
+bug = "DAB-042"
+# The B3-03 third of DAB-042, landed separately and ahead of the whole-sequence
+# deadline because it is the only measured *cost* in the ticket. This mutant
+# restores the original shape exactly: the backoff exists, but only the
+# exception branch reaches it, because only that branch sets retry_delay. The
+# empty-STOP fall-through and the timeout branch then loop with no delay --
+# four fully billed provider calls in 0.0001 s.
+summary = "Back off only on the exception path, so empty-STOP retries fire back to back"
+guard = "test_an_empty_stop_response_backs_off_before_each_retry"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if attempt < self.config.max_retries:\n                if retry_delay is None:\n                    retry_delay = self._calculate_backoff_delay(attempt)\n                await asyncio.sleep(retry_delay)\n"
+replace = "            if attempt < self.config.max_retries and retry_delay is not None:\n                await asyncio.sleep(retry_delay)\n"

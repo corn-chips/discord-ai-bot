@@ -470,7 +470,52 @@ serves no query the two new ones do not" will not think to check the tombstone p
 touching these indexes again. This is a correction to a landed commit's rationale, not a request
 to revert it. Recorded as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 18.
 
-### PPR-02 (S3) — one DAB-066 shortfall makes every later boot re-run the whole migration
+### PPR-02 (S3) — one DAB-066 shortfall makes every later boot re-run the whole migration — **CLOSED, round 2 Phase 4**
+
+The post-condition is now "no legacy row's key is absent from the target", tested per table
+against `_MIGRATION_KEYS`, and idempotent by construction: a retry finds every key present and
+records success.
+
+**Two of the four keys cannot witness a lost row, and the fix does not change that.**
+`message_index` and `message_embeddings` are keyed on the Discord snowflake, so the check is
+exact. `message_retrieval_events.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` with no UNIQUE
+constraint of any kind, and both files start it at 1 — so `INSERT OR IGNORE` keeps main's row,
+drops the legacy row carrying entirely different content, and the check still passes because the
+*id* is present. Demonstrated: 1,000 rows in main against 1,500 in legacy loses 1,000 with the
+post-condition green. `message_backfill_progress.channel_id` is natural but names a mutable
+*cursor*, so it has the same blind spot. Both need an operator merging two installations to
+trigger, `message_retrieval_events` is written but never read anywhere under `src/`, and
+reconciling by content is a much larger change than the defect warrants. Recorded so that nobody
+reads a green post-condition over those two tables as "the data is all there" — it means "the ids
+are all there".
+
+**The larger cost was the early return, not the retry.** `if not legacy_tables_found: return` sat
+*after* the embedding-model reset, a second full-table eligibility reconcile and a complete FTS
+teardown-and-rebuild, so every boot of every normal install paid for all three in order to
+discover there was nothing to migrate. Measured here, fresh install with the target already
+populated, whole constructor, median of 7, ~132-character message bodies:
+
+| Indexed rows | Before | After |
+|---|---|---|
+| 0 | 1.8 ms | 1.7 ms |
+| 20,000 | 833.1 ms | **326.8 ms** |
+| 100,000 | 4,426.5 ms | **1,727.9 ms** |
+
+Two independent re-measurements put the 100k saving at 3,568 ms and 2,245 ms against the 2,699 ms
+above. The ratio (2.5-3.9x) reproduces and the absolute scales with message length, so quote it
+with a fixture. The residual is `_ensure_schema`'s own ungated reconcile — that is DAB-077.
+
+**Only two of the three skipped statements were redundant.** The embedding-model reset is
+byte-identical to the one in `_ensure_schema` and reports rowcount 0 at every size, and the
+reconcile is `_ensure_schema`'s last statement. The FTS rebuild is the only full rebuild in the
+repository and was quietly repairing an *empty* FTS table on every boot; removing it without a
+replacement took a database from 5 lexical hits to 0 with no boot able to recover.
+`_repair_empty_fts` now does that job in `_ensure_schema`, for the empty case only — 0.33 ms flat
+at 100,000 rows against 2,547 ms for the unconditional rebuild. Partial FTS drift is still
+unhandled; that remains DAB-071. `M-PPR02` through `M-PPR02D` pin all four decisions.
+
+<details><summary>The finding as originally filed</summary>
+
 
 `922e899` correctly stopped a short legacy copy from recording itself as complete: on a shortfall
 it logs at ERROR, leaves the ledger unwritten and returns, so the migration is retried next boot.
@@ -503,6 +548,8 @@ Severity is S3, not higher, because the precondition — a real shortfall — is
 [recorded as unreachable](analysis-tickets/DAB-066.md) across every schema this repository's
 history has produced. It is a latent trap behind a latent trap. The fix is to compare
 `after_count` against `expected + before`, or to count only rows genuinely absent from `main`.
+
+</details>
 
 ### PPR-03 (S4) — cancellation during the DAB-019 retry backoff double-debits the rate limiter
 

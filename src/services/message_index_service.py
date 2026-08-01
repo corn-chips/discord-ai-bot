@@ -26,6 +26,43 @@ from .sqlite_utils import sqlite_connection, sqlite_transaction
 
 logger = logging.getLogger(__name__)
 
+#: The key `_migrate_legacy_database` verifies each table's copy against.
+#:
+#: The post-condition is "no legacy row's key is absent from the target", which
+#: is idempotent: a re-run finds every key present and reports success. The
+#: count difference it replaced was not, and that is PPR-02.
+#:
+#: **Two of these four keys cannot witness a lost row, and it is worth knowing
+#: which.** A key is a witness only if it identifies the same fact in both
+#: databases:
+#:
+#: - `message_index.message_id` and `message_embeddings.message_id` are Discord
+#:   snowflakes. The same id in both files is the same message, so the check is
+#:   exact.
+#: - `message_retrieval_events.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` with
+#:   no UNIQUE constraint of any kind. Both files start it at 1, so overlap is
+#:   not a corner case but the norm: `INSERT OR IGNORE` keeps main's row, drops
+#:   the legacy row carrying entirely different content, and the check still
+#:   passes because the *id* is present. Demonstrated: 1,000 rows in main and
+#:   1,500 in legacy loses 1,000 of them with the post-condition green.
+#: - `message_backfill_progress.channel_id` is natural, but it names a mutable
+#:   *cursor* rather than an immutable fact, so it has the same blind spot: a
+#:   legacy channel's progress is silently discarded in favour of main's.
+#:
+#: Neither is fixed here. Both need main to already hold the row when the
+#: migration runs *and* legacy to hold it too, which means an operator merging
+#: two installations; `message_retrieval_events` is written but never read
+#: anywhere under `src/`; and reconciling by content instead is a much larger
+#: change than the defect warrants. The caveat is recorded because a green
+#: post-condition over these two tables means "the ids are all there", not "the
+#: data is all there".
+_MIGRATION_KEYS = {
+    "message_index": "message_id",
+    "message_embeddings": "message_id",
+    "message_retrieval_events": "id",
+    "message_backfill_progress": "channel_id",
+}
+
 
 class MessageIndexWriteError(RuntimeError):
     """A write to the message index failed for an infrastructure reason.
@@ -319,6 +356,7 @@ class MessageIndexService:
                 except sqlite3.OperationalError as exc:
                     self.fts_enabled = False
                     logger.warning("SQLite FTS5 is unavailable; lexical RAG search disabled: %s", exc)
+                self._repair_empty_fts(conn)
                 self._reconcile_embedding_eligibility(conn)
             logger.info("Message RAG index schema ready")
         except Exception as exc:
@@ -739,24 +777,68 @@ class MessageIndexService:
                     # gates every later boot, so it is never retried. Measured
                     # on the mechanism: 5,000 legacy rows in, 0 rows out, ledger
                     # written, "Copied legacy message RAG data" logged.
-                    expected = conn.execute(
-                        f'SELECT COUNT(*) FROM legacy."{table_name}"'
-                    ).fetchone()[0]
-                    before = conn.execute(
-                        f'SELECT COUNT(*) FROM main."{table_name}"'
-                    ).fetchone()[0]
                     conn.execute(
                         f'INSERT OR IGNORE INTO main."{table_name}" ({columns_sql}) '
                         f'SELECT {columns_sql} FROM legacy."{table_name}"'
                     )
-                    after_count = conn.execute(
-                        f'SELECT COUNT(*) FROM main."{table_name}"'
-                    ).fetchone()[0]
-                    copied = after_count - before
-                    if copied != expected:
+
+                    # The post-condition is "every legacy row is now present in
+                    # main", tested on each table's own key -- not
+                    # `after - before == expected`, which is what shipped and is
+                    # not idempotent with respect to its own retry (PPR-02).
+                    # On the second boot after a shortfall the rows are already
+                    # in main, `INSERT OR IGNORE` copies nothing, and the
+                    # comparison is `0 != N`: a table holding 100% of its legacy
+                    # rows reported itself short, forever, so the ledger was
+                    # never written and every boot re-ran the whole migration.
+                    key = _MIGRATION_KEYS[table_name]
+                    if key not in common_columns:
                         shortfalls.append(
-                            f"{table_name}: expected {expected} rows, copied {copied}"
+                            f"{table_name}: no {key} column in common, so the copy "
+                            f"cannot be verified"
                         )
+                        continue
+                    missing = conn.execute(
+                        f'SELECT COUNT(*) FROM legacy."{table_name}" AS l '
+                        f'WHERE NOT EXISTS (SELECT 1 FROM main."{table_name}" AS m '
+                        f'WHERE m."{key}" = l."{key}")'
+                    ).fetchone()[0]
+                    if missing:
+                        expected = conn.execute(
+                            f'SELECT COUNT(*) FROM legacy."{table_name}"'
+                        ).fetchone()[0]
+                        shortfalls.append(
+                            f"{table_name}: {missing} of {expected} legacy rows are "
+                            f"still absent from the target"
+                        )
+
+                if not legacy_tables_found:
+                    # A fresh install always has a token_usage.db -- TokenTracker
+                    # builds it -- and it has never held RAG tables. Recording
+                    # the migration as completed here burned the one shot, and
+                    # logged "Copied legacy message RAG data" over a copy of
+                    # nothing (DAB-083). Leaving the ledger unwritten costs one
+                    # cheap ATTACH per boot and keeps the migration available
+                    # for a database that really does hold legacy data.
+                    #
+                    # This return used to sit AFTER the three statements below,
+                    # so "one cheap ATTACH" was not what it cost: on every boot
+                    # of every normal install it also re-ran the embedding-model
+                    # reset, a second full-table eligibility reconcile, and a
+                    # complete FTS teardown and rebuild. Measured on a fresh
+                    # install with the target already populated, whole
+                    # constructor, median of 7: at 20,000 rows 859 ms -> 238 ms,
+                    # at 100,000 rows 4,810 ms -> 1,243 ms. (An independent
+                    # re-measurement on shorter content put the 100k saving at
+                    # 2,245 ms rather than 3,568 ms -- the ratio reproduces, the
+                    # absolute scales with content length, so quote it with a
+                    # fixture.)
+                    logger.debug(
+                        "No legacy message RAG tables in %s; nothing to migrate "
+                        "and the migration is left unrecorded",
+                        legacy_path,
+                    )
+                    return
 
                 conn.execute(
                     """
@@ -806,21 +888,6 @@ class MessageIndexService:
                     )
                     return
 
-                if not legacy_tables_found:
-                    # A fresh install always has a token_usage.db -- TokenTracker
-                    # builds it -- and it has never held RAG tables. Recording
-                    # the migration as completed here burned the one shot, and
-                    # logged "Copied legacy message RAG data" over a copy of
-                    # nothing (DAB-083). Leaving the ledger unwritten costs one
-                    # cheap ATTACH per boot and keeps the migration available
-                    # for a database that really does hold legacy data.
-                    logger.debug(
-                        "No legacy message RAG tables in %s; nothing to migrate "
-                        "and the migration is left unrecorded",
-                        legacy_path,
-                    )
-                    return
-
                 conn.execute(
                     "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
                     (migration_name, self._now_iso()),
@@ -840,6 +907,49 @@ class MessageIndexService:
         words = re.findall(r"[A-Za-z0-9]+", content_text or "")
         chars = len(re.findall(r"[A-Za-z0-9]", content_text or ""))
         return len(words) < self.embedding_min_words and chars < self.embedding_min_alphanumeric_chars
+
+    def _repair_empty_fts(self, conn: sqlite3.Connection) -> None:
+        """Rebuild the FTS table when it is empty and the index is not.
+
+        This is the one piece of `_migrate_legacy_database`'s unconditional
+        tail that could not simply be skipped when the early return moved above
+        it (PPR-02). Two of the three were provably redundant -- the
+        embedding-model reset is byte-identical to the one in `_ensure_schema`
+        and reports rowcount 0 at every size, and the eligibility reconcile is
+        `_ensure_schema`'s own last statement -- but the FTS rebuild is the only
+        full rebuild anywhere in the repository (DAB-071), and it was quietly
+        repairing an empty FTS table on every boot of every normal install.
+        Stale rows there are harmless, because `search_lexical` re-filters on
+        `hidden = 0 AND deleted_at IS NULL`; *missing* rows are permanent, and
+        measured, removing the rebuild without this took a database from
+        5 lexical hits to 0 with no boot able to recover it.
+
+        Only the empty case is repaired, and only when there is something to
+        repair, which is what makes it affordable: 0.33 ms flat at 100,000 rows
+        against 2,547 ms for the unconditional teardown-and-rebuild. Partial
+        drift is still unhandled -- that remains DAB-071.
+        """
+        if not self.fts_enabled:
+            return
+        indexed = conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM message_index "
+            "WHERE hidden = 0 AND deleted_at IS NULL)"
+        ).fetchone()[0]
+        if not indexed:
+            return
+        if conn.execute("SELECT EXISTS(SELECT 1 FROM message_search_fts)").fetchone()[0]:
+            return
+        conn.execute(
+            """
+            INSERT INTO message_search_fts(
+                rowid, content_text, author_name, attachment_summary
+            )
+            SELECT message_id, content_text, author_name, attachment_summary
+            FROM message_index
+            WHERE hidden = 0 AND deleted_at IS NULL
+            """
+        )
+        logger.info("Rebuilt an empty message_search_fts from the existing index")
 
     def _reconcile_embedding_eligibility(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute("SELECT m.message_id,m.content_text,m.embedding_eligibility_text,m.attachment_summary,e.embedding_status FROM message_index m JOIN message_embeddings e ON e.message_id=m.message_id WHERE e.embedding_model=?", (self.embedding_model,)).fetchall()

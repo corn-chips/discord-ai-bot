@@ -1478,3 +1478,71 @@ expect = "killed"
 [[mutant.edit]]
 find = "            except BaseException as e:\n                self._slash_commands_registered = False\n                if not isinstance(e, Exception):\n                    raise\n"
 replace = "            except Exception as e:\n                self._slash_commands_registered = False\n"
+
+[[mutant]]
+id = "M-PPR02"
+bug = "PPR-02"
+# The post-condition as shipped: `after - before` against the legacy row
+# count. It cannot be satisfied by its own retry. On the second boot after a
+# shortfall the rows are already in main, `INSERT OR IGNORE` copies nothing,
+# and the comparison is `0 != N` -- a table holding 100% of its legacy rows
+# reports itself short, forever. The ledger is never written, so every boot
+# re-runs the ATTACH, the copy, the reconcile and a full FTS rebuild.
+#
+# NOTE the `continue`: without it the natural-key check below also runs and
+# masks the defect. The first draft of this mutant omitted the `before` count
+# instead, which made it pass the very test it exists to fail.
+summary = "Verify the legacy copy by row-count difference instead of by key"
+guard = "test_a_retry_over_rows_already_copied_records_success"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    conn.execute(\n                        f'INSERT OR IGNORE INTO main.\"{table_name}\" ({columns_sql}) '\n                        f'SELECT {columns_sql} FROM legacy.\"{table_name}\"'\n                    )\n"
+replace = "                    expected = conn.execute(\n                        f'SELECT COUNT(*) FROM legacy.\"{table_name}\"'\n                    ).fetchone()[0]\n                    before = conn.execute(\n                        f'SELECT COUNT(*) FROM main.\"{table_name}\"'\n                    ).fetchone()[0]\n                    conn.execute(\n                        f'INSERT OR IGNORE INTO main.\"{table_name}\" ({columns_sql}) '\n                        f'SELECT {columns_sql} FROM legacy.\"{table_name}\"'\n                    )\n                    after_count = conn.execute(\n                        f'SELECT COUNT(*) FROM main.\"{table_name}\"'\n                    ).fetchone()[0]\n                    if after_count - before != expected:\n                        shortfalls.append(\n                            f\"{table_name}: expected {expected} rows, copied \"\n                            f\"{after_count - before}\"\n                        )\n                    continue\n"
+
+[[mutant]]
+id = "M-PPR02B"
+bug = "PPR-02"
+# The other direction: a post-condition that never fails is idempotent and
+# worthless. DAB-066's whole point is that a legacy schema missing a column
+# this version declares NOT NULL drops every row silently, and the ledger must
+# stay unwritten so the migration is retried once the cause is fixed.
+summary = "Make the copy post-condition unable to report a shortfall"
+guard = "test_a_genuinely_short_copy_is_still_refused"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    if missing:\n"
+replace = "                    if False:\n"
+
+[[mutant]]
+id = "M-PPR02C"
+bug = "PPR-02"
+# Moving the early return above the legacy body takes an accidental repair
+# with it. The unconditional `DELETE FROM message_search_fts` + reindex was the
+# only full FTS rebuild anywhere in the repository (DAB-071), and it ran on
+# every boot of every normal install. Stale FTS rows are harmless --
+# search_lexical re-filters hidden and deleted -- but MISSING rows are
+# permanent, and nothing else recreates them.
+summary = "Drop the empty-FTS repair that the early-return move displaced"
+guard = "test_an_empty_fts_table_is_rebuilt_from_the_index"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                self._repair_empty_fts(conn)\n"
+replace = ""
+
+[[mutant]]
+id = "M-PPR02D"
+bug = "PPR-02"
+# Repair by unconditional teardown and rebuild -- which is what the code did
+# before, and is exactly the cost the early-return move exists to remove:
+# 2,547 ms at 100,000 rows against 0.33 ms for the emptiness check. Correct,
+# and it gives back the whole saving.
+summary = "Rebuild the FTS table on every construction instead of only when empty"
+guard = "test_a_populated_fts_table_is_not_rebuilt"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if conn.execute(\"SELECT EXISTS(SELECT 1 FROM message_search_fts)\").fetchone()[0]:\n            return\n"
+replace = "        conn.execute(\"DELETE FROM message_search_fts\")\n"

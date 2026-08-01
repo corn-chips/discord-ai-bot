@@ -577,11 +577,15 @@ Four things the finding does not say, each of which changed the fix, and each fo
 a prototype of the obvious repair rather than reading it:
 
 - **The footer is counted.** `Embed.__len__` includes `footer.text`, so "say so in the footer"
-  implemented literally puts the canonical failing case back over: 5,996 → **6,017**. The reserve
-  is taken *before* the fit loop. It is subtle enough that a single hand-picked input cannot see
-  it — each field costs ~240 characters, so the loop usually stops a whole field short and a
-  47-character footer disappears into the slack. Swept across 5,985 shapes, dropping the reserve
-  goes over on **53** of them, up to 6,046; the shipped build stays inside on all 5,985.
+  implemented literally puts the canonical failing case back over: 5,996 → **6,010**. The reserve
+  is taken *before* the fit loop, and a complete listing carries **no footer at all** — at
+  eight-character names 25 pins measure exactly 5,996, so any footer is the difference between 25
+  pins and 24, and a footer on a complete listing says nothing the description does not. The
+  listing is therefore fitted twice: once with no reserve, and again with the truncated-footer
+  reserve only if the first pass could not show everything. This is subtle enough that a single
+  hand-picked input cannot see it — each field costs ~240 characters, so the loop usually stops a
+  whole field short and a 47-character footer disappears into the slack. The guard sweeps 122
+  shapes near the ceiling; **18** of them go over without the reserve, up to 6,046.
 - **A character budget alone is not enough, because >25 rows in a channel is reachable.** Every
   pin migrated before the DAB-068 fix bypassed `add_pin` entirely — measured, 60 rows in one
   channel — and 60 *short* pins never reach 6,000 characters at all. A length-only gate emits 60
@@ -599,8 +603,10 @@ a prototype of the obvious repair rather than reading it:
 
 Guarded by `tests/test_pins_embed_bounds.py`, which asserts on the `discord.Embed` and
 `discord.ui.View` the real callback hands to `send_message`. Before it existed, a `/pins` showing
-one pin and handing out zero delete buttons passed the entire suite. `M-PPR06` through `M-PPR06E`
-pin the five decisions.
+one pin and handing out zero delete buttons passed the entire suite — and the first draft of the
+guard had the same hole in miniature: every ceiling it asserted was satisfied by a listing that
+showed nothing, so halving the budget left the suite green while the command showed 12 of 25. It
+now asserts a lower bound first. `M-PPR06` through `M-PPR06G` pin the seven decisions.
 
 Three residuals recorded rather than fixed, all pre-existing and none of them the overflow:
 `PinDeleteView` has no `interaction_check` and `/pins` is not ephemeral, so any channel member can
@@ -751,21 +757,25 @@ the moment they matter.
   `M-DAB003B` and `M-DAB003C` reintroduce both spellings.
 
   Clearing the tree and rebuilding it was rejected too, and it is the dangerous option:
-  measured, a registrar raising on the second run takes the tree from 22 commands to 6, and
-  `tree.sync()` is a full-replace `PUT /applications/{id}/commands`, so the other 16 are deleted
+  measured, a registrar raising on the second run takes the tree from 22 commands to 5, and
+  `tree.sync()` is a full-replace `PUT /applications/{id}/commands`, so the other 17 are deleted
   from Discord globally by a transient fault the shipped code survives untouched. A degraded
   image backend on reconnect does the same thing at 24 → 22, silently un-publishing
   `/edit-image` and `/image-queue`. `M-DAB003E`.
 
   Two residuals, recorded not fixed. `tree.sync()` still runs on every reconnect — one
-  full-replace PUT of an identical 8,695-byte payload — which the guard neither adds nor removes;
+  full-replace PUT of an identical 8,048-byte payload — which the guard neither adds nor removes;
   moving registration and sync into `Client.setup_hook` would remove it, and discord.py's own
   docstring recommends exactly that ("only called once, in `login()` ... a better solution than
   doing such setup in the `on_ready` event"), with `application_id` assigned before `setup_hook`
   runs so `tree.sync()` works there. That is a startup restructure rather than a log-correctness
-  fix, so it is a separate change. And every variant, including the shipped one, is racy if any
-  registrar ever awaits: `on_ready` is dispatched as its own task and two can overlap. The flag is
-  claimed *before* the await for that reason, but nothing enforces the no-await property.
+  fix, so it is a separate change. `_start_automatic_rag_backlog` re-runs on every reconnect too
+  (measured, 3 of 3) — it resumes from `message_backfill_progress`, so the cost is one extra
+  channel-history walk per reconnect rather than a re-index, and `setup_hook` would not move it.
+  And every variant, including the shipped one, is racy if any registrar ever awaits: `on_ready`
+  is dispatched as its own task and two can overlap. The flag is claimed *before* the await for
+  that reason, and released on a `CancelledError` as well as on an `Exception`, but nothing
+  enforces the no-await property.
 
 ### PPR-11 (S3) — the report web UI accepted a cross-site form POST — **CLOSED, Phase 2.3**
 
@@ -852,3 +862,48 @@ router sees the user's text and the image path sees a prompt, and the right answ
 not be the one configured for responses. Recorded so the question gets asked rather than
 inherited. The `safety:` comment in `config.yaml` now states the scope, so the config no longer
 overstates its own reach.
+
+### PPR-15 (S4) — `/pins` hands anyone a delete button for anyone's pin
+
+`PinDeleteView` (`personalization.py`) overrides no `interaction_check`, so discord.py's default
+`return True` applies, and `/pins` replies without `ephemeral=True`. The delete buttons therefore
+sit on a public message that any channel member can click, and `PinService.delete_pin` has no
+permission check of its own. Pre-existing; the PPR-06 fix widens the button count from 20 to 25
+but does not create it. Deleting a pin is recoverable only by re-pinning from memory, and `/pin`
+itself is ungated, so the severity is bounded by the same reasoning as `/live` (PPR-08): the
+action is cheap and the deployment is a single guild. It is listed because "the delete buttons are
+the recovery path" is now load-bearing in two findings.
+
+### PPR-16 (S4) — `get_pins` sorts on a TEXT column carrying two timestamp formats
+
+`get_pins` does `ORDER BY pinned_at ASC` (`pin_service.py`). `add_pin` writes
+`datetime.utcnow().isoformat()` with a `T` separator; the column default is `CURRENT_TIMESTAMP`,
+which uses a space, and `0x20 < 0x54` — so a same-day default row sorts before *every* ISO row
+regardless of its time. An offset suffix sorts lexically too. Measured: two rows inserted 1.1 s
+apart come back newest-first.
+
+Mostly cosmetic until PPR-06: now that `/pins` shows a prefix of the list, this sort decides
+*which* pins a truncated listing hides. The legacy migration avoids it by ordering on `id`
+instead, which is `INTEGER PRIMARY KEY AUTOINCREMENT` and therefore is insertion order with no
+format variants; `get_pins` should do the same, but it feeds the retrieval path
+(`hybrid_context_retriever.py:452`) as well as the command, so it is a wider change than it looks.
+
+### PPR-17 (S4) — the mutation harness reports a wrong guard without failing
+
+`scripts/mutation_check.py:253-256` computes `guarded = any(mutant.guard in name for name in
+result.killers)` and appends `(NOTE: not the declared guard)` to the output — but the verdict
+column still reads `ok` and the exit status is unaffected, so a mutant whose declared guard has
+stopped observing it is a line of prose nobody has to act on. Two mutants are in that state today
+(`M-DAB019`, `M-DAB078B`), both pre-existing. The same block prints `result.killers[:4]`, so on a
+mutant killed by five or more tests the declared guard can be absent from the printed list while
+present in the check — which reads as a failure and is not. Both are one-line fixes; neither is
+urgent, because the wrong-guard case is still reported, just not enforced.
+
+### PPR-18 (S4) — deliberate-failure tests write tracebacks to the suite's stderr
+
+Round 2 Phase 3 captured the four `on_ready` cases, which turned the noise into assertions that a
+real failure stays loud. The same shape remains in the RAG write-failure tests, which emit
+`Failed to index message 4242: database is locked` and `Could not re-index edited message 4242`
+with full tracebacks on every run. They are correct records from tests that provoke the failure on
+purpose; capturing them with `assertLogs` would both quieten the run and assert the degradation is
+announced, which is a property those tests do not currently check.

@@ -1189,8 +1189,8 @@ guard = "test_the_migration_leaves_a_state_add_pin_could_have_produced"
 file = "src/services/pin_service.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                copied, dropped = self._copy_legacy_pins(conn, available)\n"
-replace = "                conn.execute(\"INSERT OR IGNORE INTO main.pinned_messages (id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id) SELECT id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id FROM legacy.pinned_messages\")\n                copied, dropped = 0, {}\n"
+find = "                copied, capped, unusable = self._copy_legacy_pins(conn, available)\n"
+replace = "                conn.execute(\"INSERT OR IGNORE INTO main.pinned_messages (id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id) SELECT id, channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id FROM legacy.pinned_messages\")\n                copied, capped, unusable = 0, {}, 0\n"
 
 [[mutant]]
 id = "M-DAB068C"
@@ -1255,8 +1255,8 @@ guard = "test_a_full_channel_of_long_named_pins_still_fits"
 file = "src/bot/command_modules/personalization.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        if used + cost > budget:\n            break\n"
-replace = "        pass\n"
+find = "            if used + cost > budget:\n                break\n"
+replace = "            pass\n"
 
 [[mutant]]
 id = "M-PPR06C"
@@ -1273,8 +1273,8 @@ guard = "test_a_channel_migrated_over_the_pin_cap_still_fits"
 file = "src/bot/command_modules/personalization.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        if shown >= min(DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT):\n            break\n"
-replace = "        pass\n"
+find = "            if len(fields) >= min(\n                DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT\n            ):\n                break\n"
+replace = "            pass\n"
 
 [[mutant]]
 id = "M-PPR06D"
@@ -1283,15 +1283,16 @@ bug = "PPR-06"
 # counts footer text, so "Showing 24 of 26 ..." lands on top of an embed the
 # loop already filled to the ceiling. Subtle: each field costs ~240 characters,
 # so the loop usually stops a whole field short and the ~47-character footer
-# vanishes into the slack. Swept across 5,985 shapes, this goes over on 53 of
-# them, up to 6,046, and the guard's boundary band holds nine.
+# vanishes into the slack -- so no single hand-picked input demonstrates it.
+# The guard sweeps 122 shapes near the ceiling and 18 of them go over without
+# the reserve, up to 6,046.
 summary = "Append the /pins footer after the fit loop instead of reserving it"
 guard = "test_no_pin_length_near_the_ceiling_produces_an_over_limit_embed"
 file = "src/bot/command_modules/personalization.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        - footer_reserve\n"
-replace = "        - 0\n"
+find = "        fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead - truncated_footer_reserve)\n"
+replace = "        fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead)\n"
 
 [[mutant]]
 id = "M-PPR06E"
@@ -1373,15 +1374,15 @@ guard = "test_a_registration_failure_stays_critical_on_every_reconnect"
 file = "src/bot/discord_bot.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                self._slash_commands_registered = False\n                logger.critical("
-replace = "                logger.critical("
+find = "                self._slash_commands_registered = False\n                if not isinstance(e, Exception):"
+replace = "                if not isinstance(e, Exception):"
 
 [[mutant]]
 id = "M-DAB003E"
 bug = "DAB-003"
 # The other obvious way to make on_ready idempotent, and the dangerous one.
 # Measured: a registrar raising on the second run takes the tree from 22
-# commands to 6, and tree.sync() is a full-replace
+# commands to 5, and tree.sync() is a full-replace
 # PUT /applications/{id}/commands, so the other 16 are deleted from Discord
 # globally -- by a transient fault the shipped code survives untouched. A
 # degraded image backend on reconnect triggers it too: 24 -> 22, silently
@@ -1393,3 +1394,87 @@ expect = "killed"
 [[mutant.edit]]
 find = "            self._slash_commands_registered = True\n            try:\n"
 replace = "            self.tree.clear_commands(guild=None)\n            try:\n"
+
+[[mutant]]
+id = "M-DAB068E"
+bug = "DAB-068"
+# A regression the row-at-a-time copy created and an independent review
+# caught: the bulk INSERT OR IGNORE swallowed a legacy row that could not
+# become a valid pin, a plain INSERT aborts the transaction over it, and
+# because the ledger is written only on success that means retried and
+# re-failed on every boot forever. Reachable through the view support in the
+# same commit -- a view carries no NOT NULL. Measured: three good pins and one
+# with no author, zero migrated on boots 1, 2 and 3.
+summary = "Let one unusable legacy row abort the whole pin migration, permanently"
+guard = "test_one_unusable_legacy_row_does_not_block_the_others_forever"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if channel_id is None or not author_name or not pinned_by:\n                unusable += 1\n                continue\n"
+replace = "            if False:\n                unusable += 1\n                continue\n"
+
+[[mutant]]
+id = "M-DAB068F"
+bug = "DAB-068"
+# Counting a channel-less legacy row against a per-channel drop tally puts a
+# None key in the dict the summary sorts, so a migration that copied every pin
+# it should have logs "Copied 25 legacy pinned memories" and then
+# "Failed to copy legacy pinned memories ...: '<' not supported between
+# instances of 'int' and 'NoneType'" -- and every genuine drop WARNING is lost
+# with it.
+summary = "Key the drop tally by a possibly-NULL channel id and then sort it"
+guard = "test_one_unusable_legacy_row_does_not_block_the_others_forever"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if channel_id is None or not author_name or not pinned_by:\n                unusable += 1\n                continue\n"
+replace = "            if channel_id is None:\n                capped[channel_id] = capped.get(channel_id, 0) + 1\n                continue\n"
+
+[[mutant]]
+id = "M-PPR06F"
+bug = "PPR-06"
+# Fit once, always reserving the longer "Showing N of M ..." footer. Safe, and
+# it costs a pin in exactly the case that used to work: 25 pins at
+# eight-character names measure 5,996, so any reserve at all drops one to 24
+# with the budget unspent. The shipped build fits twice and sets no footer on a
+# complete listing, because the description already carries the count.
+summary = "Reserve the truncated footer even on a listing that hides nothing"
+guard = "test_a_full_channel_that_only_just_fits_still_lists_all_of_it"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead)\n    if len(fields) < total:\n        fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead - truncated_footer_reserve)\n"
+replace = "    fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead - truncated_footer_reserve)\n"
+
+[[mutant]]
+id = "M-PPR06G"
+bug = "PPR-06"
+# The other direction, and the one the first draft of the guard could not see:
+# every ceiling in tests/test_pins_embed_bounds.py is satisfied by a /pins that
+# lists one pin, or none. Halving the budget left the whole suite green while
+# the command showed 12 of 25. Hiding a pin is a smaller failure than a 400,
+# but deleting the visible ones is the only way back under the cap, so a
+# listing that hides what it did not need to is still broken.
+summary = "Halve the embed budget: a fix that never 400s and never lists the pins either"
+guard = "test_a_full_channel_that_only_just_fits_still_lists_all_of_it"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead)\n"
+replace = "    fields = fit(DISCORD_EMBED_TOTAL_LIMIT // 2 - overhead)\n"
+
+[[mutant]]
+id = "M-DAB003F"
+bug = "DAB-003"
+# DAB-019's lesson in a second file. CancelledError is a BaseException, so
+# `except Exception` cannot see it: a registration cancelled mid-flight built
+# nothing and leaves the claim latched, after which every later on_ready skips
+# registration and the bot serves with no commands at all -- silently, since
+# the skip logs at INFO.
+summary = "Release the registration claim on Exception only, not on a cancellation"
+guard = "test_a_cancelled_registration_does_not_latch_the_flag"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            except BaseException as e:\n                self._slash_commands_registered = False\n                if not isinstance(e, Exception):\n                    raise\n"
+replace = "            except Exception as e:\n                self._slash_commands_registered = False\n"

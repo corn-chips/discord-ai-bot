@@ -169,6 +169,70 @@ class PinMigrationTest(unittest.TestCase):
         self.assertEqual([row[1] for row in service.get_pins(1)], ["from a view"])
         self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
 
+    def test_one_unusable_legacy_row_does_not_block_the_others_forever(self):
+        # A legacy view carries no NOT NULL of its own, so a row with no author
+        # is reachable through exactly the view support this migration added.
+        # Row-at-a-time INSERT makes it fatal where the bulk INSERT OR IGNORE
+        # merely swallowed it -- and because the ledger is written only on
+        # success, "fatal" means retried and re-failed on every boot forever.
+        conn = sqlite3.connect(self.legacy)
+        conn.execute(
+            "CREATE TABLE base (id INTEGER PRIMARY KEY, channel_id INTEGER,"
+            " guild_id INTEGER, content TEXT, author_name TEXT, pinned_by TEXT,"
+            " pinned_at TEXT, message_id INTEGER)"
+        )
+        conn.executemany(
+            "INSERT INTO base VALUES (?, ?, NULL, ?, ?, ?, ?, NULL)",
+            [
+                (1, 1, "good one", "ada", "ada", "2026-01-01T00:00:00"),
+                (2, 1, "poisoned", None, "ada", "2026-01-01T00:01:00"),
+                (3, 1, "good two", "ada", "ada", "2026-01-01T00:02:00"),
+            ],
+        )
+        conn.execute("CREATE VIEW pinned_messages AS SELECT * FROM base")
+        conn.commit()
+        conn.close()
+
+        with self.assertLogs("src.services.pin_service", level="WARNING") as captured:
+            service = self._migrate()
+
+        self.assertEqual(
+            sorted(row[1] for row in service.get_pins(1)), ["good one", "good two"]
+        )
+        self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
+        self.assertIn("Skipped 1 legacy pin row(s)", captured.output[0])
+
+    def test_a_row_with_no_channel_does_not_abort_a_successful_migration(self):
+        self._create_legacy_table(
+            """
+            CREATE TABLE pinned_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id INTEGER,
+                guild_id INTEGER, content TEXT, author_name TEXT,
+                pinned_by TEXT, pinned_at TEXT, message_id INTEGER
+            )
+            """
+        )
+        self._seed_legacy(
+            [(channel, f"note {channel}", "ada", "ada", "2026-01-01T00:00:00")
+             for channel in (1, 2)]
+        )
+        conn = sqlite3.connect(self.legacy)
+        conn.execute(
+            "INSERT INTO pinned_messages (channel_id, content, author_name,"
+            " pinned_by, pinned_at) VALUES (NULL, 'orphan', 'ada', 'ada', 'x')"
+        )
+        conn.commit()
+        conn.close()
+
+        with self.assertLogs("src.services.pin_service", level="WARNING"):
+            service = self._migrate()
+
+        # Two real channels copied, the orphan skipped, and no error: keying the
+        # drop counts by channel and then sorting them put a None next to an int.
+        self.assertEqual(len(service.get_pins(1)), 1)
+        self.assertEqual(len(service.get_pins(2)), 1)
+        self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
+
     # ── the caps half ────────────────────────────────────────────────
 
     def test_the_channel_count_ceiling_survives_the_migration(self):
@@ -198,6 +262,9 @@ class PinMigrationTest(unittest.TestCase):
             self._migrate()
 
         count, chars, longest = self._channel_totals(1)
+        # Copying nothing satisfies every `assertLessEqual` below.
+        self.assertGreater(count, 0)
+        self.assertGreater(chars, MAX_PIN_CHARS_PER_CHANNEL // 2)
         self.assertLessEqual(chars, MAX_PIN_CHARS_PER_CHANNEL)
         self.assertLessEqual(count, MAX_PINS_PER_CHANNEL)
         # `_sanitise_pin_content` appends " [truncated]" after slicing, so the
@@ -235,6 +302,12 @@ class PinMigrationTest(unittest.TestCase):
 
         for channel in (10, 20, 30):
             count, chars, longest = self._channel_totals(channel)
+            # Lower bounds first. Three assertLessEqual are all satisfied by a
+            # migration that copies nothing, which makes them vacuous on any
+            # channel it happens to skip -- and a build that migrates only the
+            # first of the three channels passed this test without them.
+            self.assertGreater(count, 0, channel)
+            self.assertGreater(chars, MAX_PIN_CHARS_PER_CHANNEL // 2, channel)
             self.assertLessEqual(count, MAX_PINS_PER_CHANNEL, channel)
             self.assertLessEqual(chars, MAX_PIN_CHARS_PER_CHANNEL, channel)
             self.assertLessEqual(longest, MAX_PIN_CHARS + 32, channel)

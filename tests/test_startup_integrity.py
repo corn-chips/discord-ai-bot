@@ -15,6 +15,7 @@ which is the same class of mistake as asserting a permission attribute that
 never reaches the wire.
 """
 
+import asyncio
 import logging
 import tempfile
 import unittest
@@ -252,6 +253,25 @@ class OnReadyReentryTest(OnReadyHarness):
         self.assertEqual(len(self._critical(first)), 2)
         self.assertEqual(len(self._critical(second)), 2)
         self.assertFalse(self.bot._slash_commands_registered)
+
+    async def test_a_cancelled_registration_does_not_latch_the_flag(self):
+        # `except Exception` cannot see a CancelledError -- it is a
+        # BaseException, which is the trap DAB-019 hit in the live coordinator.
+        # A registration cancelled mid-flight built nothing, so the flag must be
+        # released or the tree is silently never registered again.
+        with patch(
+            "src.bot.discord_bot.setup_commands",
+            side_effect=asyncio.CancelledError(),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.bot.on_ready()
+
+        self.assertFalse(self.bot._slash_commands_registered)
+        self.assertEqual(len(self.bot.tree.get_commands()), 0)
+
+        # And the next on_ready really does build the tree.
+        await self._run_on_ready()
+        self.assertEqual(len(self.bot.tree.get_commands()), 22)
 
     async def test_a_transient_fault_on_reconnect_cannot_shrink_a_working_tree(self):
         # Why the fix is not `tree.clear_commands()` + rebuild, which is the

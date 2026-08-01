@@ -639,12 +639,17 @@ class DiscordBot(discord.Client):
         # mute a true warning in ten cases out of eleven and silence a false one
         # in one.
         #
-        # Set before the await, not after. setup_commands contains no await
-        # today, so two overlapping on_ready tasks cannot interleave inside it;
-        # claiming the flag first means that stays true if one is ever added.
+        # Claimed before the await and released on any exit that is not a
+        # completed registration. setup_commands contains no await today, so two
+        # overlapping on_ready tasks cannot interleave inside it; claiming the
+        # flag first keeps that true if one is ever added -- and the moment one
+        # is, the task can be cancelled mid-registration, which `except
+        # Exception` cannot see. That is DAB-019's lesson in a second file:
+        # CancelledError is a BaseException, so it gets its own arm rather than
+        # leaving the flag latched over a tree that was never built.
         # Clearing the tree and rebuilding it was rejected outright: measured, a
         # transient fault on the second run takes the tree from 22 commands to
-        # 6, and tree.sync() is a full-replace PUT, so it deletes the other 16
+        # 5, and tree.sync() is a full-replace PUT, so it deletes the other 17
         # from Discord globally.
         registered = self._slash_commands_registered
         if registered:
@@ -656,9 +661,10 @@ class DiscordBot(discord.Client):
             self._slash_commands_registered = True
             try:
                 await setup_commands(self, self.config, self.gemini_client, self.performance_logger, self.token_tracker)
-                registered = True
-            except Exception as e:
+            except BaseException as e:
                 self._slash_commands_registered = False
+                if not isinstance(e, Exception):
+                    raise
                 logger.critical(
                     "Slash command registration FAILED: %s. The bot is running with an "
                     "incomplete command tree; anything registered after the failure point "
@@ -666,6 +672,8 @@ class DiscordBot(discord.Client):
                     e,
                     exc_info=True,
                 )
+            else:
+                registered = True
 
         try:
             synced = await self.tree.sync()

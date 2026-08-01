@@ -122,10 +122,17 @@ class PinService:
         in a state `add_pin` itself could have produced* -- which is also what
         makes the >25-field `/pins` embed unreachable going forward.
 
-        Pins beyond a cap are dropped rather than truncated away, oldest first,
-        matching `add_pin`: once a channel is at the cap it is the *newer* pin
-        that is refused. Nothing deletes the legacy rows, so a dropped memory is
-        still readable in the legacy database, and the WARNING says so.
+        Rows are admitted oldest first, so it is the *newer* pins a channel
+        loses to a ceiling -- matching `add_pin`, which refuses the new pin once
+        the channel is full. Nothing deletes the legacy rows, so a dropped
+        memory is still readable in the legacy database, and the WARNING says
+        so.
+
+        One legacy row that cannot become a valid pin is skipped, not fatal.
+        The bulk `INSERT OR IGNORE` swallowed those silently; a plain `INSERT`
+        would abort the transaction, and because the ledger is only written on
+        success that would retry -- and fail -- on every boot forever. Reachable
+        through the view support above, since a view carries no NOT NULL.
         """
         source = Path(legacy_db_path).expanduser()
         target = Path(self.db_path).expanduser()
@@ -176,7 +183,7 @@ class PinService:
                     )
                     return
 
-                copied, dropped = self._copy_legacy_pins(conn, available)
+                copied, capped, unusable = self._copy_legacy_pins(conn, available)
                 conn.execute(
                     "INSERT INTO rag_migrations(name, completed_at) VALUES (?, ?)",
                     (migration_name, datetime.utcnow().isoformat()),
@@ -185,7 +192,10 @@ class PinService:
                 "Copied %d legacy pinned memor%s from %s",
                 copied, "y" if copied == 1 else "ies", source,
             )
-            for channel_id, count in sorted(dropped.items()):
+            # Two reasons a row can be left behind, and they need different
+            # words: one is the ceiling working as designed, the other is a
+            # legacy row that was never a valid pin.
+            for channel_id, count in sorted(capped.items()):
                 logger.warning(
                     "Dropped %d legacy pin(s) for channel %s: the channel was "
                     "already at the %d-pin / %d-character ceiling. They remain "
@@ -193,13 +203,20 @@ class PinService:
                     count, channel_id, MAX_PINS_PER_CHANNEL,
                     MAX_PIN_CHARS_PER_CHANNEL, source,
                 )
+            if unusable:
+                logger.warning(
+                    "Skipped %d legacy pin row(s) that could not become a pin: "
+                    "no channel, no author, or no content after sanitising. "
+                    "They remain readable in %s.",
+                    unusable, source,
+                )
         except Exception as exc:
             logger.error("Failed to copy legacy pinned memories from %s: %s", source, exc)
 
-    def _copy_legacy_pins(self, conn, available: set) -> Tuple[int, dict]:
+    def _copy_legacy_pins(self, conn, available: set) -> Tuple[int, dict, int]:
         """Admit legacy rows one at a time, under `add_pin`'s ceilings.
 
-        Returns `(copied, {channel_id: dropped})`.
+        Returns `(copied, {channel_id: dropped_by_a_ceiling}, unusable_rows)`.
         """
         guild_expr = "guild_id" if "guild_id" in available else "NULL"
         message_expr = "message_id" if "message_id" in available else "NULL"
@@ -207,7 +224,7 @@ class PinService:
         # substr bounds the read. Everything past MAX_PIN_CHARS is truncated by
         # _sanitise_pin_content anyway, and the pins this migration exists to
         # move are precisely the ones created before any length cap existed:
-        # on 2,000 x 100 KB legacy pins, an unbounded fetchall costs +192 MB
+        # on 2,000 x 100 KB legacy pins, an unbounded fetchall costs +194 MB
         # inside DiscordBot.__init__ against +11 MB with the substr.
         #
         # ORDER BY id, not pinned_at. `pinned_at` is TEXT and carries two
@@ -227,16 +244,21 @@ class PinService:
 
         state = {}
         copied = 0
-        dropped = {}
+        capped = {}
+        unusable = 0
 
         for channel_id, guild_id, content, author_name, pinned_by, pinned_at, message_id in rows:
-            if channel_id is None:
-                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+            # Everything NOT NULL in `pinned_messages` that cannot be
+            # synthesised. A legacy view has no NOT NULL of its own, so one bad
+            # row would otherwise abort the transaction -- and with the ledger
+            # written only on success, retry and abort on every boot forever.
+            if channel_id is None or not author_name or not pinned_by:
+                unusable += 1
                 continue
 
             cleaned = _sanitise_pin_content(content)
             if not cleaned:
-                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+                unusable += 1
                 continue
 
             if channel_id not in state:
@@ -255,7 +277,7 @@ class PinService:
                 count >= MAX_PINS_PER_CHANNEL
                 or chars + len(cleaned) > MAX_PIN_CHARS_PER_CHANNEL
             ):
-                dropped[channel_id] = dropped.get(channel_id, 0) + 1
+                capped[channel_id] = capped.get(channel_id, 0) + 1
                 continue
 
             # The legacy `id` is deliberately NOT preserved. Carrying it over
@@ -280,7 +302,7 @@ class PinService:
             state[channel_id] = [count + 1, chars + len(cleaned)]
             copied += 1
 
-        return copied, dropped
+        return copied, capped, unusable
 
     def add_pin(
         self,

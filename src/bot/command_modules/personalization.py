@@ -73,62 +73,74 @@ def build_pins_embed(channel_pins) -> tuple[discord.Embed, int]:
     through `_sanitise_pin_content`.
 
     The footer is reserved before the loop, not appended after it. `__len__`
-    counts footer text, so adding "Showing 25 of 25" to a 5,996-character embed
-    puts it back over at 6,017 -- the exact case this function exists to stop.
+    counts footer text, so a footer landing on top of an embed the loop already
+    filled to the ceiling puts it back over -- 18 of the 122 shapes
+    `test_no_pin_length_near_the_ceiling_produces_an_over_limit_embed` sweeps,
+    up to 6,046, and `M-PPR06D` is that mistake.
+
+    It is fitted twice, and a complete listing carries no footer at all, for the
+    same reason. At eight-character names 25 pins measure exactly 5,996, so any
+    footer at all costs a pin -- and a footer on a complete listing says nothing
+    the description does not already say. So the first pass reserves nothing,
+    and only a pass that could not show everything pays for the wording that
+    tells the user why.
 
     Returns `(embed, shown)`. The caller must build the delete view from the
     first `shown` pins, or it hands out buttons for rows it did not list.
     """
     total = len(channel_pins)
-    embed = discord.Embed(
-        title="Pinned Bot Memories",
-        description=f"{total} pinned message(s) in this channel",
-        color=discord.Color.gold(),
-    )
-
-    # An upper bound over every footer this function can end up setting: `shown`
-    # is never wider than `total`.
-    footer_reserve = _utf16_len(
+    title = "Pinned Bot Memories"
+    description = f"{total} pinned message(s) in this channel"
+    # An upper bound over every truncated footer: `shown` is never wider
+    # than `total`.
+    truncated_footer_reserve = _utf16_len(
         f"Showing {total} of {total} — delete one to reveal the next"
     )
-    budget = (
-        DISCORD_EMBED_TOTAL_LIMIT
-        - _utf16_len(embed.title or "")
-        - _utf16_len(embed.description or "")
-        - footer_reserve
+    overhead = _utf16_len(title) + _utf16_len(description)
+
+    def fit(budget):
+        fields = []
+        used = 0
+        for index, (_pin_id, content, author_name, pinned_by, _pinned_at) in enumerate(
+            channel_pins, start=1
+        ):
+            if len(fields) >= min(
+                DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT
+            ):
+                break
+
+            preview = (
+                content[:PIN_PREVIEW_CHARS] + "..."
+                if len(content) > PIN_PREVIEW_CHARS
+                else content
+            )
+            name = _clamp(f"#{index} — {author_name}", DISCORD_EMBED_FIELD_NAME_LIMIT)
+            value = _clamp(
+                f"{preview}\n*Pinned by {pinned_by}*", DISCORD_EMBED_FIELD_VALUE_LIMIT
+            )
+            cost = _utf16_len(name) + _utf16_len(value)
+            if used + cost > budget:
+                break
+
+            fields.append((name, value))
+            used += cost
+        return fields
+
+    fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead)
+    if len(fields) < total:
+        fields = fit(DISCORD_EMBED_TOTAL_LIMIT - overhead - truncated_footer_reserve)
+
+    embed = discord.Embed(
+        title=title, description=description, color=discord.Color.gold()
     )
-
-    used = 0
-    shown = 0
-    for index, (_pin_id, content, author_name, pinned_by, _pinned_at) in enumerate(
-        channel_pins, start=1
-    ):
-        if shown >= min(DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT):
-            break
-
-        preview = (
-            content[:PIN_PREVIEW_CHARS] + "..."
-            if len(content) > PIN_PREVIEW_CHARS
-            else content
-        )
-        name = _clamp(f"#{index} — {author_name}", DISCORD_EMBED_FIELD_NAME_LIMIT)
-        value = _clamp(
-            f"{preview}\n*Pinned by {pinned_by}*", DISCORD_EMBED_FIELD_VALUE_LIMIT
-        )
-        cost = _utf16_len(name) + _utf16_len(value)
-        if used + cost > budget:
-            break
-
+    for name, value in fields:
         embed.add_field(name=name, value=value, inline=False)
-        used += cost
-        shown += 1
 
+    shown = len(fields)
     if shown < total:
         # Say what to do about it: `/pins` is the only delete UI, so "some are
         # hidden" without "delete one to see the next" is a dead end.
         embed.set_footer(text=f"Showing {shown} of {total} — delete one to reveal the next")
-    else:
-        embed.set_footer(text=f"Showing all {total}")
 
     return embed, shown
 

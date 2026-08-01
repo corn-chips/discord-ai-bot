@@ -102,8 +102,9 @@ never hand-edit a version in it.
 
 Commands do not exist until `on_ready` (`discord_bot.py:516`) runs `setup_commands` +
 `tree.sync()`. `on_ready` re-fires on every gateway reconnect, so registration is guarded by
-`bot._slash_commands_registered`, set only when `setup_commands` has run to completion and
-released again if it raised (DAB-003). Do not replace that flag with
+`bot._slash_commands_registered`, claimed before the await and released again on any exit that is
+not a completed registration — including a `CancelledError`, which `except Exception` cannot see
+(DAB-003). Do not replace that flag with
 `bool(self.tree.get_commands())`: `register_ping_command` runs first, so a registrar failing
 after it leaves a non-empty but genuinely incomplete tree, and ten of the eleven registrars
 produce exactly that. `M-DAB003C` reintroduces it. Do not clear the tree and rebuild either —

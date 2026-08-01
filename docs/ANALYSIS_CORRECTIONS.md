@@ -3,11 +3,12 @@
 Last updated: 2026-07-31 | Repo state: branch `dev`, HEAD `922e899` | Baseline suite: 273 tests,
 OK; mutation harness 56/56
 
-Items 1-16 correct the 2026-07-29 analysis corpus. **Items 17-19 are different in kind:** they
-correct claims made by the remediation programme's own landed commits, found by reviewing the
-combined diff before the repository was pushed. Where a commit message is wrong, history is not
-being rewritten for it — the correction lives here, and where the same false claim also reached a
-source comment, the comment was fixed.
+Items 1-16 and 21 correct the 2026-07-29 analysis corpus. **Items 17-20 and 22 are different in
+kind:** they correct claims made by the remediation programme's own landed commits, found by
+reviewing the combined diff before the repository was pushed and, for item 22, by an independent
+review of round 2 Phase 3. Where a commit message is wrong, history is not being rewritten for it
+— the correction lives here, and where the same false claim also reached a source comment or a
+document, that was fixed in place.
 
 **A note on commit hashes.** This history was rewritten once, to scrub absolute paths. Hashes
 quoted inside commit messages written before that rewrite may name objects that are no longer
@@ -833,6 +834,30 @@ prompts instruct the model to apply no content restrictions, so a typo changed n
 the shipped posture. **The victim is the operator who deliberately tightens safety, mistypes or
 uses the SDK's own name, and is told nothing.** That is why the shipped default was left exactly
 as it is: changing it is a product decision, and it is not one a lookup-table repair gets to make.
+
+## 22. Seven figures in round 2 Phase 3's own commit messages do not reproduce
+
+**Not a corpus claim — this programme's own work, corrected here for the same reason as items 11,
+12, 17 and 20.** An independent review of `0fb7016`, `56bd52c` and `a55c601` re-ran every
+quantitative claim in them. Eight reproduced exactly; seven did not. History is not being
+rewritten for a commit message, so the corrections live here, and where the same figure reached a
+source comment or a document it was fixed in place.
+
+| Claim | As committed | Re-measured | Why it was wrong |
+|---|---|---|---|
+| `/pins` footer overflow | "5,996 → **6,017**" | **6,010** | 6,017 was measured against a `"Showing 25 of 25 pins"` footer that the fix does not ship. The shipped complete-listing footer was `"Showing all 25"`, 14 characters — and it has since been removed entirely, because at that exact shape *any* footer is the difference between 25 pins and 24 |
+| the footer guard's coverage | "5,985 shapes, **53** go over" | **not reproducible** | The sweep was defined nowhere, and two attempts to reconstruct it gave 107 and 0. The figure is withdrawn rather than restated. What *is* reproducible is the guard itself: run `scripts/mutation_check.py M-PPR06D` and **18** of the 122 shapes it sweeps go over, up to 6,046 |
+| that guard's band | "holds **nine**" | **18** | Nine is the count at 25 pins alone; the sweep covers 25 **and** 26 |
+| clear-and-rebuild damage | "22 commands to **6**" | **5** | 6 is `register_admin_commands`; 5 is `register_feature_commands`, which is the registrar the test beside that comment actually patches |
+| the reconnect sync payload | "**8,695** bytes" | **8,048** | 8,695 is `json.dumps` with default separators; discord.py serialises compact. (`json.dumps` defaults give 8,713 here, so even the loose reading does not match) |
+| unbounded `fetchall` | "**+192 MB** against +11 MB" | **+194 MB** against +11 MB | Within noise across three runs (191, 192, 194) — the claim stands, the number is restated |
+| the pre-fix pin fixture | "61 rows, **300,871** characters, a 5,014-character pin" | reproduces **only with the fixture stated** | 61 pins of `"legacy pin {i} " + "y"*5000` plus one delimiter pin. A re-creation using plain 5,000-character pins gives 300,059. The fixture is not in the tree, so the figure needs it quoted |
+
+**The lesson is discipline 5 applied to a figure rather than to a payoff.** Every one of the seven
+was measured on a *prototype* of the fix and then not re-measured after the fix changed shape —
+which is exactly the failure this file's summary table attributes to the corpus. The footer figure
+is the sharpest case: the fix that produced 6,017 was superseded twice before it landed, and the
+number travelled unchanged through both.
 
 ## The pattern across the corpus's measured claims
 

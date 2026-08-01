@@ -118,7 +118,17 @@ class PinsEmbedBoundsTest(unittest.IsolatedAsyncioTestCase):
         kwargs = call.response.send_message.await_args.kwargs
         return kwargs["embed"], kwargs["view"]
 
-    def _assert_within_every_ceiling(self, embed, view):
+    def _assert_within_every_ceiling(self, embed, view, *, at_least=1):
+        # The lower bound comes first, and it is not decoration. Every ceiling
+        # below is satisfied by a `/pins` that lists one pin, or none -- halving
+        # DISCORD_EMBED_TOTAL_LIMIT in a scratch copy left the whole suite green
+        # while the command showed 12 of 25. Hiding a pin the user could have
+        # seen is a smaller failure than a 400, but it is still a failure, and
+        # the only way back under the cap is to see and delete pins.
+        self.assertGreaterEqual(
+            len(embed.fields), at_least,
+            f"only {len(embed.fields)} of the pins were listed",
+        )
         self.assertLessEqual(
             len(embed), DISCORD_EMBED_TOTAL_LIMIT,
             f"embed is {len(embed)} characters; Discord rejects the message",
@@ -141,6 +151,22 @@ class PinsEmbedBoundsTest(unittest.IsolatedAsyncioTestCase):
         embed, view = await self._render()
 
         self._assert_within_every_ceiling(embed, view)
+
+    async def test_a_full_channel_that_only_just_fits_still_lists_all_of_it(self):
+        # 25 pins at eight-character names measure 5,996 and used to render.
+        # Reserving the longer "Showing N of M ..." footer unconditionally would
+        # hide one of them to buy room for a footer that is never set.
+        self._seed(MAX_PINS_PER_CHANNEL, name_length=8)
+
+        embed, view = await self._render()
+
+        self._assert_within_every_ceiling(
+            embed, view, at_least=MAX_PINS_PER_CHANNEL
+        )
+        # No footer at all when nothing is hidden: `Embed.__len__` counts one,
+        # the description already carries the count, and at this exact shape a
+        # footer of any length is the difference between 25 pins and 24.
+        self.assertIsNone(embed.footer.text)
 
     async def test_the_longest_display_name_discord_allows_still_fits(self):
         self._seed(MAX_PINS_PER_CHANNEL, name_length=32)
@@ -233,7 +259,7 @@ class PinsEmbedBoundsTest(unittest.IsolatedAsyncioTestCase):
         self._assert_within_every_ceiling(embed, view)
         self.assertEqual(len(embed.fields), 3)
         self.assertEqual(len(view.children), 3)
-        self.assertIn("all 3", embed.footer.text)
+        self.assertIsNone(embed.footer.text)
 
     async def test_an_empty_channel_is_unchanged(self):
         call = interaction()

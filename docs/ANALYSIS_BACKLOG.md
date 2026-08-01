@@ -139,7 +139,7 @@ an afternoon or that need a Tier-0 item first.
 | 24 | DAB-096 | **OPEN.** Synchronous SQLite on the asyncio event loop. The per-call payoff is refuted — re-measured like-for-like, `to_thread` is 0.144 -> 0.225 ms, i.e. *slower*; the loop-stall figure stands. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 14 | IMPROVEMENT | 4997 ms -> 3.1 ms max loop stall | M | **6.0** | DAB-095 | [DAB-096](analysis-tickets/DAB-096.md) |
 | 25 | DAB-166 | **DONE** (Phase 3b) — `/config debug` is a no-op; handler levels pinned at startup. Landed as option 1 plus `perf_logger.propagate = False`, which option 1 needs to be safe. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 10 | BUG | S2 | S | **6.0** | — | [DAB-166](analysis-tickets/DAB-166.md) |
 | 26 | DAB-073 | **DONE** (Phase 2/3, `36bf261`) — pins no longer have absolute priority; a retrieval floor is reserved before pins are allocated | BUG | S2 | S | **6.0** | — | [DAB-073](analysis-tickets/DAB-073.md) |
-| 27 | DAB-150 | **DONE** (Phase 2/3, `417e468`) — `/pin` is capped at 25 per channel and 40,000 chars per channel, 4,000 per pin, with prompt-delimiter defusal. Landed with DAB-073's floor, as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 7 required. **Note:** the 25-pin cap does not make `/pins` safe — at 25 pins the embed exceeds Discord's 6,000-character cap once display names reach 9 characters. See the post-programme findings below | BUG | S2 | S | **6.0** | DAB-073 | [DAB-150](analysis-tickets/DAB-150.md) |
+| 27 | DAB-150 | **DONE** (Phase 2/3, `417e468`) — `/pin` is capped at 25 per channel and 40,000 chars per channel, 4,000 per pin, with prompt-delimiter defusal. Landed with DAB-073's floor, as [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 7 required. **Note:** the 25-pin cap did not by itself make `/pins` safe — at 25 pins the embed exceeds Discord's 6,000-character cap once display names reach 9 characters, and the cap was bypassed entirely by the legacy migration. Both closed in round 2 Phase 3; see PPR-06 and DAB-068 below | BUG | S2 | S | **6.0** | DAB-073 | [DAB-150](analysis-tickets/DAB-150.md) |
 | 28 | DAB-065 | **DONE** (Phase 4) — A transient DB error during an edit permanently tombstones the message. Closed by separating a write failure from a business decision, NOT by adding `deleted_at = NULL` to the `ON CONFLICT` list (that reintroduces BUG-0004 and does not work anyway — `mark_deleted` also sets `hidden = 1`). See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 15 | BUG | **S1** | M | **4.0** | DAB-095 | [DAB-065](analysis-tickets/DAB-065.md) |
 | 29 | DAB-066 | **DONE** (Phase 4) — Legacy migration silently discards all rows, then records success. Landed as a count assertion that logs and returns, NOT the prescribed raise, which would abort DiscordBot.__init__ on every boot forever. Latent-trap guard: the precondition is unreachable across all nine revisions of the schema. See [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 16 | BUG | **S1** | S | **4.0** | — | [DAB-066](analysis-tickets/DAB-066.md) |
 | 30 | DAB-203 | **OPEN**, and more load-bearing than before. `tests/test_command_registration.py` still pins the tree positionally: `== 22` (`:147`), `== 35` (`:148`) and the `[5:10]` slice (`:323`, was `:239`). It survived the programme unchanged and correctly caught nothing wrongly, but five landed commits had to reason about it | BUG | S3 | S | **4.0** | — | [DAB-203](analysis-tickets/DAB-203.md) |
@@ -220,7 +220,7 @@ here.
 | DAB-148 | **DONE** — Every `/config` subcommand mutates process-global state, ungated. Promoted out of Tier 3 and landed in Phase 3: runtime Manage Server guards on the five mutating subcommands, `/config info` deliberately left open | security |
 | DAB-153 | **DONE** (round 2 Phase 3) — raw exception text no longer reaches unprivileged users through `error_manager` (`d4b91a5`), and the three call sites outside that scope are now closed too. `/deepresearch` and `/summarize` reply with a fixed string, ephemeral (PPR-09). `/rag status`'s DEGRADED embed **keeps** its `str(exc)` deliberately — ephemeral, Manage Server only, and no path in any realistic failure — while the resolved database path beside it, which was the actual disclosure and was in the healthy embed as well, is gone (PPR-05) | security |
 | DAB-159 | **OPEN.** Indirect prompt injection: retrieved content can forge the RAG context fence. Partially mitigated for *pins* only — `417e468` defuses the prompt delimiters in pinned text (`pin_service.py:45-48`) — but retrieved messages are untouched | security |
-| DAB-163 | **OPEN, and it reads as closed when it is not.** `417e468` capped pins at 25 per channel, which looks like it closes the 25-field embed limit by construction. It does not: at the permitted 25 pins the embed **exceeds Discord's 6,000-character total cap** as soon as display names reach 9 characters. Measured below | security |
+| DAB-163 | **DONE** (round 2 Phase 3) — it read as closed by the 25-pin cap and was not: the binding ceiling is the embed's 6,000-character *total*, reached at 6,046 with nine-character display names. `/pins` now stops at whichever of five ceilings binds first, and the delete view covers exactly what it listed. Four things the finding missed changed the fix; see PPR-06 below | security |
 | DAB-167 | `send_error_response` raises out of its own `except` block | observability |
 | DAB-168 | **DONE** (Phase 3b) — Live-mode RAG retrieval failure is logged at DEBUG. Now WARNING with `exc_info`, matching the mention path | observability |
 | DAB-169 | 39 of 237 `except` handlers are invisible at the default log level | observability |
@@ -565,7 +565,53 @@ class as DAB-153 and was outside that fix's scope.
 
 </details>
 
-### PPR-06 (S3) — `/pins` exceeds Discord's 6,000-character embed cap at the permitted 25 pins
+### PPR-06 (S3) — `/pins` exceeds Discord's 6,000-character embed cap at the permitted 25 pins — **CLOSED, round 2 Phase 3**
+
+**Closed, and wider than the finding.** `/pins` now adds fields one at a time and stops when the
+next would breach *any* ceiling: the 6,000-character total, the 25-field count, 256 per field
+name, 1,024 per field value, and 25 view children. The delete view is built from exactly the pins
+listed, replacing a flat `[:20]` that stranded five listed pins with no button in any channel that
+rendered at all.
+
+Four things the finding does not say, each of which changed the fix, and each found by executing
+a prototype of the obvious repair rather than reading it:
+
+- **The footer is counted.** `Embed.__len__` includes `footer.text`, so "say so in the footer"
+  implemented literally puts the canonical failing case back over: 5,996 → **6,017**. The reserve
+  is taken *before* the fit loop. It is subtle enough that a single hand-picked input cannot see
+  it — each field costs ~240 characters, so the loop usually stops a whole field short and a
+  47-character footer disappears into the slack. Swept across 5,985 shapes, dropping the reserve
+  goes over on **53** of them, up to 6,046; the shipped build stays inside on all 5,985.
+- **A character budget alone is not enough, because >25 rows in a channel is reachable.** Every
+  pin migrated before the DAB-068 fix bypassed `add_pin` entirely — measured, 60 rows in one
+  channel — and 60 *short* pins never reach 6,000 characters at all. A length-only gate emits 60
+  fields and then raises `ValueError: maximum number of children exceeded` building the view,
+  which is worse than the 400: it is raised while composing the reply, so the interaction is never
+  acknowledged, and this bot registers no `on_app_command_error` handler.
+- **discord.py validates nothing.** `add_field` accepts 30 fields with 300-character names and
+  2,000-character values and `to_dict()` passes every one through. `author_name` and `pinned_by`
+  are unconstrained TEXT and never see `_sanitise_pin_content`, so name and value are clamped
+  independently of the total.
+- **`len(embed)` counts code points, and an astral character is two UTF-16 units** — measured
+  1.84x on an all-emoji listing (5,971 against 10,971). Which unit Discord's 6,000 is denominated
+  in cannot be settled without calling the API, so the budget counts the larger of the two:
+  identical to `len(embed)` for any ordinary listing, conservative for the rest.
+
+Guarded by `tests/test_pins_embed_bounds.py`, which asserts on the `discord.Embed` and
+`discord.ui.View` the real callback hands to `send_message`. Before it existed, a `/pins` showing
+one pin and handing out zero delete buttons passed the entire suite. `M-PPR06` through `M-PPR06E`
+pin the five decisions.
+
+Three residuals recorded rather than fixed, all pre-existing and none of them the overflow:
+`PinDeleteView` has no `interaction_check` and `/pins` is not ephemeral, so any channel member can
+click any pin's delete button; `get_pins` orders by a TEXT `pinned_at` carrying two formats, so
+*which* pins a truncated listing hides is decided by a sort in which a `CURRENT_TIMESTAMP` row
+precedes every ISO one; and a channel holding 60 pins needs 14 rounds of delete-and-rerun to reach
+them all, which the footer now names but does not shorten.
+
+<details><summary>The finding as originally filed</summary>
+
+
 
 DAB-163 reads as closed by construction: `417e468` set `MAX_PINS_PER_CHANNEL = 25`
 (`pin_service.py:26`), and Discord's per-embed limit is 25 *fields*. But the field count is not
@@ -589,6 +635,8 @@ it stays broken until someone deletes a pin, except that the delete buttons live
 attached to the message that will not send. The pin cap made this reachable at exactly the value
 it permits. Fixes: paginate, shorten the preview, or cap on cumulative embed length rather than
 count.
+
+</details>
 
 ### PPR-07 (S3) — `/clear-cache` is administrator-gated in guilds and ungated in DMs
 

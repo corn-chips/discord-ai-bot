@@ -6,6 +6,13 @@ from typing import Optional
 import discord
 from discord import app_commands
 
+from ...constants import (
+    DISCORD_EMBED_FIELD_COUNT_LIMIT,
+    DISCORD_EMBED_FIELD_NAME_LIMIT,
+    DISCORD_EMBED_FIELD_VALUE_LIMIT,
+    DISCORD_EMBED_TOTAL_LIMIT,
+    DISCORD_VIEW_CHILD_LIMIT,
+)
 from ...services.channel_settings_service import ChannelSettingsService
 from ...services.message_visibility_service import MessageVisibilityService
 from ...services.pin_service import PinService
@@ -15,6 +22,115 @@ from .context import CommandContext
 
 
 logger = logging.getLogger("src.bot.commands")
+
+PIN_PREVIEW_CHARS = 200
+
+
+def _utf16_len(text: str) -> int:
+    """Length of `text` in UTF-16 code units.
+
+    `discord.Embed.__len__` counts Python code points, and for ASCII the two
+    agree exactly. They diverge on astral characters: a 25-pin listing of
+    emoji measures 5,971 code points and 10,971 UTF-16 units, a factor of 1.84.
+    Which unit Discord's 6,000 is denominated in cannot be settled without
+    calling the API, so this counts the larger of the two -- identical to
+    `len(embed)` for every ordinary listing, and conservative for the rest.
+    """
+    return len(text) + sum(1 for character in text if ord(character) > 0xFFFF)
+
+
+def _clamp(text: str, limit: int) -> str:
+    """Truncate `text` to `limit` UTF-16 units, marking that it was cut."""
+    if _utf16_len(text) <= limit:
+        return text
+    kept: list[str] = []
+    used = 0
+    for character in text:
+        cost = 2 if ord(character) > 0xFFFF else 1
+        if used + cost > limit - 1:
+            break
+        kept.append(character)
+        used += cost
+    return "".join(kept) + "\u2026"
+
+
+def build_pins_embed(channel_pins) -> tuple[discord.Embed, int]:
+    """Render as many pins as Discord will accept, and say how many that was.
+
+    Three ceilings bind here and they bind in a surprising order (PPR-06 /
+    DAB-163). `MAX_PINS_PER_CHANNEL` is 25 and an embed holds 25 fields, so the
+    field count reads as safe by construction -- but the embed's 6,000-character
+    *total* is reached first: 5,996 at 25 pins with 8-character display names,
+    6,046 at 9. Discord then rejects the whole message, and because the delete
+    buttons live on the message that will not send, the channel has no way back
+    under the cap.
+
+    The field count is still checked rather than inferred, because more than 25
+    rows in a channel is reachable: every pin migrated before round 2 Phase 3
+    bypassed `add_pin`'s caps entirely, and 60 *short* pins never reach 6,000 at
+    all. Per-field name and value are clamped independently, because
+    `author_name` and `pinned_by` are unconstrained TEXT and only `content` goes
+    through `_sanitise_pin_content`.
+
+    The footer is reserved before the loop, not appended after it. `__len__`
+    counts footer text, so adding "Showing 25 of 25" to a 5,996-character embed
+    puts it back over at 6,017 -- the exact case this function exists to stop.
+
+    Returns `(embed, shown)`. The caller must build the delete view from the
+    first `shown` pins, or it hands out buttons for rows it did not list.
+    """
+    total = len(channel_pins)
+    embed = discord.Embed(
+        title="Pinned Bot Memories",
+        description=f"{total} pinned message(s) in this channel",
+        color=discord.Color.gold(),
+    )
+
+    # An upper bound over every footer this function can end up setting: `shown`
+    # is never wider than `total`.
+    footer_reserve = _utf16_len(
+        f"Showing {total} of {total} — delete one to reveal the next"
+    )
+    budget = (
+        DISCORD_EMBED_TOTAL_LIMIT
+        - _utf16_len(embed.title or "")
+        - _utf16_len(embed.description or "")
+        - footer_reserve
+    )
+
+    used = 0
+    shown = 0
+    for index, (_pin_id, content, author_name, pinned_by, _pinned_at) in enumerate(
+        channel_pins, start=1
+    ):
+        if shown >= min(DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT):
+            break
+
+        preview = (
+            content[:PIN_PREVIEW_CHARS] + "..."
+            if len(content) > PIN_PREVIEW_CHARS
+            else content
+        )
+        name = _clamp(f"#{index} — {author_name}", DISCORD_EMBED_FIELD_NAME_LIMIT)
+        value = _clamp(
+            f"{preview}\n*Pinned by {pinned_by}*", DISCORD_EMBED_FIELD_VALUE_LIMIT
+        )
+        cost = _utf16_len(name) + _utf16_len(value)
+        if used + cost > budget:
+            break
+
+        embed.add_field(name=name, value=value, inline=False)
+        used += cost
+        shown += 1
+
+    if shown < total:
+        # Say what to do about it: `/pins` is the only delete UI, so "some are
+        # hidden" without "delete one to see the next" is a dead end.
+        embed.set_footer(text=f"Showing {shown} of {total} — delete one to reveal the next")
+    else:
+        embed.set_footer(text=f"Showing all {total}")
+
+    return embed, shown
 
 
 def register_personalization_commands(context: CommandContext) -> None:
@@ -185,7 +301,13 @@ def register_personalization_commands(context: CommandContext) -> None:
     class PinDeleteView(discord.ui.View):
         def __init__(self, channel_pins, channel_id):
             super().__init__(timeout=120)
-            for i, (pin_id, _content, _author, _pinned_by, _pinned_at) in enumerate(channel_pins[:20], start=1):
+            # One button per pin the embed actually listed. It used to be a
+            # flat [:20], which stranded five listed pins with no delete button
+            # in any channel at the 25-pin cap that rendered at all -- and would
+            # raise ValueError on the 26th in a channel holding more.
+            for i, (pin_id, _content, _author, _pinned_by, _pinned_at) in enumerate(
+                channel_pins[:DISCORD_VIEW_CHILD_LIMIT], start=1
+            ):
                 self.add_item(PinDeleteButton(pin_id, i, channel_id))
 
     @bot.tree.command(name="pin", description="Pin a memory for the bot to always remember in this channel")
@@ -227,21 +349,8 @@ def register_personalization_commands(context: CommandContext) -> None:
             )
             return
 
-        embed = discord.Embed(
-            title="Pinned Bot Memories",
-            description=f"{len(channel_pins)} pinned message(s) in this channel",
-            color=discord.Color.gold(),
-        )
-
-        for i, (pin_id, content, author_name, pinned_by, pinned_at) in enumerate(channel_pins, start=1):
-            preview = content[:200] + "..." if len(content) > 200 else content
-            embed.add_field(
-                name=f"#{i} — {author_name}",
-                value=f"{preview}\n*Pinned by {pinned_by}*",
-                inline=False,
-            )
-
-        view = PinDeleteView(channel_pins, interaction.channel_id)
+        embed, shown = build_pins_embed(channel_pins)
+        view = PinDeleteView(channel_pins[:shown], interaction.channel_id)
         await interaction.response.send_message(embed=embed, view=view)
 
     @bot.tree.command(name="hide", description="Replace recent Grok messages in this channel with '.'")

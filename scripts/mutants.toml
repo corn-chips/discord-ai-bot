@@ -1225,3 +1225,87 @@ expect = "killed"
 [[mutant.edit]]
 find = "            cleaned = _sanitise_pin_content(content)\n"
 replace = "            cleaned = (content or \"\").strip()\n"
+
+[[mutant]]
+id = "M-PPR06"
+bug = "PPR-06"
+# The defect itself: one field per pin, unbounded. At the permitted 25 pins the
+# embed is 5,996 characters with 8-character display names and 6,046 with nine,
+# and Discord's ceiling is 6,000 -- so most full channels got
+# "Embed size exceeds maximum size of 6000" and no listing at all. /pins is the
+# only delete UI, and its buttons ride on the message that will not send, so
+# the channel could not get back under the cap.
+summary = "Render one embed field per pin with no ceiling of any kind"
+guard = "test_a_full_channel_of_long_named_pins_still_fits"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        embed, shown = build_pins_embed(channel_pins)\n        view = PinDeleteView(channel_pins[:shown], interaction.channel_id)\n"
+replace = "        embed = discord.Embed(title=\"Pinned Bot Memories\", description=f\"{len(channel_pins)} pinned message(s) in this channel\", color=discord.Color.gold())\n        for i, (pin_id, content, author_name, pinned_by, pinned_at) in enumerate(channel_pins, start=1):\n            preview = content[:200] + \"...\" if len(content) > 200 else content\n            embed.add_field(name=f\"#{i} — {author_name}\", value=f\"{preview}\\n*Pinned by {pinned_by}*\", inline=False)\n        view = PinDeleteView(channel_pins, interaction.channel_id)\n"
+
+[[mutant]]
+id = "M-PPR06B"
+bug = "PPR-06"
+# The fix everyone reaches for first, and it is not enough: cap the field count
+# at 25 and trust MAX_PINS_PER_CHANNEL for the rest. The field count is not the
+# binding ceiling -- 25 pins with nine-character names is 6,046 characters
+# against a 25-field allowance that is never exceeded.
+summary = "Bound /pins by the 25-field count only, with no character budget"
+guard = "test_a_full_channel_of_long_named_pins_still_fits"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if used + cost > budget:\n            break\n"
+replace = "        pass\n"
+
+[[mutant]]
+id = "M-PPR06C"
+bug = "PPR-06"
+# The mirror-image wrong fix: budget the characters and infer the field count
+# from MAX_PINS_PER_CHANNEL. More than 25 rows in a channel is reachable --
+# every pin migrated before round 2 Phase 3 bypassed add_pin entirely -- and 60
+# *short* pins never reach 6,000 characters at all, so this emits 60 fields and
+# then raises ValueError building a 60-button view. That is worse than the 400:
+# it is raised while composing the reply, so the interaction is never
+# acknowledged and there is no on_app_command_error handler to notice.
+summary = "Bound /pins by the character budget only, with no field-count cap"
+guard = "test_a_channel_migrated_over_the_pin_cap_still_fits"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if shown >= min(DISCORD_EMBED_FIELD_COUNT_LIMIT, DISCORD_VIEW_CHILD_LIMIT):\n            break\n"
+replace = "        pass\n"
+
+[[mutant]]
+id = "M-PPR06D"
+bug = "PPR-06"
+# Reserve nothing for the footer and set it after the loop. Embed.__len__
+# counts footer text, so "Showing 24 of 26 ..." lands on top of an embed the
+# loop already filled to the ceiling. Subtle: each field costs ~240 characters,
+# so the loop usually stops a whole field short and the ~47-character footer
+# vanishes into the slack. Swept across 5,985 shapes, this goes over on 53 of
+# them, up to 6,046, and the guard's boundary band holds nine.
+summary = "Append the /pins footer after the fit loop instead of reserving it"
+guard = "test_no_pin_length_near_the_ceiling_produces_an_over_limit_embed"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        - footer_reserve\n"
+replace = "        - 0\n"
+
+[[mutant]]
+id = "M-PPR06E"
+bug = "PPR-06"
+# The bound that was there before: a flat [:20] on the button view, unrelated to
+# anything the embed does. In a channel at the 25-pin cap that renders
+# successfully today, five pins are listed with no delete button; in a
+# migrated channel holding more than 25 it would raise ValueError. Every pin
+# the embed lists has to be deletable, because deleting is the only way back
+# under the ceiling.
+summary = "Hand out delete buttons for the first 20 pins regardless of what was listed"
+guard = "test_a_channel_migrated_over_the_pin_cap_still_fits"
+file = "src/bot/command_modules/personalization.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                channel_pins[:DISCORD_VIEW_CHILD_LIMIT], start=1\n"
+replace = "                channel_pins[:20], start=1\n"

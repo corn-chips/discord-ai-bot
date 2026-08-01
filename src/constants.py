@@ -10,6 +10,26 @@ DISCORD_MESSAGE_LIMIT = 2000
 DISCORD_EMBED_DESCRIPTION_LIMIT = 4096
 DISCORD_EMBED_FIELD_VALUE_LIMIT = 1024
 
+# The rest of the embed ceilings. None of them is enforced by discord.py:
+# `Embed.add_field` accepts 30 fields with 300-character names and
+# 2,000-character values and `to_dict()` passes every one of them through, so
+# the first thing that notices is a 400 on send.
+#
+# The total is the one that surprises. It is 6,000 characters summed across the
+# title, the description, every field name and value, the footer text and the
+# author name -- and a /pins listing at the permitted 25 pins reaches 5,996 with
+# 8-character display names and 6,046 with 9-character ones. The field-count
+# ceiling never binds first for that command, so it cannot be the only check.
+DISCORD_EMBED_TOTAL_LIMIT = 6000
+DISCORD_EMBED_FIELD_COUNT_LIMIT = 25
+DISCORD_EMBED_FIELD_NAME_LIMIT = 256
+
+# discord.ui.View raises ValueError("maximum number of children exceeded") on
+# the 26th component. That is worse than a 400: it is raised while building the
+# reply, so the interaction is never acknowledged, and this bot registers no
+# on_app_command_error handler to notice.
+DISCORD_VIEW_CHILD_LIMIT = 25
+
 # Supported File Types (protocol-level data definitions)
 SUPPORTED_IMAGE_FORMATS = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
 SUPPORTED_AUDIO_FORMATS = {

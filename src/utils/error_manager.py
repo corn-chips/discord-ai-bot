@@ -254,7 +254,6 @@ class ErrorManager:
         # is not).
         error_text = str(error)
         error_str = error_text.lower()
-        error_class = type(error).__name__.lower()
         
         # Discord-specific errors
         if isinstance(error, discord.Forbidden):

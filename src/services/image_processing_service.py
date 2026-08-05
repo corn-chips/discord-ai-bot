@@ -434,6 +434,37 @@ class ImageProcessingService:
                     if job_id in self._progress_callbacks:
                         del self._progress_callbacks[job_id]
 
+                    # Strip the request payload before archiving (DAB-029,
+                    # container 5's first item -- one of six, and the others are
+                    # untouched).
+                    #
+                    # `_completed_jobs` is capped at 100 entries and swept
+                    # hourly, so it is not retained "forever" -- one source says
+                    # so and the shipped code disagrees. The defect is what each
+                    # entry weighs: an archived job keeps the whole uploaded
+                    # image in `request.image_data`, up to the configured
+                    # `max_image_size_mb` each, for as long as it sits in the
+                    # ring. Nothing reads it after completion -- the only two
+                    # readers, `estimate_processing_time` and `validate_image`,
+                    # both run before the job is queued -- while the delivered
+                    # image lives in `job.result.edited_image` and is read from
+                    # the archive by `get_job_status`.
+                    #
+                    # `result.edited_image` is deliberately NOT dropped here,
+                    # although the ticket lists it in the same clause: the
+                    # command callback polls `get_job_status` and reads it to
+                    # send the image, so the service cannot know it has been
+                    # delivered. That needs a delivery hook and is a separate
+                    # change.
+                    #
+                    # A direct assignment, not the ticket's prescribed
+                    # `dataclasses.replace(job.request, image_data=b"")`: that
+                    # re-runs `ImageEditRequest.__post_init__`, which raises
+                    # `ValueError("Image data cannot be empty")` and takes the
+                    # whole worker down in its own `finally`. The invariant it
+                    # enforces is about *constructing* a request; retiring a
+                    # terminal job's payload is not that.
+                    job.request.image_data = b""
                     self._completed_jobs.append(job)
                     if len(self._completed_jobs) > 100:
                         self._completed_jobs.pop(0)

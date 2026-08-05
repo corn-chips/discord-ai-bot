@@ -1748,3 +1748,37 @@ expect = "killed"
 [[mutant.edit]]
 find = "            answered[:] = messages\n            owed.clear()\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB029A"
+bug = "DAB-029"
+# DAB-029 container 5, item 5a. `_completed_jobs` is a 100-entry ring swept
+# hourly -- it is not retained "forever", whatever one source in the corpus
+# says -- and the defect is what each entry weighs: the whole uploaded image,
+# up to max_image_size_mb, held for as long as the job sits in the ring.
+# Nothing reads it once the job is terminal; its only two readers,
+# estimate_processing_time and validate_image, both run before the job is
+# queued.
+summary = "Archive a completed image job with its uploaded payload intact"
+guard = "test_an_archived_job_does_not_retain_the_uploaded_image"
+file = "src/services/image_processing_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    job.request.image_data = b\"\"\n"
+replace = ""
+
+[[mutant]]
+id = "M-DAB029A2"
+bug = "DAB-029"
+# The over-correction, and the ticket invites it by putting both in one
+# clause: drop `result.edited_image` at archive time as well. /edit-image polls
+# get_job_status AFTER completion and reads exactly that to send the file, so
+# the service cannot know it has been delivered. Dropping it here breaks the
+# command outright.
+summary = "Drop the delivered image from the archive along with the upload"
+guard = "test_the_delivered_image_survives_archiving"
+file = "src/services/image_processing_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    job.request.image_data = b\"\"\n"
+replace = "                    job.request.image_data = b\"\"\n                    if job.result is not None:\n                        job.result.edited_image = None\n"

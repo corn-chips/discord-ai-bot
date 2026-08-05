@@ -1627,3 +1627,52 @@ expect = "killed"
 [[mutant.edit]]
 find = "                self._reconcile_embedding_eligibility(conn)\n                if self.fts_enabled:\n                    conn.execute(\"DELETE FROM message_search_fts\")\n"
 replace = "                if self.fts_enabled:\n                    conn.execute(\"DELETE FROM message_search_fts\")\n"
+
+[[mutant]]
+id = "M-DAB087"
+bug = "DAB-087"
+# The lexical half of DAB-087 as shipped: a Latin-only token class, so a
+# query in any other script produced no tokens and _build_fts_query returned
+# None -- search_lexical then answered nothing without ever consulting an index
+# that held the text. Measured: Cyrillic, Arabic, Korean, Greek, Hebrew and CJK
+# all 0 hits over documents unicode61 had tokenised correctly. It also shredded
+# accented Latin: "naive" with a diaeresis split into two fragments.
+summary = "Tokenise the FTS query on a Latin-only character class"
+guard = "test_every_script_is_searchable"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        tokens = re.findall(r\"[\\w@#./:-]{2,}\", query or \"\")\n"
+replace = "        tokens = re.findall(r\"[A-Za-z0-9_@#./:-]{2,}\", query or \"\")\n"
+
+[[mutant]]
+id = "M-DAB087B"
+bug = "DAB-087"
+# The companion change that looks obviously right and is not. Normalising the
+# query with NFKC while the stored side stays unnormalised turns a full-width
+# search from a hit into a miss. Doing it properly means normalising at index
+# time too, which is a full FTS rebuild -- so it is not a free rider on this
+# commit.
+summary = "Normalise the FTS query with NFKC while the index stays unnormalised"
+guard = "test_a_full_width_query_still_matches_a_full_width_document"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        tokens = re.findall(r\"[\\w@#./:-]{2,}\", query or \"\")\n"
+replace = "        import unicodedata\n        tokens = re.findall(r\"[\\w@#./:-]{2,}\", unicodedata.normalize(\"NFKC\", query or \"\"))\n"
+
+[[mutant]]
+id = "M-DAB087C"
+bug = "DAB-087"
+# Widen the class but lose the punctuation with it, so mentions, URLs and
+# paths stop tokenising as they did. A widening has to leave everything that
+# already worked byte-identical, and the guard asserts that through the real
+# function -- its first draft compared two literal regexes inside the test and
+# this mutant survived it (ANALYSIS_CORRECTIONS item 13, in miniature).
+summary = "Drop @ # . / : - from the token class while widening it"
+guard = "test_ascii_queries_tokenise_byte_for_byte_as_before"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        tokens = re.findall(r\"[\\w@#./:-]{2,}\", query or \"\")\n"
+replace = "        tokens = re.findall(r\"[\\w]{2,}\", query or \"\")\n"

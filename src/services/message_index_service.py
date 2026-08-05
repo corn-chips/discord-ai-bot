@@ -951,6 +951,38 @@ class MessageIndexService:
             )
             raise
     def _embedding_is_trivial(self, content_text: str, attachment_summary: str = "") -> bool:
+        """Decide whether a message is too slight to be worth embedding.
+
+        **The Latin-only character classes below are a known defect (DAB-087),
+        and widening them is deliberately deferred. Editing this function AT ALL
+        starts a paid re-embedding run on the operator's own API key. Read this
+        before you touch it.**
+
+        `_eligibility_fingerprint` hashes this function's own source, so any
+        change -- including a comment or a reformat -- bumps the fingerprint,
+        and the next boot re-runs the full eligibility reconcile. That is
+        correct behaviour and it is exactly the hazard: widening the classes
+        flips every non-Latin row from `skipped` to `pending`, and
+        `_start_automatic_rag_backlog` then drains them with **no inter-batch
+        delay, no cap and no rate limiter**. Estimated at 100k indexed messages
+        with half the corpus non-Latin: ~37,500 rows, ~4.4M tokens, ~2,400
+        back-to-back embedding calls over 16-40 minutes of boot.
+
+        The tokens are not the objection. `mark_embedding_failed` is terminal at
+        three attempts, and the reconcile only ever rescues rows in `skipped`,
+        never in `failed` -- so a rate-limit storm part-way through that run
+        leaves rows permanently unembeddable, recoverable only by hand-editing
+        SQLite. That would be unsafe at zero cost.
+
+        **Reopen condition, both halves required:** the backfill drain needs
+        inter-batch pacing and a cap, and `failed` needs to become recoverable
+        by the reconcile. Then widen the classes, in a commit that expects the
+        re-embedding and says so.
+
+        The lexical half of DAB-087 is already fixed and cost nothing -- see
+        `_build_fts_query`. Non-Latin *search* works today; only non-Latin
+        *semantic* retrieval is still blind.
+        """
         if (attachment_summary or "").strip():
             return False
         words = re.findall(r"[A-Za-z0-9]+", content_text or "")
@@ -1447,7 +1479,29 @@ class MessageIndexService:
 
     @staticmethod
     def _build_fts_query(query: str) -> Optional[str]:
-        tokens = re.findall(r"[A-Za-z0-9_@#./:-]{2,}", query or "")
+        # `\w` rather than `A-Za-z0-9_`: the lexical half of DAB-087.
+        #
+        # The token class was Latin-only, so a query in any other script
+        # produced no tokens at all and this returned None -- the lexical leg
+        # was not degraded for those users, it was dead. Measured before the
+        # change: "Privet", "marhaba", "annyeonghaseyo", "Geia" and a CJK
+        # sentence, in their own scripts, all gave `fts_query=None` and 0 hits,
+        # while `message_search_fts` already held their text, correctly
+        # tokenised by `unicode61`. The data was there and the query threw it
+        # away, so this is retroactive over all existing history with no
+        # re-indexing, no FTS rebuild and no re-embedding.
+        #
+        # It also stops accented Latin being shredded: "naive" with a diaeresis
+        # used to split into two two-letter fragments and match neither.
+        #
+        # NFKC normalisation was measured here and deliberately NOT added. The
+        # stored side is not normalised, so normalising only the query takes a
+        # full-width search from 1 hit to 0. Doing it correctly means
+        # normalising at index time too, which is a full FTS rebuild.
+        #
+        # The punctuation set is unchanged, so mentions, URLs and paths
+        # tokenise exactly as before.
+        tokens = re.findall(r"[\w@#./:-]{2,}", query or "")
         if not tokens:
             return None
         terms = []

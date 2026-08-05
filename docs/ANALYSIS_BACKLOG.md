@@ -157,7 +157,7 @@ review window.
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
 |---|---|---|---|---|---|---|---|---|
 | 33 | DAB-028 | **OPEN.** `search_semantic` still copies the whole matrix and recomputes norms | IMPROVEMENT | 2225 ms -> 62 ms (35.8x); 2056 -> 8.4 MiB | M | **3.0** | DAB-027 | [DAB-028](analysis-tickets/DAB-028.md) |
-| 34 | DAB-087 | **OPEN, unblocked, and deliberately not landed — it spends money.** DAB-077's fingerprint now exists, and because it hashes the eligibility rule's own source, widening the regex bumps it automatically: the next boot reconciles, flips every non-Latin row from `skipped` to `pending`, and the backfill drain then embeds them with no inter-batch delay and no cap. Estimated at 100k indexed messages with half the corpus non-Latin: ~37,500 rows, ~4.4M tokens, of the order of a dollar — but 2,400 back-to-back embedding calls over 16-40 minutes on the operator's personal key, and `mark_embedding_failed` is terminal at 3 attempts while the reconcile only ever rescues `skipped`, never `failed`. See the note below | BUG | S2 | S | **3.0** | DAB-077 (discharged) | [DAB-087](analysis-tickets/DAB-087.md) |
+| 34 | DAB-087 | **PARTIAL** (round 2 Phase 5) — **the lexical half landed and cost nothing.** `_build_fts_query` tokenised on `[A-Za-z0-9_@#./:-]`, so a query in any other script produced no tokens and the function returned `None`: the lexical leg was not degraded, it was dead, while `message_search_fts` already held the text correctly tokenised by `unicode61`. Widening the class to `\w` is retroactive over all history with no re-indexing, no FTS rebuild and no embedding — it also stops accented Latin being shredded. **The semantic half is deliberately deferred, and not over the money.** See the reopen condition below | BUG | S2 | S | **3.0** | DAB-077 (discharged) | [DAB-087](analysis-tickets/DAB-087.md) |
 | 35 | DAB-194 | **DONE** — Dead code: 2,027 removable lines, verified twice. Landed in `9894bcc` / `4baa29c` | IMPROVEMENT | delivered **-2,111 lines** across 25 files; `constraints.txt` 57 -> 51 pins | S | **3.0** | — (landed ahead of DAB-203) | [DAB-194](analysis-tickets/DAB-194.md) |
 | 36 | DAB-027 | **OPEN.** `_vector_lock` is still held across CPU-bound numpy scoring | IMPROVEMENT | 244x concurrent throughput | M | **2.0** | — | [DAB-027](analysis-tickets/DAB-027.md) |
 | 37 | DAB-106 | **OPEN**, re-measured as **39 of 99**. The programme added three fields (`expensive_command_limit_per_minute`, `expensive_command_limit_per_hour`, `sqlite_busy_timeout_ms`) and all three arrived with a validation rule, so the count did not move for those; round 2 Phase 2.4 then took it from 43 to 39 by validating the four `safety_*` enums, which is this ticket's first acceptance box. The remaining 39 are untouched | BUG | S2 | M | **1.5** | — | [DAB-106](analysis-tickets/DAB-106.md) |
@@ -958,3 +958,30 @@ real failure stays loud. The same shape remains in the RAG write-failure tests, 
 with full tracebacks on every run. They are correct records from tests that provoke the failure on
 purpose; capturing them with `assertLogs` would both quieten the run and assert the degradation is
 announced, which is a property those tests do not currently check.
+
+### DAB-087 semantic half — deferred with a named prerequisite (round 2 Phase 5)
+
+Widening `_embedding_is_trivial`'s Latin-only classes is **not** blocked on cost. At 100k indexed
+messages with half the corpus non-Latin the estimate is ~37,500 rows reclassified and ~4.4M
+embedding tokens, of the order of a dollar; the price could not be verified offline, so trust the
+token count rather than the figure. It is blocked on a data-integrity hazard sitting underneath it:
+
+- `_eligibility_fingerprint` hashes `_embedding_is_trivial`'s own **source**, so any edit to that
+  function — including a comment or a reformat — bumps the fingerprint and the next boot re-runs
+  the full reconcile. There is no separate step to withhold.
+- The reconcile flips every non-Latin row from `skipped` to `pending`, and
+  `_start_automatic_rag_backlog` drains them with **no inter-batch delay, no cap and no rate
+  limiter** — roughly 2,400 back-to-back embedding calls over 16-40 minutes of boot.
+- `mark_embedding_failed` is terminal at three attempts, and the reconcile only ever rescues rows
+  in `skipped`, never in `failed`. A rate-limit storm part-way through that run therefore leaves
+  rows **permanently unembeddable**, recoverable only by hand-editing SQLite. That would be unsafe
+  to run at zero cost.
+
+**Reopen condition, both halves required:** the backfill drain needs inter-batch pacing and a cap,
+and `failed` must become recoverable by the reconcile. Then widen the classes, in a commit that
+expects the re-embedding and says so.
+
+Because the deferral would otherwise depend on nobody tidying a function, the prerequisite is
+written into `_embedding_is_trivial`'s own docstring, where the next person to touch it will read
+it. "Widen for new content only" is not an escape: measured, one reboot sets the row back to
+`skipped` **and** NULLs the vector just paid for.

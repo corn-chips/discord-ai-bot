@@ -23,6 +23,38 @@ from src.config import BotConfig
 from src.models.data_models import EditType, ImageEditRequest
 
 
+#: The top-level command tree, in registration order, for each of the two trees
+#: `setup_commands` can build.
+#:
+#: These replace a positional slice, `get_commands()[5:10]`, which pinned five
+#: names in the image-enabled tree and nothing else (DAB-203). It was brittle in
+#: a way unrelated to what it protected -- anything inserted at or before index 9
+#: shifted the window and broke it, and five landed commits had to reason about
+#: that -- and it was silently narrow: nineteen of the twenty-four names were
+#: unpinned, and the image-disabled tree had no ordering assertion at all.
+#:
+#: A full ordered list rather than a name-derived lookup, deliberately. Deriving
+#: the expectation from the tree's own names, or asserting membership with a set,
+#: would delete the only thing the slice was really doing: proving that
+#: registration order -- which `AGENTS.md` calls load-bearing and which
+#: `setup_commands` preserves on purpose -- has not moved.
+EXPECTED_TOP_LEVEL_ORDER = [
+    "ping", "report", "report-status", "stats", "token-leaderboard", "features",
+    "clear-cache", "dev", "api-usage", "usage-report", "deepresearch", "config",
+    "rag", "summarize", "personality", "personality-info", "live", "pin", "pins",
+    "hide", "unhide", "preferences",
+]
+
+#: The same tree with the image service available. `/edit-image` and
+#: `/image-queue` register inline after `/features`, which is why the old slice
+#: began at index 5.
+EXPECTED_TOP_LEVEL_ORDER_WITH_IMAGES = [
+    "ping", "report", "report-status", "stats", "token-leaderboard", "features",
+    "edit-image", "image-queue", "clear-cache", "dev", "api-usage", "usage-report",
+    "deepresearch", "config", "rag", "summarize", "personality", "personality-info",
+    "live", "pin", "pins", "hide", "unhide", "preferences",
+]
+
 EXPECTED_SIGNATURE = [
     ("ping", "Check if the bot is responsive", "ping"),
     ("report", "Submit a bot issue or feature request", "report"),
@@ -144,7 +176,10 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         bot = await self._register()
 
         self.assertEqual(self._flatten_signature(bot), EXPECTED_SIGNATURE)
-        self.assertEqual(len(bot.tree.get_commands()), 22)
+        self.assertEqual(
+            [command.name for command in bot.tree.get_commands()],
+            EXPECTED_TOP_LEVEL_ORDER,
+        )
         self.assertEqual(len(EXPECTED_SIGNATURE), 35)
 
         report = self._command(bot, "report")
@@ -320,8 +355,8 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
         bot = await self._register(image_processing_service=object())
 
         self.assertEqual(
-            [command.name for command in bot.tree.get_commands()][5:10],
-            ["features", "edit-image", "image-queue", "clear-cache", "dev"],
+            [command.name for command in bot.tree.get_commands()],
+            EXPECTED_TOP_LEVEL_ORDER_WITH_IMAGES,
         )
         edit_image = self._command(bot, "edit-image")
         self.assertEqual(edit_image.description, "Edit an uploaded image using AI")

@@ -88,16 +88,23 @@ never hand-edit a version in it.
 2. Call it from `setup_commands` in `src/bot/commands.py:46-80`. **Registration order is
   load-bearing** and deliberately preserved; groups are built then added via
   `bot.tree.add_command`.
-3. Update `tests/test_command_registration.py`, which pins the entire tree:
-  - `EXPECTED_SIGNATURE` (line 26) â€” ordered `(path, description, callback_name)` tuples;
-    the description must match the decorator byte-for-byte.
-  - `len(bot.tree.get_commands()) == 22` (line 147) â€” bump only for a new *top-level*
-    command or group.
-  - `len(EXPECTED_SIGNATURE) == 35` (line 148) â€” bump for any addition, subcommands included.
-  - the positional slice guard at line 323, which pins `get_commands()[5:10]` to
-    `["features", "edit-image", "image-queue", "clear-cache", "dev"]` in the
-    image-enabled tree. Anything inserted at or before index 9 shifts that window and
-    breaks it independently of `EXPECTED_SIGNATURE`.
+3. Update `tests/test_command_registration.py`, which pins the entire tree. Three ordered
+  lists, and a new command touches at least two of them:
+  - `EXPECTED_SIGNATURE` — ordered `(path, description, callback_name)` tuples, subcommands
+    included; the description must match the decorator byte-for-byte. Asserted against the
+    image-**disabled** tree only.
+  - `EXPECTED_TOP_LEVEL_ORDER` and `EXPECTED_TOP_LEVEL_ORDER_WITH_IMAGES` — the top-level
+    names in registration order, one list per tree `setup_commands` can build. The second is
+    the only ordering assertion the image-enabled tree gets.
+  - `len(EXPECTED_SIGNATURE) == 35` — bump for any addition, subcommands included.
+
+  These replaced a positional `get_commands()[5:10]` slice (DAB-203). Read the change for
+  what it is: **de-brittling, not strengthening.** The slice broke whenever anything was
+  inserted at or before index 9, which five landed commits had to reason about, and no defect
+  could be constructed that it misses and the full lists catch — `EXPECTED_SIGNATURE`
+  backstops the disabled tree and the image test carries its own metadata assertions. What
+  the lists buy is a failure that names what moved, and 24 of 24 top-level names pinned in
+  the image tree instead of 5.
 
 
 Commands do not exist until `on_ready` (`discord_bot.py:516`) runs `setup_commands` +

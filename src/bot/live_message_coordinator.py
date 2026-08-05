@@ -130,7 +130,12 @@ class LiveMessageCoordinator:
         # re-answer or re-bill a turn.
         # `charged` remembers which users the rate limiter has already debited
         # for this turn, so a retry does not spend a second token per user.
+        # `answered` is the other half of the receipt, and it exists because an
+        # empty `owed` is ambiguous: it means both "there was nothing to do" and
+        # "a paid call was made, so this must never be retried". Only the second
+        # obliges us to tell the user something went wrong (PPR-04).
         owed: List[discord.Message] = []
+        answered: List[discord.Message] = []
         charged: Set[int] = set()
         attempts = 0
         try:
@@ -151,6 +156,7 @@ class LiveMessageCoordinator:
                     response_sent = await self._answer_batch(
                         pending_messages,
                         owed=owed,
+                        answered=answered,
                         charged=charged,
                     )
                 except Exception as exc:
@@ -181,9 +187,28 @@ class LiveMessageCoordinator:
                     if owed:
                         await self._abandon_batch(channel_id, list(owed))
                         owed.clear()
+                    elif answered:
+                        # Nothing is owed because the model was already called,
+                        # so this must not be retried -- but the user is still
+                        # waiting. The attachment branch delegates a call that
+                        # owns its own generation and billing and does not
+                        # notify on the way out, so before this the failure was
+                        # logged at ERROR and the user was told nothing at all.
+                        logger.error(
+                            "Live turn in channel %s failed after the model had "
+                            "already been called for %s message(s); not retrying, "
+                            "because the call has been billed",
+                            channel_id,
+                            len(answered),
+                        )
+                        await self._tell_user_the_turn_failed(
+                            channel_id, answered[-1], len(answered)
+                        )
+                    answered.clear()
                     attempts = 0
                     charged.clear()
                 else:
+                    answered.clear()
                     attempts = 0
                     charged.clear()
 
@@ -217,6 +242,18 @@ class LiveMessageCoordinator:
                         else "discarded, because live mode is closing or disabled",
                     )
                     owed.clear()
+
+                if answered:
+                    # Cancelled after the bill and before the reply. Nothing to
+                    # requeue -- requeuing would buy the generation twice -- but
+                    # it must not be silent either.
+                    logger.warning(
+                        "Live worker for channel %s exited after a billed call "
+                        "for %s message(s) that was never delivered",
+                        channel_id,
+                        len(answered),
+                    )
+                    answered.clear()
 
                 if self.tasks.get(channel_id) is current_task:
                     self.tasks.pop(channel_id, None)
@@ -354,13 +391,16 @@ class LiveMessageCoordinator:
 
     async def process_messages(self, messages: List[discord.Message]) -> bool:
         """Process one ordered batch of live-mode messages."""
-        return await self._answer_batch(messages, owed=[], charged=set())
+        return await self._answer_batch(
+            messages, owed=[], answered=[], charged=set()
+        )
 
     async def _answer_batch(
         self,
         messages: List[discord.Message],
         *,
         owed: List[discord.Message],
+        answered: List[discord.Message],
         charged: Set[int],
     ) -> bool:
         """Answer one ordered batch, keeping `owed` and `charged` accurate.
@@ -378,12 +418,22 @@ class LiveMessageCoordinator:
           A model call that *raises* has produced nothing and is retryable;
           one that *returns*, successfully or not, is not.
 
-        On every normal return `owed` is empty.
+        On every normal return `owed` is empty -- which is exactly why it cannot
+        be the only receipt. An empty `owed` means both "there was nothing to
+        answer" and "a paid call has been made", and only the second obliges the
+        caller to tell the user the turn failed. `answered` disambiguates it
+        (PPR-04): it holds the messages a paid model call was made for **and
+        whose failure the user has not yet been told about**, so a path that
+        notifies on its own way out clears it, and the worker notifies only when
+        it is still set. The alternative -- keeping `owed` populated across the
+        payment so the worker's existing abandonment path fires -- is what the
+        ticket reads like and it bills three Gemini calls for one attachment.
 
         `charged` accumulates the user ids the rate limiter has already debited
         for this turn. A retry skips them, so one turn costs each participant
         exactly one token however many attempts it takes.
         """
+        answered.clear()
         if not messages:
             owed.clear()
             return False
@@ -463,6 +513,14 @@ class LiveMessageCoordinator:
             # generation, billing and user-facing error handling, so a raise out
             # of it may already have cost a Gemini call; retrying it could buy a
             # second one. Everything up to here is retryable, this is not.
+            #
+            # `answered` takes the receipt over, because the worker's
+            # abandonment path was gated on `owed` alone: a raise out of the
+            # call below left `attempts` incremented, `_abandon_batch` skipped,
+            # and the user who posted the attachment told nothing at all
+            # (PPR-04). This branch does not notify on its own, so it leaves
+            # `answered` set for the worker to act on.
+            answered[:] = messages
             owed.clear()
             await self.process_message_with_context(
                 attachment_message,
@@ -534,6 +592,7 @@ class LiveMessageCoordinator:
         # The model has answered and the call has been billed. Nothing after
         # this line may be retried, because a retry would generate again.
         paid_for = list(owed)
+        answered[:] = paid_for
         owed.clear()
 
         if not api_response.success:
@@ -569,6 +628,8 @@ class LiveMessageCoordinator:
             await self._tell_user_the_turn_failed(
                 channel_id, target_message, len(paid_for)
             )
+            # Told, so the worker must not tell them again.
+            answered.clear()
             raise
 
         for source_message, source_prompt in prompt_entries:

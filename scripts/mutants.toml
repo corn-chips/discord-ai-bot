@@ -320,8 +320,8 @@ guard = "test_a_transient_failure_is_retried_and_the_batch_is_answered"
 file = "src/bot/live_message_coordinator.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                    if owed and attempts < self.max_retry_attempts:\n                        async with lock:\n                            queued = self.pending_messages.get(channel_id, [])\n                            self.pending_messages[channel_id] = list(owed) + queued\n                        # The batch now lives in pending_messages, so the receipt\n                        # must be surrendered: leaving it populated would let the\n                        # `finally` below requeue the same messages a second time\n                        # if the worker were cancelled during the backoff.\n                        owed.clear()\n                        await asyncio.sleep(self.retry_backoff_seconds * attempts)\n                        continue\n                    if owed:\n                        await self._abandon_batch(channel_id, list(owed))\n                        owed.clear()\n                    attempts = 0\n                    charged.clear()\n"
-replace = "                    attempts = 0\n                    charged.clear()\n"
+find = "                    if owed and attempts < self.max_retry_attempts:\n                        async with lock:\n                            queued = self.pending_messages.get(channel_id, [])\n                            self.pending_messages[channel_id] = list(owed) + queued\n                        # The batch now lives in pending_messages, so the receipt\n                        # must be surrendered: leaving it populated would let the\n                        # `finally` below requeue the same messages a second time\n                        # if the worker were cancelled during the backoff.\n                        owed.clear()\n                        await asyncio.sleep(self.retry_backoff_seconds * attempts)\n                        continue\n                    if owed:\n                        await self._abandon_batch(channel_id, list(owed))\n                        owed.clear()\n"
+replace = ""
 
 [[mutant]]
 id = "M-DAB019B"
@@ -345,8 +345,8 @@ guard = "test_a_failure_after_the_model_answered_never_regenerates"
 file = "src/bot/live_message_coordinator.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        # The model has answered and the call has been billed. Nothing after\n        # this line may be retried, because a retry would generate again.\n        paid_for = list(owed)\n        owed.clear()\n"
-replace = "        paid_for = list(owed)\n"
+find = "        paid_for = list(owed)\n        answered[:] = paid_for\n        owed.clear()\n"
+replace = "        paid_for = list(owed)\n        answered[:] = paid_for\n"
 
 [[mutant]]
 id = "M-DAB019D"
@@ -550,13 +550,23 @@ replace = "                if False:\n                    resumable = not self._
 [[mutant]]
 id = "M-DAB019G"
 bug = "DAB-019"
-summary = "A delivery failure after the model answered tells the user nothing, so the turn is billed and silently lost"
+# RETARGETED in round 2 Phase 5. It used to delete the post-payment
+# notification inside `_answer_batch` alone, and PPR-04's `answered` receipt
+# then made that survivable: the worker's own arm notices the same failure and
+# tells the user instead. A mutant that has stopped discriminating is a signal,
+# not a nuisance (ANALYSIS_CORRECTIONS item 12), so it now removes BOTH routes
+# and pins the property rather than one implementation of it -- a turn that has
+# been billed and not delivered must reach the user by some path.
+summary = "Bill the user for a generation, fail to deliver it, and say nothing"
 guard = "test_a_failure_after_the_model_answered_never_regenerates"
 file = "src/bot/live_message_coordinator.py"
 expect = "killed"
 [[mutant.edit]]
-find = "            await self._tell_user_the_turn_failed(\n                channel_id, target_message, len(paid_for)\n            )\n            raise\n"
+find = "            await self._tell_user_the_turn_failed(\n                channel_id, target_message, len(paid_for)\n            )\n            # Told, so the worker must not tell them again.\n            answered.clear()\n            raise\n"
 replace = "            raise\n"
+[[mutant.edit]]
+find = "                    elif answered:\n                        # Nothing is owed because the model was already called,\n                        # so this must not be retried -- but the user is still\n                        # waiting. The attachment branch delegates a call that\n                        # owns its own generation and billing and does not\n                        # notify on the way out, so before this the failure was\n                        # logged at ERROR and the user was told nothing at all.\n                        logger.error(\n                            \"Live turn in channel %s failed after the model had \"\n                            \"already been called for %s message(s); not retrying, \"\n                            \"because the call has been billed\",\n                            channel_id,\n                            len(answered),\n                        )\n                        await self._tell_user_the_turn_failed(\n                            channel_id, answered[-1], len(answered)\n                        )\n"
+replace = ""
 
 [[mutant]]
 id = "M-DAB078"
@@ -1676,3 +1686,65 @@ expect = "killed"
 [[mutant.edit]]
 find = "        tokens = re.findall(r\"[\\w@#./:-]{2,}\", query or \"\")\n"
 replace = "        tokens = re.findall(r\"[\\w]{2,}\", query or \"\")\n"
+
+[[mutant]]
+id = "M-PPR04"
+bug = "PPR-04"
+# PPR-04 as shipped. `_answer_batch` clears `owed` before delegating an
+# attachment turn -- it must, or a retry buys a second Gemini call -- and the
+# worker's abandonment path was gated on `owed` alone. So a raise out of the
+# delegated call incremented `attempts`, skipped `_abandon_batch`, and told the
+# user who posted the attachment nothing at all. The failure reached the log at
+# ERROR and stopped there.
+summary = "Report a billed-but-undelivered live turn to the log only"
+guard = "test_an_attachment_turn_is_not_regenerated_but_is_reported"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    elif answered:\n                        # Nothing is owed because the model was already called,\n                        # so this must not be retried -- but the user is still\n                        # waiting. The attachment branch delegates a call that\n                        # owns its own generation and billing and does not\n                        # notify on the way out, so before this the failure was\n                        # logged at ERROR and the user was told nothing at all.\n                        logger.error(\n                            \"Live turn in channel %s failed after the model had \"\n                            \"already been called for %s message(s); not retrying, \"\n                            \"because the call has been billed\",\n                            channel_id,\n                            len(answered),\n                        )\n                        await self._tell_user_the_turn_failed(\n                            channel_id, answered[-1], len(answered)\n                        )\n"
+replace = ""
+
+[[mutant]]
+id = "M-PPR04B"
+bug = "PPR-04"
+# The receipt never set, so the worker's new arm cannot fire. Distinct from
+# M-PPR04 because it is the failure a future refactor of `_answer_batch`
+# produces, rather than one in the worker.
+summary = "Delegate the attachment turn without recording that it was billed"
+guard = "test_an_attachment_turn_is_not_regenerated_but_is_reported"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            answered[:] = messages\n            owed.clear()\n"
+replace = "            owed.clear()\n"
+
+[[mutant]]
+id = "M-PPR04C"
+bug = "PPR-04"
+# The over-correction. `answered` means "billed AND the user has not been
+# told", not merely "billed": the non-attachment post-payment path notifies on
+# its own way out, so leaving the receipt set there tells the user twice about
+# one failure.
+summary = "Leave the receipt set on a path that already notified the user"
+guard = "test_a_reported_attachment_failure_is_reported_once"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            # Told, so the worker must not tell them again.\n            answered.clear()\n            raise"
+replace = "            raise"
+
+[[mutant]]
+id = "M-PPR04D"
+bug = "PPR-04"
+# The ticket's literal reading: stop clearing `owed` across the payment so the
+# worker's existing abandonment path fires. It notifies, and it also retries a
+# call that has already been billed -- measured, three delegated generations for
+# one attachment. ANALYSIS_CORRECTIONS item 8, in the branch item 8 did not
+# cover.
+summary = "Keep owed populated across an attachment turn's payment"
+guard = "test_an_attachment_turn_is_not_regenerated_but_is_reported"
+file = "src/bot/live_message_coordinator.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            answered[:] = messages\n            owed.clear()\n"
+replace = ""

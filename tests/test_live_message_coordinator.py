@@ -212,14 +212,26 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
                 notify.assert_awaited_once()
                 self.assertEqual(coordinator.pending_messages, {})
 
-    async def test_an_attachment_turn_is_not_regenerated_either(self):
-        # process_message_with_context owns its own generation, billing and
-        # error reporting, so a raise out of it may already have cost a call --
-        # and it has already told the user itself, which is why this path does
-        # not add a second notification.
+    async def test_an_attachment_turn_is_not_regenerated_but_is_reported(self):
+        # PPR-04, and a contract change to this test rather than a new one.
+        #
+        # It used to assert only that the delegated call is not retried, on the
+        # stated grounds that `process_message_with_context` "has already told
+        # the user itself, which is why this path does not add a second
+        # notification". That premise is exactly backwards for the case being
+        # tested: the exception ESCAPED that call, so its own broad handler did
+        # not report it. `_answer_batch` clears `owed` before delegating -- it
+        # must, or a retry buys a second Gemini call -- and the worker's
+        # abandonment path was gated on `owed` alone, so `attempts` was
+        # incremented, `_abandon_batch` was skipped, and the user who posted the
+        # attachment was told nothing at all. The `answered` receipt is what
+        # closes that, and both halves are asserted here: exactly one delegated
+        # call, and exactly one notification.
         process_with_context = AsyncMock(side_effect=RuntimeError("boom"))
+        notify = AsyncMock()
         coordinator = self.make_coordinator(
             process_message_with_context=process_with_context,
+            handle_response_error=notify,
         )
 
         await self.drive(
@@ -228,7 +240,23 @@ class LiveBatchDurabilityTest(unittest.IsolatedAsyncioTestCase):
         )
 
         process_with_context.assert_awaited_once()
+        notify.assert_awaited_once()
         self.assertEqual(coordinator.pending_messages, {})
+
+    async def test_a_reported_attachment_failure_is_reported_once(self):
+        # The other direction. The non-attachment post-payment path notifies on
+        # its own way out, so the worker must not tell the user a second time --
+        # which is why `answered` means "billed AND not yet reported" rather
+        # than just "billed".
+        notify = AsyncMock()
+        coordinator = self.make_coordinator(
+            send_response=AsyncMock(side_effect=RuntimeError("gateway hung up")),
+            handle_response_error=notify,
+        )
+
+        await self.drive(coordinator, [make_message(1, "no attachment here")])
+
+        notify.assert_awaited_once()
 
     async def test_a_cancelled_worker_does_not_lose_its_batch_in_silence(self):
         # asyncio.CancelledError is a BaseException in 3.12, so the worker's

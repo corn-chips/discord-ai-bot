@@ -573,7 +573,33 @@ failure. Fixing it means moving `charged` somewhere that outlives the worker —
 with the deliberate decision in `161ff5d` not to add a seventh never-evicting per-channel
 container (DAB-029). Land those two together.
 
-### PPR-04 (S4) — a live attachment turn that raises notifies nobody
+### PPR-04 (S4) — a live attachment turn that raises notifies nobody — **CLOSED, round 2 Phase 5**
+
+Closed with a second receipt, `answered`, and **not** by keeping `owed` populated across the
+payment. That is what the finding reads like, and measured it delegates the attachment turn three
+times for one message — `ANALYSIS_CORRECTIONS.md` item 8's hazard, in the one branch item 8 did
+not cover. `M-PPR04D` is that reading.
+
+An empty `owed` was ambiguous: it means both "there was nothing to answer" and "a paid call has
+been made", and only the second obliges the worker to say something. `answered` holds the messages
+a paid call was made for **and whose failure the user has not yet been told about** — so a path
+that notifies on its own way out clears it, and the worker notifies only when it is still set.
+That distinction is load-bearing in both directions and each has its own mutant: `M-PPR04` for the
+silence, `M-PPR04C` for telling the user twice.
+
+`test_an_attachment_turn_is_not_regenerated_either` was rewritten rather than joined, because its
+stated premise was backwards: it asserted no second notification on the grounds that
+`process_message_with_context` "has already told the user itself", when the case under test is an
+exception that *escaped* that call and therefore its handler. It is now
+`test_an_attachment_turn_is_not_regenerated_but_is_reported` and asserts both halves.
+
+One consequence worth recording: `M-DAB019G` stopped discriminating. It deleted the post-payment
+notification inside `_answer_batch`, which the new worker arm now covers, so the mutant survived.
+It was retargeted to remove both routes and pin the property — a billed, undelivered turn must
+reach the user by some path — rather than one implementation of it.
+
+<details><summary>The finding as originally filed</summary>
+
 
 `_answer_batch` clears `owed` before delegating an attachment turn
 (`live_message_coordinator.py:466`, immediately before `await
@@ -587,6 +613,8 @@ The non-attachment path does not have this shape: it clears `owed` after `genera
 returns and still runs delivery inside the same call, so a delivery failure is notified without
 regeneration. Only the attachment branch loses the receipt and the notification together. S4
 because it needs an exception to escape `process_message_with_context`'s own broad handler.
+
+</details>
 
 ### PPR-05 (S4) — `/rag status` discloses the resolved database path — **CLOSED, Phase 3**
 

@@ -37,6 +37,10 @@ from .gemini_response_pipeline import (
 logger = logging.getLogger(__name__)
 
 
+#: Distinct unrecognised safety-threshold values already reported, so a
+#: misconfiguration costs one ERROR line rather than four per message.
+#: Bounded by the number of distinct bad strings in one `config.yaml`.
+_reported_unknown_thresholds: set = set()
 def resolve_safety_threshold(value) -> "types.HarmBlockThreshold":
     """Turn a configured `safety:` value into the enum member it names.
 
@@ -64,13 +68,33 @@ def resolve_safety_threshold(value) -> "types.HarmBlockThreshold":
 
     name = canonical_safety_threshold(value)
     if not name:
-        logger.error(
-            "safety threshold %r is not a Gemini HarmBlockThreshold; sending %s "
-            "instead. This should have been refused at startup -- a BotConfig "
-            "that did not go through validate_config has reached the client.",
-            value,
-            SAFETY_THRESHOLD_FALLBACK,
-        )
+        # Reported once per distinct value, not once per call. This resolver
+        # runs for all four harm categories on every request config that
+        # carries safety settings, so a single unrecognised threshold that
+        # reaches it produces four identical ERROR lines per message and would
+        # bury everything else in the log.
+        #
+        # Once per process is enough because the input is not user data: these
+        # values come from `config.yaml` and are fixed at boot, so the set below
+        # cannot grow past the number of distinct bad strings in one config --
+        # four, at worst. It is deliberately not an LRU or a TTL cache for that
+        # reason.
+        #
+        # And the volume is the only thing being fixed here. The shipped config
+        # canonicalises cleanly on all four categories, so this does not fire
+        # for an operator who has booted normally: reaching it at all means a
+        # `BotConfig` got to the client without passing `validate_config`, which
+        # the message says.
+        if value not in _reported_unknown_thresholds:
+            _reported_unknown_thresholds.add(value)
+            logger.error(
+                "safety threshold %r is not a Gemini HarmBlockThreshold; sending %s "
+                "instead, and not reporting this value again. This should have been "
+                "refused at startup -- a BotConfig that did not go through "
+                "validate_config has reached the client.",
+                value,
+                SAFETY_THRESHOLD_FALLBACK,
+            )
         name = SAFETY_THRESHOLD_FALLBACK
     return types.HarmBlockThreshold[name]
 

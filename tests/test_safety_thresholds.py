@@ -37,6 +37,7 @@ from src.constants import (
     SAFETY_THRESHOLD_FALLBACK,
     SAFETY_THRESHOLD_NAMES,
 )
+from src.services import gemini_client
 from src.services.gemini_client import GeminiClient
 
 
@@ -338,3 +339,46 @@ class SafetyThresholdValidationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SafetyThresholdLogVolumeTest(unittest.TestCase):
+    """One unrecognised value costs one ERROR line, not one per category per call.
+
+    `resolve_safety_threshold` runs for all four harm categories on every
+    request config that carries safety settings, so a single bad threshold
+    produced four identical ERROR records per message. The volume is the whole
+    defect: the fallback itself is correct, and it does not fire for an operator
+    who has booted normally -- the shipped config canonicalises cleanly on all
+    four categories, so reaching it means a `BotConfig` got to the client
+    without passing `validate_config`.
+    """
+
+    def setUp(self):
+        gemini_client._reported_unknown_thresholds.clear()
+        self.addCleanup(gemini_client._reported_unknown_thresholds.clear)
+
+    def test_one_bad_value_is_reported_once_however_often_it_is_resolved(self):
+        with self.assertLogs("src.services.gemini_client", "ERROR") as captured:
+            for _ in range(4):
+                gemini_client.resolve_safety_threshold("BLOCK_EVERYTHING")
+
+        self.assertEqual(len(captured.records), 1)
+
+    def test_a_second_distinct_bad_value_is_still_reported(self):
+        # Deduplication must not swallow a different misconfiguration.
+        with self.assertLogs("src.services.gemini_client", "ERROR") as captured:
+            gemini_client.resolve_safety_threshold("BLOCK_EVERYTHING")
+            gemini_client.resolve_safety_threshold("BLOCK_NOTHING_AT_ALL")
+
+        self.assertEqual(len(captured.records), 2)
+
+    def test_the_fallback_is_unchanged_by_the_deduplication(self):
+        # Quieter must not mean more permissive: every call still resolves to
+        # the strict fallback, including the ones that log nothing.
+        with self.assertLogs("src.services.gemini_client", "ERROR"):
+            first = gemini_client.resolve_safety_threshold("BLOCK_EVERYTHING")
+        second = gemini_client.resolve_safety_threshold("BLOCK_EVERYTHING")
+
+        expected = types.HarmBlockThreshold[gemini_client.SAFETY_THRESHOLD_FALLBACK]
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)

@@ -19,13 +19,16 @@ without editing the config: by name (`localhost`) and through a port forward
 onto some other local port.
 """
 
+import asyncio
 import socket
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import aiohttp
 
+from src.services import report_web_server
 from src.services.report_service import ReportService
 from src.services.report_web_server import ReportWebServer, _parses_as_ip
 
@@ -434,3 +437,112 @@ class ReportWebServerRequestGuardTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
+    """Four residuals the Phase 2.3 review found and Phase 2.3 did not close.
+
+    None is a security boundary -- the loopback refusal and the Origin guard
+    both hold. They are the surrounding machinery being wrong in ways an
+    operator or a reconnect can reach.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = ReportService(str(Path(self._tmp.name) / "token_usage.db"))
+        self.servers = []
+
+    async def asyncTearDown(self) -> None:
+        for server in self.servers:
+            await server.stop()
+
+    def _server(self, host, port=0):
+        server = ReportWebServer(self.service, host=host, port=port)
+        self.servers.append(server)
+        return server
+
+    async def test_two_concurrent_starts_leave_no_socket_behind(self):
+        # `start()` awaits twice between checking `_runner` and setting it, so
+        # both callers passed the guard and both bound. Measured before the fix
+        # with `ss -ltnp`: two listening sockets, and `stop()` closed only the
+        # one that won the assignment -- the other stayed open for the life of
+        # the process. `on_ready` re-fires on every gateway reconnect, which is
+        # where the second call comes from.
+        #
+        # Every port the server opens is recorded, not just the one it kept.
+        # The first draft probed `bound_addresses[0][1]`, which is the winner's
+        # port and is closed correctly either way -- so it never saw the leak,
+        # and the missing-lock mutant survived it. The leaked socket is on a
+        # port the server does not report.
+        opened = []
+        real_site = report_web_server.web.TCPSite
+
+        class RecordingSite(real_site):
+            async def start(self):
+                await super().start()
+                for sock in self._server.sockets:
+                    opened.append(sock.getsockname()[1])
+
+        server = self._server("127.0.0.1")
+        with patch.object(report_web_server.web, "TCPSite", RecordingSite):
+            await asyncio.gather(server.start(), server.start())
+        try:
+            self.assertTrue(server.is_running)
+        finally:
+            await server.stop()
+
+        self.assertEqual(
+            len(opened), 1,
+            f"{len(opened)} sockets were bound by two concurrent start() calls",
+        )
+        for port in opened:
+            with socket.socket() as probe:
+                probe.settimeout(1)
+                self.assertNotEqual(
+                    probe.connect_ex(("127.0.0.1", port)), 0,
+                    f"a listening socket on port {port} survived stop()",
+                )
+
+    async def test_an_ephemeral_port_is_adopted_after_the_bind(self):
+        # With `web_port: 0` the kernel picks the port. `self.port` stayed 0, so
+        # the refusal message's `ssh -L 0:127.0.0.1:0` remedy was nonsense and
+        # any later reader of `.port` got the request rather than the result.
+        server = self._server("127.0.0.1", 0)
+
+        await server.start()
+        try:
+            self.assertNotEqual(server.port, 0)
+            self.assertEqual(server.port, server.bound_addresses[0][1])
+            self.assertIn(str(server.port), server.urls[0])
+        finally:
+            await server.stop()
+
+    async def test_an_unbindable_loopback_address_is_refused_not_raised(self):
+        # `::ffff:127.0.0.1` is loopback as far as `ipaddress` is concerned, so
+        # it clears the pre-check, and the kernel then refuses the bind with
+        # `OSError: [Errno 22] invalid argument`. Propagated, that reaches
+        # `on_ready` as "Failed to start report web UI" plus a traceback, which
+        # reads as a bug in this server rather than an address to fix.
+        server = self._server("::ffff:127.0.0.1")
+
+        with self.assertLogs("src.services.report_web_server", "ERROR") as captured:
+            await server.start()
+
+        self.assertFalse(server.is_running)
+        self.assertEqual(server.bound_addresses, [])
+        self.assertIn("could not bind", captured.output[0])
+
+    async def test_the_pre_check_refusal_does_not_claim_a_socket_was_bound(self):
+        # The pre-check path opens no socket at all, and the message used to say
+        # the host "binds 0.0.0.0" -- sending an operator to look for a listener
+        # that never existed.
+        server = self._server("0.0.0.0")
+
+        with self.assertLogs("src.services.report_web_server", "ERROR") as captured:
+            await server.start()
+
+        self.assertFalse(server.is_running)
+        message = captured.output[0]
+        self.assertIn("is not a loopback literal", message)
+        self.assertNotIn("socket has been closed", message)

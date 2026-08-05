@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+import asyncio
 import ipaddress
 import logging
 from typing import List, Optional, Tuple
@@ -80,6 +81,17 @@ class ReportWebServer:
       deliberately port-agnostic so that a tunnel on a different local port
       still works.
 
+      **The refusal is not atomic for a host *name*, and that is a deliberate
+      trade rather than an oversight.** Only address literals are judged before
+      the bind; a name is left to the post-bind check, which reads back what the
+      socket actually got. So a name resolving off-box does open a listening
+      socket, for the microseconds between ``site.start()`` and
+      ``runner.cleanup()``. Closing that window means resolving the name here
+      and handing the same string to aiohttp -- two independent lookups that can
+      disagree, which is the failure this check exists to avoid. An earlier
+      revision of this docstring described the refusal as absolute; it is not,
+      and the window is stated here rather than papered over.
+
     * **A state-changing request must prove it came from this page.** See
       ``_guard_request``.
     """
@@ -92,6 +104,13 @@ class ReportWebServer:
         self.port = int(port)
         self._runner: Optional[web.AppRunner] = None
         self._bound: List[Tuple[str, int]] = []
+        # `start()` awaits twice between checking `self._runner` and setting it,
+        # so two concurrent calls both passed the guard and both bound. Measured:
+        # two listening sockets, one of them untracked, and `stop()` closed only
+        # the one that won the assignment -- the other stayed open for the life
+        # of the process. `on_ready` re-fires on every gateway reconnect, which
+        # is exactly where a second call comes from.
+        self._start_lock = asyncio.Lock()
 
     @property
     def bound_addresses(self) -> List[Tuple[str, int]]:
@@ -130,6 +149,10 @@ class ReportWebServer:
     async def start(self) -> None:
         """Start the web UI, unless it would bind a non-loopback address."""
 
+        async with self._start_lock:
+            await self._start_locked()
+
+    async def _start_locked(self) -> None:
         if self._runner:
             return
 
@@ -138,7 +161,7 @@ class ReportWebServer:
         # *name* is left to the authoritative post-bind check below, which
         # costs no name resolution of our own.
         if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):
-            self._refuse(self.host or "<empty>")
+            self._refuse("is not a loopback literal", bound=False)
             return
 
         app = web.Application(middlewares=[self._guard_request])
@@ -151,6 +174,24 @@ class ReportWebServer:
         try:
             site = web.TCPSite(runner, self.host, self.port)
             await site.start()
+        except OSError as exc:
+            # A refusal, not a fault. `::ffff:127.0.0.1` is the case that
+            # matters: `ipaddress` calls it loopback so it clears the pre-check,
+            # and the kernel then rejects the bind outright --
+            # `OSError: [Errno 22] invalid argument`. Left to propagate, that
+            # reaches `on_ready`'s handler as "Failed to start report web UI"
+            # with a traceback, which reads as a bug in this server rather than
+            # as an address the operator can fix. Any unbindable address --
+            # a port already in use, a privileged port -- lands here too, and
+            # the same reasoning applies: the bot must still boot.
+            await runner.cleanup()
+            logger.error(
+                "Report web UI NOT started: could not bind reports.web_host %r "
+                "on port %d (%s). Set reports.web_host to 127.0.0.1, or set "
+                "reports.web_enabled to false.",
+                self.host, self.port, exc,
+            )
+            return
         except Exception:
             await runner.cleanup()
             raise
@@ -166,30 +207,44 @@ class ReportWebServer:
         exposed = [host for host, _ in bound if not _is_loopback_literal(host)]
         if not bound or exposed:
             await runner.cleanup()
-            self._refuse(", ".join(exposed) or "no readable address")
+            self._refuse(
+                f"bound {', '.join(exposed)}" if exposed else "bound no readable address",
+                bound=True,
+            )
             return
 
         self._runner = runner
         self._bound = bound
+        # Adopt the port the socket actually got. With `web_port: 0` the kernel
+        # picks one, and `self.port` stayed 0 -- so `_refuse`'s `ssh -L` remedy
+        # named port 0, and any later reader of `.port` was told the request
+        # rather than the result. `.urls` already reads `_bound` and was right.
+        self.port = bound[0][1]
         logger.info("Report web UI running at %s", ", ".join(self.urls))
 
-    def _refuse(self, bound_description: str) -> None:
+    def _refuse(self, reason: str, *, bound: bool) -> None:
         """Log why the UI is not starting.
 
         Logged and returned rather than raised: this is a deliberate refusal,
         not a fault, and ``discord_bot.on_ready`` would render a raise as
         "Failed to start report web UI" plus a traceback, which reads as a bug
         in the server rather than as a problem with the address.
+
+        ``bound`` distinguishes the two callers, because the message used to
+        claim the address "binds" something on the pre-check path -- where no
+        socket was ever opened -- which sends an operator looking for a listener
+        that does not exist.
         """
 
         logger.error(
-            "Report web UI NOT started: reports.web_host %r binds %s, which is not a "
-            "loopback address. This page has no authentication and serves every guild's "
-            "reports, so it is loopback-only by construction. Set reports.web_host to "
-            "127.0.0.1 and reach it remotely with a port forward "
+            "Report web UI NOT started: reports.web_host %r %s, so it is not a "
+            "loopback-only listener%s. This page has no authentication and serves "
+            "every guild's reports, so it is loopback-only by construction. Set "
+            "reports.web_host to 127.0.0.1 and reach it remotely with a port forward "
             "(ssh -L %d:127.0.0.1:%d <host>), or set reports.web_enabled to false.",
             self.host,
-            bound_description,
+            reason,
+            "; the socket has been closed again" if bound else "",
             self.port,
             self.port,
         )

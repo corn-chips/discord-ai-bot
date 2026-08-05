@@ -810,10 +810,10 @@ guard = "test_a_wildcard_bind_is_refused_and_leaves_nothing_listening"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(self.host or \"<empty>\")\n            return\n"
+find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(\"is not a loopback literal\", bound=False)\n            return\n"
 replace = ""
 [[mutant.edit]]
-find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\", \".join(exposed) or \"no readable address\")\n            return\n"
+find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\n                f\"bound {', '.join(exposed)}\" if exposed else \"bound no readable address\",\n                bound=True,\n            )\n            return\n"
 replace = ""
 
 [[mutant]]
@@ -831,7 +831,7 @@ guard = "test_a_host_the_pre_check_cannot_judge_is_refused_after_binding"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\", \".join(exposed) or \"no readable address\")\n            return\n"
+find = "        if not bound or exposed:\n            await runner.cleanup()\n            self._refuse(\n                f\"bound {', '.join(exposed)}\" if exposed else \"bound no readable address\",\n                bound=True,\n            )\n            return\n"
 replace = ""
 
 [[mutant]]
@@ -964,7 +964,7 @@ guard = "test_a_wildcard_literal_is_refused_before_any_socket_operation"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(self.host or \"<empty>\")\n            return\n"
+find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(\"is not a loopback literal\", bound=False)\n            return\n"
 replace = ""
 
 [[mutant]]
@@ -1782,3 +1782,110 @@ expect = "killed"
 [[mutant.edit]]
 find = "                    job.request.image_data = b\"\"\n"
 replace = "                    job.request.image_data = b\"\"\n                    if job.result is not None:\n                        job.result.edited_image = None\n"
+
+[[mutant]]
+id = "M-RWS01"
+bug = "PPR-19"
+# `start()` awaits twice between checking `self._runner` and setting it, so
+# two concurrent calls both cleared the guard and both bound. Measured with
+# `ss -ltnp`: two listening sockets, and `stop()` closed only the one that won
+# the assignment -- the other stayed open for the life of the process.
+# `on_ready` re-fires on every gateway reconnect, which is where the second
+# call comes from.
+summary = "Let two concurrent start() calls each bind their own socket"
+guard = "test_two_concurrent_starts_leave_no_socket_behind"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        async with self._start_lock:\n            await self._start_locked()\n"
+replace = "        await self._start_locked()\n"
+
+[[mutant]]
+id = "M-RWS02"
+bug = "PPR-19"
+# With `web_port: 0` the kernel picks the port and `self.port` stayed 0, so
+# the refusal message's remedy read `ssh -L 0:127.0.0.1:0` and any later reader
+# of `.port` got the request rather than the result.
+summary = "Leave self.port at the requested value after an ephemeral bind"
+guard = "test_an_ephemeral_port_is_adopted_after_the_bind"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        self.port = bound[0][1]\n"
+replace = ""
+
+[[mutant]]
+id = "M-RWS03"
+bug = "PPR-19"
+# `::ffff:127.0.0.1` is loopback to `ipaddress`, so it clears the pre-check,
+# and the kernel then refuses the bind with `OSError: [Errno 22] invalid
+# argument`. Propagated, it reaches on_ready as "Failed to start report web UI"
+# plus a traceback -- which reads as a bug in this server rather than as an
+# address the operator can fix.
+summary = "Let an unbindable loopback address escape start() as an OSError"
+guard = "test_an_unbindable_loopback_address_is_refused_not_raised"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "class ReportWebServer:"
+replace = "class _UnreachableError(Exception):\n    pass\n\n\nclass ReportWebServer:"
+[[mutant.edit]]
+find = "        except OSError as exc:"
+replace = "        except _UnreachableError as exc:"
+
+[[mutant]]
+id = "M-RWS04"
+bug = "PPR-19"
+# The pre-check path opens no socket at all. Saying the host "binds" something
+# there sends an operator looking for a listener that never existed.
+summary = "Tell the operator a socket was bound on the path where none was"
+guard = "test_the_pre_check_refusal_does_not_claim_a_socket_was_bound"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            self._refuse(\"is not a loopback literal\", bound=False)\n"
+replace = "            self._refuse(\"is not a loopback literal\", bound=True)\n"
+
+[[mutant]]
+id = "M-RWS05"
+bug = "PPR-19"
+# One unrecognised threshold produced four identical ERROR records per
+# message, because the resolver runs for all four harm categories on every
+# request config that carries safety settings. The fallback is correct; the
+# volume is the defect.
+summary = "Report an unrecognised safety threshold on every resolution"
+guard = "test_one_bad_value_is_reported_once_however_often_it_is_resolved"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if value not in _reported_unknown_thresholds:\n            _reported_unknown_thresholds.add(value)\n"
+replace = "        if True:\n"
+
+[[mutant]]
+id = "M-RWS06"
+bug = "PPR-19"
+# Deduplicating on "have we reported anything" rather than on the value
+# swallows a SECOND, different misconfiguration entirely -- quieter, and now
+# hiding something.
+summary = "Report only the first bad threshold and swallow every later distinct one"
+guard = "test_a_second_distinct_bad_value_is_still_reported"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if value not in _reported_unknown_thresholds:\n            _reported_unknown_thresholds.add(value)\n"
+replace = "        if not _reported_unknown_thresholds:\n            _reported_unknown_thresholds.add(value)\n"
+
+[[mutant]]
+id = "M-RWS07"
+bug = "PPR-19"
+# The hazard of touching this at all: quieter must not mean more permissive.
+# Folding the fallback inside the log branch sends BLOCK_NONE for every
+# resolution after the first -- an unrecognised threshold silently disabling
+# the filter, which is the DAB-052 defect returning by a new route.
+summary = "Fall back to BLOCK_NONE on the resolutions that no longer log"
+guard = "test_the_fallback_is_unchanged_by_the_deduplication"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        name = SAFETY_THRESHOLD_FALLBACK\n    return types.HarmBlockThreshold[name]"
+replace = "            name = SAFETY_THRESHOLD_FALLBACK\n        else:\n            name = 'BLOCK_NONE'\n    return types.HarmBlockThreshold[name]"

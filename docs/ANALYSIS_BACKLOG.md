@@ -1013,3 +1013,43 @@ Because the deferral would otherwise depend on nobody tidying a function, the pr
 written into `_embedding_is_trivial`'s own docstring, where the next person to touch it will read
 it. "Widen for new content only" is not an escape: measured, one reboot sets the row back to
 `skipped` **and** NULLs the vector just paid for.
+
+### PPR-19 (S3/S4) — five live findings promoted out of the pre-push review pile — **CLOSED, round 2 Phase 5**
+
+The 2026-07-31 phase 2.3 and 2.4 reviews produced 34 findings that no document recorded. Most are
+documentation; these five were code, and are fixed here. None is a security boundary — the loopback
+refusal and the `Origin` guard both hold — they are the machinery around them being wrong in ways
+an operator or a gateway reconnect can reach.
+
+- **A concurrent `start()` leaked a listening socket.** `ReportWebServer.start` awaits twice
+  between checking `self._runner` and setting it, so two callers both cleared the guard and both
+  bound. Measured with `ss -ltnp`: **two** listening sockets, and `stop()` closed only the one that
+  won the assignment — the other stayed open for the life of the process. `on_ready` re-fires on
+  every gateway reconnect, which is exactly where a second call comes from. Serialised with a lock.
+- **`self.port` was never updated from the bind.** With `web_port: 0` the kernel picks the port and
+  `self.port` stayed `0`, so the refusal message's remedy read `ssh -L 0:127.0.0.1:0`. `.urls`
+  already read the real value and was right.
+- **`::ffff:127.0.0.1` cleared the pre-check and then could not bind.** `ipaddress` calls it
+  loopback, and the kernel rejects it: `OSError: [Errno 22] invalid argument`, propagating out of
+  `start()` to `on_ready` as *"Failed to start report web UI"* plus a traceback — a bug report
+  about this server rather than an address the operator can fix. Now a refusal, along with any
+  other unbindable address.
+- **The pre-check refusal claimed a socket had been bound.** It said the host *"binds 0.0.0.0"* on
+  the path where nothing was ever opened, sending an operator to look for a listener that does not
+  exist.
+- **An unrecognised safety threshold logged once per category per call** — four identical ERROR
+  records per message. Now reported once per distinct value. The volume was the only defect: the
+  strict fallback is correct, and it does not fire for an operator who has booted normally, because
+  the shipped config canonicalises cleanly on all four categories. Reaching it means a `BotConfig`
+  got to the client without passing `validate_config`, which the message says. `M-RWS07` pins the
+  hazard of touching it at all — quieter must not become more permissive.
+
+One finding from the same pile is **corrected rather than fixed**: the loopback refusal is *not*
+atomic for a host *name*. Only address literals are judged before the bind, so a name resolving
+off-box does open a socket for the microseconds between `site.start()` and `runner.cleanup()`.
+Closing that window means resolving the name here and handing the same string to aiohttp — two
+lookups that can disagree, which is the failure the post-bind check exists to avoid. The class
+docstring described the refusal as absolute; it now states the window.
+
+`M-RWS01` through `M-RWS07` pin all seven decisions. The remaining 29 findings from that pile are
+documentation and are Phase 6's.

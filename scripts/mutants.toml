@@ -801,13 +801,14 @@ replace = "        clauses = [\"id = ?\"]\n        params: list = [int(report_id
 [[mutant]]
 id = "M-DAB143"
 bug = "DAB-143"
-# Removes both loopback refusals at once. They are individually redundant for
-# an address literal -- the pre-check refuses `0.0.0.0` before a socket exists,
-# and the post-bind check would refuse it again -- so neither alone is killable
-# on that input. M-DAB143B and M-DAB143C pin them separately, each on an input
-# only one of them can see.
+# Removes the literal refusal and the post-bind refusal at once. They are
+# individually redundant for an address literal -- the pre-check refuses
+# `0.0.0.0` before a socket exists, and the post-bind check would refuse it
+# again -- so neither alone is killable on that input. M-DAB143C and M-DAB143B
+# pin them separately, and M-DAB143E pins the third gate, the resolution that
+# judges a host name.
 summary = "Bind whatever reports.web_host names, restoring the off-box report surface"
-guard = "test_a_wildcard_bind_is_refused_and_leaves_nothing_listening"
+guard = "test_a_wildcard_literal_is_refused_without_opening_a_socket"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
@@ -820,15 +821,15 @@ replace = ""
 [[mutant]]
 id = "M-DAB143B"
 bug = "DAB-143"
-# Keeps the pre-check and deletes only the authoritative post-bind
-# verification, which is the half that survives predicting a bind and
-# performing it disagreeing. Its guard uses `web_host: "0"`: not an address
-# literal, so the pre-check has nothing to judge, but it resolves to 0.0.0.0
-# and binds every interface. The machine's own host name would also work and
-# would self-skip on any host without a non-loopback address, which would leave
-# this mutant alive for an environment reason rather than a code one.
+# Deletes only the post-bind read-back. That check used to be the authority
+# for a host name and was killed on `web_host: "0"`, which resolves to 0.0.0.0
+# and used to reach the bind; since the resolution gate landed, "0" is refused
+# before any socket exists and never reaches this branch. Nothing a config can
+# say does, which is what makes the read-back a backstop -- so its guard
+# injects the fault instead, making the runner report an off-box address for a
+# socket that is really on 127.0.0.1. The check must still close it.
 summary = "Trust the configured host string instead of the address actually bound"
-guard = "test_a_host_the_pre_check_cannot_judge_is_refused_after_binding"
+guard = "test_a_bind_the_runner_reports_as_off_box_is_torn_down"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
@@ -954,19 +955,63 @@ replace = "            netloc = (request.headers.get(\"Origin\") or \"\").split(
 [[mutant]]
 id = "M-DAB143C"
 bug = "DAB-143"
-# The other half: deletes only the pre-check, so a wildcard literal reaches the
-# bind and is caught a moment later by the post-bind check. Almost invisible --
-# the refusal still happens -- except that the socket has existed in between,
-# and a connection arriving in that window is accepted. The guard makes the
-# difference observable by occupying the port first: refusing early is silent,
-# reaching the bind is EADDRINUSE out of start().
+# Deletes only the literal pre-check, so a wildcard literal reaches the bind
+# and is caught a moment later by the post-bind check. Almost invisible -- the
+# refusal still happens, and the port is closed again -- except that the
+# socket has existed in between, and a connection arriving in that window is
+# accepted. The guard observes the socket layer rather than a port it guessed:
+# every socket the site opens is recorded, and the fixed code opens none.
+#
+# An earlier guard made the window observable by occupying the port first, so
+# that reaching the bind meant EADDRINUSE. That distinguished the two paths
+# only in the text of the log line -- start() catches OSError -- and the
+# mutant was really being killed by
+# test_the_pre_check_refusal_does_not_claim_a_socket_was_bound below.
 summary = "Open the socket first and judge it afterwards, so a wildcard bind briefly exists"
-guard = "test_a_wildcard_literal_is_refused_before_any_socket_operation"
+guard = "test_a_wildcard_literal_is_refused_without_opening_a_socket"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
 find = "        if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):\n            self._refuse(\"is not a loopback literal\", bound=False)\n            return\n"
 replace = ""
+
+[[mutant]]
+id = "M-DAB143E"
+bug = "DAB-143"
+# The shipped state before the refusal became atomic: a host *name* was passed
+# to aiohttp as written and judged only by the read-back, so a name resolving
+# off-box opened a listening socket on every interface for as long as the
+# refusal took to decide. `web_host: "0"` is the hermetic form -- not an
+# address literal, so the pre-check has nothing to judge, and it resolves to
+# 0.0.0.0 with no DNS query and no dependency on this machine having a
+# non-loopback address of its own.
+#
+# The refusal still happens under this mutant, and the port is closed again;
+# what the guard sees is that a socket was opened at all.
+summary = "Bind the host name aiohttp is given and judge it only after the socket is up"
+guard = "test_a_host_name_that_resolves_off_box_never_opens_a_socket"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        bind_targets = [self.host]\n        if not _parses_as_ip(self.host):\n            try:\n                bind_targets = _resolve_bind_targets(self.host, self.port)\n            except OSError as exc:\n                # A name that does not resolve is the same class of operator\n                # error as an address that will not bind, and gets the same\n                # treatment: logged with the remedy, and the bot boots.\n                logger.error(\n                    \"Report web UI NOT started: could not resolve reports.web_host \"\n                    \"%r (%s). Set reports.web_host to 127.0.0.1, or set \"\n                    \"reports.web_enabled to false.\",\n                    self.host, exc,\n                )\n                return\n            exposed = [host for host in bind_targets if not _is_loopback_literal(host)]\n            if exposed:\n                self._refuse(f\"resolves to {', '.join(exposed)}\", bound=False)\n                return\n"
+replace = "        bind_targets = [self.host]\n"
+
+[[mutant]]
+id = "M-DAB143F"
+bug = "DAB-143"
+# Resolving the name here is what makes the refusal atomic, and it introduces a
+# failure mode the old code could not have: getaddrinfo raises for a name that
+# does not resolve. Propagated, that reaches on_ready's handler as "Failed to
+# start report web UI" plus a traceback -- the shape this file spends the
+# OSError branch below avoiding, because it reads as a bug in the server rather
+# than as a typo in reports.web_host.
+summary = "Let a name that does not resolve escape start() as a traceback"
+guard = "test_a_host_name_that_does_not_resolve_is_refused_not_raised"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            try:\n                bind_targets = _resolve_bind_targets(self.host, self.port)\n            except OSError as exc:\n                # A name that does not resolve is the same class of operator\n                # error as an address that will not bind, and gets the same\n                # treatment: logged with the remedy, and the bot boots.\n                logger.error(\n                    \"Report web UI NOT started: could not resolve reports.web_host \"\n                    \"%r (%s). Set reports.web_host to 127.0.0.1, or set \"\n                    \"reports.web_enabled to false.\",\n                    self.host, exc,\n                )\n                return\n"
+replace = "            bind_targets = _resolve_bind_targets(self.host, self.port)\n"
 
 [[mutant]]
 id = "M-DAB143D"
@@ -1831,8 +1876,11 @@ expect = "killed"
 find = "class ReportWebServer:"
 replace = "class _UnreachableError(Exception):\n    pass\n\n\nclass ReportWebServer:"
 [[mutant.edit]]
-find = "        except OSError as exc:"
-replace = "        except _UnreachableError as exc:"
+# Anchored on the comment as well as the clause: the resolution above the bind
+# has an `except OSError as exc:` of its own now, and the bare clause matched
+# both (the harness refused the ambiguity rather than mutating the wrong one).
+find = "\n        except OSError as exc:\n            # A refusal, not a fault."
+replace = "\n        except _UnreachableError as exc:\n            # A refusal, not a fault."
 
 [[mutant]]
 id = "M-RWS04"

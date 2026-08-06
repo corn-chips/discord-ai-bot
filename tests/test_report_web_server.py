@@ -7,9 +7,16 @@ change anything". These tests hold both halves at the boundary that enforces
 them: a real aiohttp server on a real socket, real rows in a real SQLite
 database, and real HTTP requests.
 
-Nothing here asserts a Python attribute or a log line. A refusal is proven by a
-connection that is refused; a rejected write is proven by reading the row back
-out of SQLite and finding it unchanged.
+Nothing here asserts a Python attribute or a log line. A refusal is proven by
+the socket layer -- either no socket was opened at all, or the one that was is
+no longer answering; a rejected write is proven by reading the row back out of
+SQLite and finding it unchanged.
+
+Nothing here opens a listener off this machine either, which was not true
+before the bind became atomic: proving that `web_host: "0"` is refused used to
+mean binding 0.0.0.0, on every interface, on every run of the suite, for as
+long as the refusal took to decide. See
+`test_a_host_name_that_resolves_off_box_never_opens_a_socket`.
 
 The awkward half is deliberate. A CSRF guard that rejects the operator's own
 form gets switched off, and a switched-off guard is worse than none -- so for
@@ -27,21 +34,39 @@ from unittest.mock import patch
 from pathlib import Path
 
 import aiohttp
+from aiohttp import web
 
 from src.services import report_web_server
 from src.services.report_service import ReportService
 from src.services.report_web_server import ReportWebServer, _parses_as_ip
 
 
-def _free_port() -> int:
-    """A port nothing is listening on, so a refused connection means refused."""
+def _socket_recorder():
+    """A ``TCPSite`` that records every socket it opens, and the record.
 
-    probe = socket.socket()
-    try:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-    finally:
-        probe.close()
+    Returns the class to patch in and the list it appends ``(host, port)`` to.
+
+    This replaces the ``_free_port()`` helper these tests used to ask for a
+    port and then assert nothing was listening on it. That was a TOCTOU
+    window -- the probe socket is closed before the server starts, so another
+    process can take the port in between and turn a refusal into a false
+    failure -- and it answered a weaker question. ``runner.addresses`` reports
+    only the sockets the server *kept*, so a socket that was opened and then
+    closed again, which is the whole question a refusal raises, does not appear
+    there at all. This observes the socket layer directly: every port the
+    server opened, including the ones it did not keep.
+    """
+
+    opened = []
+
+    class RecordingSite(web.TCPSite):
+        async def start(self):
+            await super().start()
+            for sock in self._server.sockets:
+                name = sock.getsockname()
+                opened.append((str(name[0]), int(name[1])))
+
+    return RecordingSite, opened
 
 
 class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
@@ -51,15 +76,14 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.service = ReportService(str(Path(self._tmp.name) / "token_usage.db"))
-        self.servers = []
 
-    async def asyncTearDown(self) -> None:
-        for server in self.servers:
-            await server.stop()
-
-    def _server(self, host: str, port: int) -> ReportWebServer:
+    def _server(self, host: str, port: int = 0) -> ReportWebServer:
+        # addAsyncCleanup rather than a loop in asyncTearDown: cleanups all run
+        # even when one of them raises, where the loop stopped at the first
+        # failure and left every later server listening for the rest of the
+        # process.
         server = ReportWebServer(self.service, host=host, port=port)
-        self.servers.append(server)
+        self.addAsyncCleanup(server.stop)
         return server
 
     async def _nothing_is_listening(self, port: int) -> bool:
@@ -73,32 +97,38 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
             return True
         return False
 
-    async def test_a_wildcard_bind_is_refused_and_leaves_nothing_listening(self):
+    async def test_a_wildcard_literal_is_refused_without_opening_a_socket(self):
+        # The pre-check's whole value is that it refuses without binding: the
+        # post-bind check would catch 0.0.0.0 too, but only after the socket
+        # has briefly existed, and a connection arriving in that window does
+        # get accepted. The recorder is what makes the difference observable --
+        # both paths end with nothing listening, and only one of them ever
+        # opened a socket.
         for host in ("0.0.0.0", "::"):
             with self.subTest(host=host):
-                port = _free_port()
-                server = self._server(host, port)
+                site, opened = _socket_recorder()
+                server = self._server(host)
 
                 # assertLogs both captures the refusal -- it is the operator's
                 # only signal, and a silent refusal would be its own defect --
                 # and keeps it out of the suite's output.
-                with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
-                    await server.start()
+                with patch.object(report_web_server.web, "TCPSite", site):
+                    with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
+                        await server.start()
                 self.assertIn("loopback", "".join(logs.output))
 
+                self.assertEqual(
+                    opened, [],
+                    f"{host} was refused, but a socket was opened on {opened}",
+                )
                 self.assertFalse(server.is_running)
                 self.assertEqual(server.bound_addresses, [])
-                # The end state that matters is the socket, not the flag.
-                self.assertTrue(
-                    await self._nothing_is_listening(port),
-                    f"{host} bind was refused but something answered on {port}",
-                )
 
     async def test_the_refusal_does_not_raise_so_the_bot_still_boots(self):
         # A raise here is caught by on_ready's `except Exception` and rendered
         # as a failure with a traceback. Refusing an address is a decision, not
         # a fault, and the rest of the bot is unaffected by it.
-        server = self._server("0.0.0.0", _free_port())
+        server = self._server("0.0.0.0")
 
         with self.assertLogs("src.services.report_web_server", "ERROR"):
             await server.start()  # must not raise
@@ -106,7 +136,6 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(server.is_running)
 
     async def test_the_shipped_loopback_default_still_serves_the_page(self):
-        port = _free_port()
         report = self.service.create_report(
             report_type="issue",
             description="CANARY-DESCRIPTION",
@@ -115,11 +144,12 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
             guild_id=111,
             channel_id=1,
         )
-        server = self._server("127.0.0.1", port)
+        server = self._server("127.0.0.1")
 
         await server.start()
 
         self.assertTrue(server.is_running)
+        port = server.bound_addresses[0][1]
         async with aiohttp.ClientSession() as session:
             async with session.get(f"http://127.0.0.1:{port}/") as response:
                 body = await response.text()
@@ -127,54 +157,96 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("CANARY-DESCRIPTION", body)
         self.assertIn(str(report.id), body)
 
-    async def test_a_host_the_pre_check_cannot_judge_is_refused_after_binding(self):
-        # The case that proves the post-bind check is load-bearing rather than
-        # a second copy of the pre-check. `"0"` is not an address literal --
-        # ipaddress.ip_address rejects it, so the pre-check has nothing to
-        # judge -- but getaddrinfo resolves it to 0.0.0.0 and aiohttp binds
-        # every interface. Predicting the bind and performing it are two
-        # independent resolutions, and this is one input on which they differ.
+    async def test_a_host_name_that_resolves_off_box_never_opens_a_socket(self):
+        # The case only the resolution can judge, and the reason it exists.
+        # `"0"` is not an address literal -- ipaddress.ip_address rejects it,
+        # so the literal pre-check has nothing to say about it -- and
+        # getaddrinfo resolves it to 0.0.0.0, so aiohttp handed the string
+        # would bind every interface.
         #
-        # Chosen over the machine's own host name, which would work here and
-        # self-skip on any host without a non-loopback address, leaving the
-        # mutant that deletes this check alive for an environment reason.
+        # This is the hermetic stand-in for the real shape, a host name whose
+        # A record is off-box: `"0"` needs no DNS and no non-loopback address
+        # on this machine, where the machine's own host name self-skips on any
+        # host that has none, leaving the mutant alive for an environment
+        # reason rather than a code one.
+        #
+        # Until the resolution landed this bound 0.0.0.0 for real and tore it
+        # down again a moment later, which meant every run of this suite --
+        # on any machine, shared or not -- opened a listener on every
+        # interface. `opened == []` is both the security property and the
+        # reason the suite no longer does that.
         self.assertFalse(_parses_as_ip("0"), "the pre-check must not be able to judge '0'")
-        port = _free_port()
-        server = self._server("0", port)
+        site, opened = _socket_recorder()
+        server = self._server("0")
 
-        with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
-            await server.start()
+        with patch.object(report_web_server.web, "TCPSite", site):
+            with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
+                await server.start()
         self.assertIn("0.0.0.0", "".join(logs.output))
+
+        self.assertEqual(
+            opened, [], f"'0' was refused, but a socket was opened on {opened}"
+        )
+        self.assertFalse(server.is_running)
+        self.assertEqual(server.bound_addresses, [])
+
+    async def test_a_host_name_that_does_not_resolve_is_refused_not_raised(self):
+        # Resolving the name here is what makes the refusal atomic, and it
+        # introduces a failure the old code could not have: getaddrinfo raises.
+        # Left to propagate it reaches on_ready's handler as "Failed to start
+        # report web UI" plus a traceback, which reads as a bug in this server
+        # rather than as a typo in the config -- the same reasoning as the
+        # unbindable-address path below.
+        #
+        # `"-"` is rejected by the resolver locally, as an invalid host name,
+        # so this costs no DNS query and cannot hang on a slow resolver.
+        site, opened = _socket_recorder()
+        server = self._server("-")
+
+        with patch.object(report_web_server.web, "TCPSite", site):
+            with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
+                await server.start()  # must not raise
+        self.assertIn("could not resolve", "".join(logs.output))
+
+        self.assertEqual(opened, [])
+        self.assertFalse(server.is_running)
+
+    async def test_a_bind_the_runner_reports_as_off_box_is_torn_down(self):
+        # The post-bind read-back, which is now a backstop: with the resolution
+        # above deciding what gets bound, no value of `reports.web_host` can
+        # reach it, so the fault is injected instead. What is faked is the
+        # environment's report of the bind -- not the decision under test,
+        # which is still the real one running on a real socket. The socket
+        # really is opened, and the assertion is that it really is closed
+        # again.
+        site, opened = _socket_recorder()
+
+        class LyingRunner(web.AppRunner):
+            @property
+            def addresses(self):
+                return [("203.0.113.7", 8080)]  # TEST-NET-3, and off this box.
+
+        server = self._server("127.0.0.1")
+        with patch.object(report_web_server.web, "TCPSite", site), patch.object(
+            report_web_server.web, "AppRunner", LyingRunner
+        ):
+            with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
+                await server.start()
+        self.assertIn("203.0.113.7", "".join(logs.output))
 
         self.assertFalse(server.is_running)
         self.assertEqual(server.bound_addresses, [])
-        self.assertTrue(await self._nothing_is_listening(port))
-
-    async def test_a_wildcard_literal_is_refused_before_any_socket_operation(self):
-        # The pre-check's whole value is that it refuses without binding: the
-        # post-bind check would catch 0.0.0.0 too, but only after the socket
-        # has briefly existed, and a connection during that window does get
-        # accepted. Occupying the port first makes the difference observable --
-        # refusing early is silent, while reaching the bind is EADDRINUSE out
-        # of start().
-        port = _free_port()
-        occupier = socket.socket()
-        occupier.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        occupier.bind(("127.0.0.1", port))
-        occupier.listen(1)
-        self.addCleanup(occupier.close)
-        server = self._server("0.0.0.0", port)
-
-        with self.assertLogs("src.services.report_web_server", "ERROR"):
-            await server.start()  # must refuse, not raise OSError
-
-        self.assertFalse(server.is_running)
+        self.assertEqual(len(opened), 1, f"expected one socket, got {opened}")
+        self.assertTrue(
+            await self._nothing_is_listening(opened[0][1]),
+            f"the bind reported as off-box is still listening on {opened[0][1]}",
+        )
 
     async def test_a_host_that_needs_stripping_still_starts(self):
         # config_helpers strips only for its emptiness test and stores the
         # value as written, so " 127.0.0.1 " reaches here intact and would go
         # to getaddrinfo as a host name -- gaierror, and a traceback.
-        server = self._server(" 127.0.0.1 ", _free_port())
+        server = self._server(" 127.0.0.1 ")
 
         await server.start()
 
@@ -183,9 +255,10 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_host_name_that_binds_only_loopback_is_allowed(self):
         # `localhost` cannot be judged without resolving it, and this is the
-        # case the post-bind check exists to allow: it commonly binds two
-        # sockets, 127.0.0.1 and ::1, and both are loopback.
-        server = self._server("localhost", _free_port())
+        # case the resolution exists to allow rather than refuse: it commonly
+        # resolves to both 127.0.0.1 and ::1, and both are loopback, so both
+        # get bound.
+        server = self._server("localhost")
 
         await server.start()
 
@@ -267,15 +340,16 @@ class ReportWebServerRequestGuardTest(unittest.IsolatedAsyncioTestCase):
             channel_id=1,
         )
         self.server = ReportWebServer(self.service, host="127.0.0.1", port=0)
+        self.addAsyncCleanup(self.server.stop)
         await self.server.start()
         self.assertTrue(self.server.is_running)
         self.port = self.server.bound_addresses[0][1]
         self.origin = f"http://127.0.0.1:{self.port}"
         self.session = aiohttp.ClientSession()
-
-    async def asyncTearDown(self) -> None:
-        await self.session.close()
-        await self.server.stop()
+        # Registered separately, and after the server, so that a session that
+        # fails to close cannot leave the listening socket behind: the teardown
+        # this replaced awaited both in one coroutine, in that order.
+        self.addAsyncCleanup(self.session.close)
 
     async def _post_status(self, headers):
         return await self.session.post(
@@ -435,10 +509,6 @@ class ReportWebServerRequestGuardTest(unittest.IsolatedAsyncioTestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
     """Four residuals the Phase 2.3 review found and Phase 2.3 did not close.
 
@@ -451,15 +521,10 @@ class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.service = ReportService(str(Path(self._tmp.name) / "token_usage.db"))
-        self.servers = []
-
-    async def asyncTearDown(self) -> None:
-        for server in self.servers:
-            await server.stop()
 
     def _server(self, host, port=0):
         server = ReportWebServer(self.service, host=host, port=port)
-        self.servers.append(server)
+        self.addAsyncCleanup(server.stop)
         return server
 
     async def test_two_concurrent_starts_leave_no_socket_behind(self):
@@ -475,17 +540,10 @@ class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
         # port and is closed correctly either way -- so it never saw the leak,
         # and the missing-lock mutant survived it. The leaked socket is on a
         # port the server does not report.
-        opened = []
-        real_site = report_web_server.web.TCPSite
-
-        class RecordingSite(real_site):
-            async def start(self):
-                await super().start()
-                for sock in self._server.sockets:
-                    opened.append(sock.getsockname()[1])
+        site, opened = _socket_recorder()
 
         server = self._server("127.0.0.1")
-        with patch.object(report_web_server.web, "TCPSite", RecordingSite):
+        with patch.object(report_web_server.web, "TCPSite", site):
             await asyncio.gather(server.start(), server.start())
         try:
             self.assertTrue(server.is_running)
@@ -496,7 +554,7 @@ class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
             len(opened), 1,
             f"{len(opened)} sockets were bound by two concurrent start() calls",
         )
-        for port in opened:
+        for _host, port in opened:
             with socket.socket() as probe:
                 probe.settimeout(1)
                 self.assertNotEqual(
@@ -546,3 +604,7 @@ class ReportWebServerStartupResidualsTest(unittest.IsolatedAsyncioTestCase):
         message = captured.output[0]
         self.assertIn("is not a loopback literal", message)
         self.assertNotIn("socket has been closed", message)
+
+
+if __name__ == "__main__":
+    unittest.main()

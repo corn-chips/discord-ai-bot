@@ -1073,12 +1073,15 @@ an operator or a gateway reconnect can reach.
   got to the client without passing `validate_config`, which the message says. `M-RWS07` pins the
   hazard of touching it at all — quieter must not become more permissive.
 
-One finding from the same pile is **corrected rather than fixed**: the loopback refusal is *not*
-atomic for a host *name*. Only address literals are judged before the bind, so a name resolving
-off-box does open a socket for the microseconds between `site.start()` and `runner.cleanup()`.
-Closing that window means resolving the name here and handing the same string to aiohttp — two
-lookups that can disagree, which is the failure the post-bind check exists to avoid. The class
-docstring described the refusal as absolute; it now states the window.
+One finding from the same pile was **corrected rather than fixed** at the time, and is now fixed
+(2026-08-06): the loopback refusal was not atomic for a host *name*. Only address literals were
+judged before the bind, so a name resolving off-box opened a socket for the microseconds between
+`site.start()` and `runner.cleanup()`. The objection to closing it was that resolving the name here
+and handing the same string to aiohttp is two lookups that can disagree — true of the *string*, and
+not of its result: the name is now resolved once and the **resolved addresses** are what gets
+bound, so aiohttp binds literals this class has already judged and there is no second lookup left
+to disagree with. `M-DAB143E` reintroduces the window. The read-back stays as a backstop, and
+`M-DAB143B`'s guard now injects the fault that no configuration can hand it any more.
 
 `M-RWS01` through `M-RWS07` pin all seven decisions. The remaining 29 findings from that pile are
 documentation and are Phase 6's.
@@ -1138,8 +1141,10 @@ None of these is scheduled. They are S4 unless marked.
 
 **`src/services/report_web_server.py`**
 
-- The loopback refusal is not atomic for a host *name*: `site.start()` binds before the post-bind
-  check runs. Documented in the class docstring since `083ebea`; the window is still real.
+- ~~The loopback refusal is not atomic for a host *name*.~~ **Closed 2026-08-06.** The name is
+  resolved once and the resolved addresses are what gets bound, so the refusal is decided before
+  any socket exists for a name as well as for a literal. `M-DAB143E` reintroduces the window,
+  `M-DAB143F` the traceback the new resolution can raise. See PPR-19 above.
 - `_hostname_of` does not strip a trailing dot; `_is_own_host` does. A second caller has to
   remember.
 - The `not bound` half of `if not bound or exposed:` has no test and no isolating mutant —
@@ -1150,12 +1155,17 @@ None of these is scheduled. They are S4 unless marked.
 
 **`tests/`**
 
-- `tests/test_report_web_server.py` binds `0.0.0.0` — every interface — for the duration of one
-  refusal check, on **every** run of the suite. Harmless on a laptop; worth knowing on a shared
-  box. It is the one item here that changes what running the gate does.
-- `_free_port()` is a TOCTOU window another process can win: a second flake source beside the one
-  already recorded at `test_rag_optimization.py:94`.
-- Two `asyncTearDown` loops stop servers without a `try`, so one `stop()` raising skips the rest.
+- ~~`tests/test_report_web_server.py` binds `0.0.0.0`.~~ **Closed 2026-08-06**, as a consequence of
+  the atomic refusal above: the `web_host: "0"` case it was proving now refuses before binding, and
+  the test asserts exactly that — no socket was opened. The suite opens no listener off this
+  machine.
+- ~~`_free_port()` is a TOCTOU window another process can win.~~ **Closed 2026-08-06.** Deleted.
+  Every test that used it now either binds port 0 and reads the port back, or observes the socket
+  layer through `_socket_recorder()`, which reports every port the server opened including the ones
+  it closed again — the question `_free_port()` plus a connection probe could not answer.
+- ~~Two `asyncTearDown` loops stop servers without a `try`.~~ **Closed 2026-08-06.** Both are
+  `addAsyncCleanup` registrations now, which all run even when one raises; measured on the old
+  form, one `stop()` raising left the next server's socket listening.
 - Nothing pins the migrated `pinned_at`, which decides `get_pins` order; nothing asserts the
   positive INFO record on the `on_ready` skip path.
 - `tests/test_safety_thresholds.py`: the module docstring does not separate the four

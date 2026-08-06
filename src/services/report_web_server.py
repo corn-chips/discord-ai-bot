@@ -6,6 +6,7 @@ from html import escape
 import asyncio
 import ipaddress
 import logging
+import socket
 from typing import List, Optional, Tuple
 
 from aiohttp import web
@@ -38,6 +39,28 @@ def _parses_as_ip(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _resolve_bind_targets(host: str, port: int) -> List[str]:
+    """Every distinct address ``host`` would bind, in the order it would bind them.
+
+    One resolution, whose *result* is what gets bound -- see
+    ``ReportWebServer._start_locked``. Duplicates are dropped because
+    ``getaddrinfo`` can report the same address more than once and binding it
+    twice is ``EADDRINUSE``.
+
+    Raises ``OSError`` (``socket.gaierror``) for a name that does not resolve;
+    the caller turns that into a refusal rather than letting it escape.
+    """
+
+    targets: List[str] = []
+    for info in socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+    ):
+        address = str(info[4][0])
+        if address not in targets:
+            targets.append(address)
+    return targets
 
 
 def _format_url(host: str, port: int) -> str:
@@ -81,16 +104,25 @@ class ReportWebServer:
       deliberately port-agnostic so that a tunnel on a different local port
       still works.
 
-      **The refusal is not atomic for a host *name*, and that is a deliberate
-      trade rather than an oversight.** Only address literals are judged before
-      the bind; a name is left to the post-bind check, which reads back what the
-      socket actually got. So a name resolving off-box does open a listening
-      socket, for the microseconds between ``site.start()`` and
-      ``runner.cleanup()``. Closing that window means resolving the name here
-      and handing the same string to aiohttp -- two independent lookups that can
-      disagree, which is the failure this check exists to avoid. An earlier
-      revision of this docstring described the refusal as absolute; it is not,
-      and the window is stated here rather than papered over.
+      **The refusal is decided before anything binds, for a host *name* as
+      well as for a literal.** A literal is judged as it stands. A name is
+      resolved once, here, and the addresses that come back are both what gets
+      judged and what gets handed to aiohttp.
+
+      That last clause is the whole trick. An earlier revision resolved
+      nothing and left a name to the post-bind check, which reads back what the
+      socket actually got -- correct, but only after the socket exists, so a
+      name resolving off-box did open a listening socket for the microseconds
+      between ``site.start()`` and ``runner.cleanup()``. The stated reason for
+      accepting that window was that resolving the name here and then handing
+      aiohttp *the same string* is two independent lookups that can disagree,
+      which is the failure the post-bind check exists to catch. Handing it the
+      resolved *addresses* is one lookup, and there is nothing left to
+      disagree with: aiohttp binds the literals this class already judged.
+
+      The post-bind read-back stays, as a backstop rather than as the
+      authority. Nothing this class can be configured with reaches it any
+      more, which is why its test injects the fault.
 
     * **A state-changing request must prove it came from this page.** See
       ``_guard_request``.
@@ -157,12 +189,37 @@ class ReportWebServer:
             return
 
         # Cheap pre-check, so the common misconfiguration (`0.0.0.0`) never
-        # opens a socket at all. Only address literals are judged here; a host
-        # *name* is left to the authoritative post-bind check below, which
-        # costs no name resolution of our own.
+        # opens a socket at all and costs no name resolution either. Only
+        # address literals are judged here; a host *name* is judged by the
+        # resolution below.
         if not self.host or (_parses_as_ip(self.host) and not _is_loopback_literal(self.host)):
             self._refuse("is not a loopback literal", bound=False)
             return
+
+        # A name cannot be judged without resolving it, so resolve it once and
+        # bind the result. `bind_targets` is what reaches aiohttp below, which
+        # is what makes the refusal atomic for a name: every address that gets
+        # bound has already been judged here, and no second resolution happens
+        # that could produce a different one.
+        bind_targets = [self.host]
+        if not _parses_as_ip(self.host):
+            try:
+                bind_targets = _resolve_bind_targets(self.host, self.port)
+            except OSError as exc:
+                # A name that does not resolve is the same class of operator
+                # error as an address that will not bind, and gets the same
+                # treatment: logged with the remedy, and the bot boots.
+                logger.error(
+                    "Report web UI NOT started: could not resolve reports.web_host "
+                    "%r (%s). Set reports.web_host to 127.0.0.1, or set "
+                    "reports.web_enabled to false.",
+                    self.host, exc,
+                )
+                return
+            exposed = [host for host in bind_targets if not _is_loopback_literal(host)]
+            if exposed:
+                self._refuse(f"resolves to {', '.join(exposed)}", bound=False)
+                return
 
         app = web.Application(middlewares=[self._guard_request])
         app.router.add_get("/", self._index)
@@ -172,8 +229,12 @@ class ReportWebServer:
         await runner.setup()
 
         try:
-            site = web.TCPSite(runner, self.host, self.port)
-            await site.start()
+            # One site per address, rather than one site handed the whole list:
+            # `TCPSite.name` builds a URL from its host and raises TypeError on
+            # a list, and a name that resolves to both ::1 and 127.0.0.1 is the
+            # ordinary case here rather than an exotic one.
+            for target in bind_targets:
+                await web.TCPSite(runner, target, self.port).start()
         except OSError as exc:
             # A refusal, not a fault. `::ffff:127.0.0.1` is the case that
             # matters: `ipaddress` calls it loopback so it clears the pre-check,
@@ -196,13 +257,13 @@ class ReportWebServer:
             await runner.cleanup()
             raise
 
-        # Authoritative check: what the socket layer actually bound, not what we
-        # predicted it would. Resolving the host ourselves and then handing the
-        # same string to aiohttp is two independent lookups that can disagree,
-        # and they need not even be lookups: `web_host: "0"` is rejected by
-        # `ipaddress` as a literal, resolves to `0.0.0.0`, and binds every
-        # interface. An empty address list is refused for the same reason -- if
-        # the bind cannot be read back, it cannot be claimed to be loopback.
+        # Backstop: what the socket layer actually bound, not what was asked
+        # for. Since the resolution above decides what gets bound, no
+        # configuration reaches this branch any more -- it is here because the
+        # cost of a redundant check is one list comprehension and the cost of
+        # trusting an unverified bind is publishing every guild's reports.
+        # An empty address list is refused for the same reason: if the bind
+        # cannot be read back, it cannot be claimed to be loopback.
         bound = [(str(address[0]), int(address[1])) for address in runner.addresses]
         exposed = [host for host, _ in bound if not _is_loopback_literal(host)]
         if not bound or exposed:

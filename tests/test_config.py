@@ -269,6 +269,20 @@ class BotConfigTest(unittest.TestCase):
         config.system_prompt_low_complexity = " "
         config.system_prompt_medium_complexity = " "
         config.max_pdf_pages = 0
+        # The four safety errors were the only rule in validate_config whose
+        # place in this list was unpinned. Order is the product here -- it is
+        # what load_and_validate_config prints, in this sequence, before
+        # exiting 1 -- and these four come last because _validate_feature_values
+        # runs last and they sit at the end of it.
+        config.safety_harassment = "BLOCK_MEDIUM"
+        config.safety_hate_speech = "BLOCK_HIGH"
+        config.safety_sexually_explicit = ""
+        config.safety_dangerous_content = "none"
+
+        accepted = (
+            "BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_NONE, "
+            "BLOCK_ONLY_HIGH, HARM_BLOCK_THRESHOLD_UNSPECIFIED, OFF"
+        )
 
         self.assertEqual(
             config.validate(),
@@ -319,6 +333,10 @@ class BotConfigTest(unittest.TestCase):
                 "system_prompts.low_complexity must not be empty",
                 "system_prompts.medium_complexity must not be empty",
                 "validation.max_pdf_pages must be positive",
+                f"safety.harassment must be one of {accepted} (got 'BLOCK_MEDIUM')",
+                f"safety.hate_speech must be one of {accepted} (got 'BLOCK_HIGH')",
+                f"safety.sexually_explicit must be one of {accepted} (got '')",
+                f"safety.dangerous_content must be one of {accepted} (got 'none')",
             ],
         )
 

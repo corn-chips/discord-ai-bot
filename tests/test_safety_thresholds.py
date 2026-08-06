@@ -20,6 +20,32 @@ of the object handed to the SDK rather than off the resolver, because that is
 what the provider acts on. The shipped `BLOCK_NONE` default is pinned too,
 deliberately: it is a product decision about what this bot is for, and it must
 not drift on the back of a bug fix in the map underneath it.
+
+**Two kinds of test live here and they are not interchangeable.** Most are
+defect guards: they fail on the pre-fix code, and `scripts/mutants.toml` proves
+each one still would. Five are not, and cannot be:
+
+    test_the_shipped_default_still_sends_block_none
+    test_the_legacy_alias_still_reaches_the_sdk_name_it_meant
+    test_the_shipped_defaults_validate
+    test_every_real_sdk_name_validates
+    test_the_legacy_alias_validates
+
+Measured, not assumed -- the pre-fix resolver (the four-entry map above) and the
+absence of any safety validation were reintroduced in a scratch tree and this
+file was run against them. The first two pass because `BLOCK_NONE` and
+`BLOCK_HIGH_AND_ABOVE` were both keys in that map; the last three pass because
+before `071f442` nothing validated the `safety:` block at all, so every config
+"validated cleanly" vacuously.
+
+That is what they are for, not a weakness in them. Failing closed would not have
+been a fix on its own -- with `BLOCK_ONLY_HIGH` still unrecognised, a correct
+config would merely have gone from silently permissive to loudly broken -- so
+the repair had to be proved harmless to configs that already worked, and a test
+that proves that is a test the unfixed code passes by construction. They guard
+everything *after* the fix rather than the fix itself. Deleting them because
+they cannot fail on the defect would delete the only evidence that the defect
+was closed without collateral.
 """
 
 import unittest
@@ -72,9 +98,27 @@ class SafetyThresholdVocabularyTest(unittest.TestCase):
                 self.assertNotIn(invented, sdk_names)
                 self.assertIn(real, sdk_names)
 
-    def test_the_fallback_is_the_strictest_threshold_the_sdk_offers(self):
-        self.assertEqual(SAFETY_THRESHOLD_FALLBACK, "BLOCK_LOW_AND_ABOVE")
+    def test_the_fallback_names_a_threshold_the_sdk_defines(self):
+        # This was called ...is_the_strictest_threshold_the_sdk_offers and
+        # asserted a literal, which is not that property and cannot be made
+        # into it: `types.HarmBlockThreshold` is a str enum whose values are
+        # its own names, so there is no ordinal to compare and no ordering the
+        # SDK exposes. Declaration order does not stand in for one either --
+        # HARM_BLOCK_THRESHOLD_UNSPECIFIED is first, and it is the proto zero
+        # value rather than the strictest policy.
+        #
+        # What is assertable here is that the fallback resolves at all:
+        # `resolve_safety_threshold` ends in types.HarmBlockThreshold[name],
+        # which raises KeyError on a name the SDK does not define -- turning an
+        # already-degraded path into a crash on every request. WHICH threshold
+        # it is has moved to test_an_unresolvable_threshold_does_not_disable_
+        # the_filter, where it is asserted on the request payload instead of on
+        # the constant that produced it.
         self.assertIn(SAFETY_THRESHOLD_FALLBACK, SAFETY_THRESHOLD_NAMES)
+        self.assertEqual(
+            types.HarmBlockThreshold[SAFETY_THRESHOLD_FALLBACK].name,
+            SAFETY_THRESHOLD_FALLBACK,
+        )
 
     def test_case_and_surrounding_space_do_not_change_the_meaning(self):
         self.assertEqual(canonical_safety_threshold("  block_only_high "), "BLOCK_ONLY_HIGH")
@@ -169,11 +213,19 @@ class SafetyThresholdRequestTest(unittest.IsolatedAsyncioTestCase):
     async def test_an_unresolvable_threshold_does_not_disable_the_filter(self):
         # The direction of the fallback is the whole point: an operator who
         # mistyped a threshold was asking for more filtering, not for none.
+        #
+        # The literal is asserted here rather than beside the constant, and
+        # against the request payload rather than against
+        # SAFETY_THRESHOLD_FALLBACK, for two reasons. Comparing to the constant
+        # would pass for any value of it, including OFF -- equally permissive
+        # as BLOCK_NONE and not excluded by a `not BLOCK_NONE` check. And with
+        # the literal beside the constant, M-DAB052B took two tests down at
+        # once, the second of which observed nothing but the constant's own
+        # text. There is one killer now, and it is the behaviour.
         with self.assertLogs("src.services.gemini_client", "ERROR"):
             sent = await self._thresholds_sent("BLOCK_MEDIUM")
 
-        self.assertEqual(set(sent.values()), {SAFETY_THRESHOLD_FALLBACK})
-        self.assertNotIn("BLOCK_NONE", set(sent.values()))
+        self.assertEqual(set(sent.values()), {"BLOCK_LOW_AND_ABOVE"})
 
     async def test_the_streaming_path_sends_the_same_thresholds(self):
         # Both branches share one GenerateContentConfig today, so this guards

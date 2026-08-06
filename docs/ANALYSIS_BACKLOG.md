@@ -1188,11 +1188,38 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
   form, one `stop()` raising left the next server's socket listening.
 - Nothing pins the migrated `pinned_at`, which decides `get_pins` order; nothing asserts the
   positive INFO record on the `on_ready` skip path.
-- `tests/test_safety_thresholds.py`: the module docstring does not separate the four
+- ~~`tests/test_safety_thresholds.py`: the module docstring does not separate the four
   "a correct config still works" guards from the defect guards, and
   `test_the_fallback_is_the_strictest_threshold_the_sdk_offers` asserts a literal rather than the
   property its name promises (the SDK exposes no ordering, so the literal is the best available —
-  the objection is the name). No test pins the position of the safety errors in the ordered list.
+  the objection is the name). No test pins the position of the safety errors in the ordered
+  list.~~ **Closed 2026-08-06**, all three.
+
+  The docstring now names the guards that cannot fail on the unfixed code, and it is **five**, not
+  four — measured rather than counted by eye, by reintroducing the pre-`071f442` four-entry
+  resolver *and* the absent validation loop in a scratch tree and running this file against them.
+  `test_the_shipped_default_still_sends_block_none` and
+  `test_the_legacy_alias_still_reaches_the_sdk_name_it_meant` pass because `BLOCK_NONE` and
+  `BLOCK_HIGH_AND_ABOVE` were both keys in that map; `test_the_shipped_defaults_validate`,
+  `test_every_real_sdk_name_validates` and `test_the_legacy_alias_validates` pass because nothing
+  validated the `safety:` block at all before the fix, so every config validated vacuously. The
+  docstring says why that is the point: failing closed alone would not have been a fix — with
+  `BLOCK_ONLY_HIGH` still unrecognised a correct config would have gone from silently permissive to
+  loudly broken — so the repair had to be proved harmless to configs that already worked, and a
+  test proving *that* is one the unfixed code passes by construction.
+
+  The rename is `test_the_fallback_names_a_threshold_the_sdk_defines`, and it keeps only the
+  property it can hold: `resolve_safety_threshold` ends in `types.HarmBlockThreshold[name]`, which
+  raises `KeyError` on a name the SDK does not define. "Strictest" is not assertable and cannot be
+  made so — `HarmBlockThreshold` is a str enum whose values are its own names, and declaration
+  order does not stand in for strictness because `HARM_BLOCK_THRESHOLD_UNSPECIFIED` is first.
+  *Which* threshold the fallback is has moved to
+  `test_an_unresolvable_threshold_does_not_disable_the_filter`, asserted on the request payload,
+  which also closes the `M-DAB052B` noise below.
+
+  The position of the four safety errors is pinned in
+  `test_validate_preserves_error_messages_and_order` — the list every other rule was already in.
+  `M-DAB052J` sorts the four, which reads as a tidy-up and puts `dangerous_content` first.
 
 **`scripts/mutants.toml` / `scripts/mutation_check.py`**
 
@@ -1205,7 +1232,11 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
   replacement is now just the `return True`.
 - `M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
   one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.
-- `M-DAB052B`'s second killer is the literal-equality test above — noise, same root.
+- ~~`M-DAB052B`'s second killer is the literal-equality test above — noise, same root.~~
+  **Closed 2026-08-06.** One killer now. The literal moved out from beside the constant and onto
+  the request payload inside the declared guard, so the only thing that notices the edit is the
+  threshold that reaches the SDK; the assertion it replaced observed nothing but the constant's own
+  text and reported as a killer anyway.
 - The harness's own wrong-guard reporting is `PPR-17`.
 
 **`src/config_helpers.py` / `src/services/gemini_client.py`**

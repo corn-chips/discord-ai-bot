@@ -1138,6 +1138,12 @@ bug = "DAB-052"
 # the half that is easy to lose: recognising more names is the visible fix, and
 # which way the remaining unknown falls is the one that decides whether a typo
 # silently disables filtering.
+#
+# One killer, as of 2026-08-06. It used to take a second test with it --
+# a literal equality on this constant, sitting beside the constant, which
+# observed nothing but its own text and reported as a killer anyway. The
+# literal now lives on the request payload inside the declared guard, so the
+# only thing that notices this edit is the threshold that reaches the SDK.
 summary = "Keep the fallback permissive, so an unrecognised threshold still means BLOCK_NONE"
 guard = "test_an_unresolvable_threshold_does_not_disable_the_filter"
 file = "src/constants.py"
@@ -1160,6 +1166,28 @@ expect = "killed"
 [[mutant.edit]]
 find = "        if not canonical_safety_threshold(value):\n"
 replace = "        if False:\n"
+
+[[mutant]]
+id = "M-DAB052J"
+bug = "DAB-052"
+# Where the four safety errors land in the ordered list validate_config
+# returns. That order is the product: load_and_validate_config prints the list
+# in sequence and then exits 1, so it is the whole of what an operator with a
+# bad config sees. Every other rule's position was pinned and these four were
+# not, so they could be reordered among themselves, or moved to a different
+# _validate_* helper entirely, with the suite green. Sorting the tuple is the
+# most plausible way in -- it reads as a tidy-up and it puts dangerous_content
+# first.
+summary = "Report the four safety errors in sorted order rather than config.yaml's"
+guard = "test_validate_preserves_error_messages_and_order"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    for setting, value in (\n        (\"harassment\", config.safety_harassment),\n"
+replace = "    for setting, value in sorted((\n        (\"harassment\", config.safety_harassment),\n"
+[[mutant.edit]]
+find = "        (\"dangerous_content\", config.safety_dangerous_content),\n    ):\n"
+replace = "        (\"dangerous_content\", config.safety_dangerous_content),\n    )):\n"
 
 [[mutant]]
 id = "M-DAB052D"

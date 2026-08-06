@@ -824,7 +824,11 @@ programme" while sitting directly above them.
   round 2 Phase 3**, together with a second, independent defect in the same method that the
   finding does not mention and that turned out to be the upstream cause of PPR-06. The ledger
   guard landed as described — an absent legacy `pinned_messages` returns without writing
-  `legacy_shared_pins_v1`, so the migration stays armed. The second half: the copy was a bulk
+  `legacy_shared_pins_v1`, so the migration stays armed — but **only half of it landed**, and the
+  other half closed on 2026-08-06: an *empty* legacy table still burned the ledger. See the round 2
+  still-open list at the foot of this file for the evidence; the short version is that the empty
+  table is the ordinary pre-split state, so the half that landed armed the migration for the
+  installs with no legacy pins and burned it for the ones that have them. The second half: the copy was a bulk
   `INSERT OR IGNORE ... SELECT`, the **only** path in the tree that writes `pinned_messages`
   without going through `add_pin`, and it enforced none of `add_pin`'s ceilings. Measured before
   the fix on 61 legacy pins in one channel: **61 rows** against a 25-pin cap, **300,871
@@ -1257,6 +1261,25 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
 
 **`src/services/pin_service.py`**
 
-- An **empty** legacy `pinned_messages` table still burns the one-shot ledger. An *absent* one
+- ~~An **empty** legacy `pinned_messages` table still burns the one-shot ledger. An *absent* one
   correctly does not, and `DAB-068`'s write-up says so — but it does not say the empty case
-  differs, and the distinction is the whole of DAB-068.
+  differs, and the distinction is the whole of DAB-068.~~ **Closed 2026-08-06 by fixing the
+  behaviour, not by documenting the distinction**, because the evidence says the distinction was
+  the wrong way round. Before `784e71e` `PinService` defaulted to `data/token_usage.db` and created
+  `pinned_messages` in `__init__` (`git show 784e71e^:src/services/pin_service.py`), so **every**
+  pre-split install has that table and one that never used `/pin` has it empty. The empty table is
+  therefore the ordinary pre-split state, and guarding only the absent case armed the migration for
+  post-split fresh installs — which have no legacy pins to lose — while burning it for the
+  population that does: upgrade, roll back to a pre-split build, pin something, upgrade again, and
+  those pins were gated out forever. Both states now return without writing the ledger.
+  `M-DAB068G` reintroduces the burn.
+
+  The gate is deliberately "the legacy table held **no rows**", not "nothing was copied". A table
+  whose every row is capped or unusable has been fully considered, and leaving that pending would
+  re-read and re-warn on every boot forever — `M-DAB068E`'s failure wearing the empty-table fix as
+  a disguise, which `M-DAB068H` reproduces. The check also sits *after* the missing-column check
+  rather than before it: an empty table with a broken schema is where the operator most needs that
+  ERROR, and `test_a_legacy_schema_missing_a_required_column_leaves_the_migration_pending` failed
+  when the order was the other way round. Measured cost of staying armed on an empty table:
+  **+0.11 ms per boot** against the burned early return, +0.05 ms against the absent-table branch
+  that was already staying armed (400 constructions, median).

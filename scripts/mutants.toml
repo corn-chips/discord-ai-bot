@@ -1616,6 +1616,40 @@ find = "            if channel_id is None or not author_name or not pinned_by:\n
 replace = "            if channel_id is None:\n                capped[channel_id] = capped.get(channel_id, 0) + 1\n                continue\n"
 
 [[mutant]]
+id = "M-DAB068G"
+bug = "DAB-068"
+# The half of DAB-068 the first fix left behind: an ABSENT legacy table stayed
+# armed, an EMPTY one still burned the ledger having copied nothing. That is
+# the population the fix should have protected and did not -- before 784e71e
+# PinService defaulted to data/token_usage.db and created the table in
+# __init__, so every pre-split install has the table and one that never used
+# /pin has it empty. Upgrade, roll back to a pre-split build, pin something,
+# upgrade again: gated out forever.
+summary = "Burn the one-shot ledger on a legacy pinned_messages that exists but holds no rows"
+guard = "test_an_empty_legacy_table_does_not_burn_the_one_shot_either"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if not conn.execute(\n                    \"SELECT 1 FROM legacy.pinned_messages LIMIT 1\"\n                ).fetchone():\n"
+replace = "                if False:\n"
+
+[[mutant]]
+id = "M-DAB068H"
+bug = "DAB-068"
+# The overcorrection, and the reason the gate reads "the table held no rows"
+# rather than "nothing was copied". A table whose every row is capped or
+# unusable has been fully considered; leaving that pending re-reads and
+# re-warns on every boot forever, which is M-DAB068E's failure wearing the
+# empty-table fix as a disguise.
+summary = "Leave the migration pending whenever nothing was copied, not just when there was nothing to read"
+guard = "test_a_legacy_table_of_only_unusable_rows_is_recorded_as_done"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                copied, capped, unusable = self._copy_legacy_pins(conn, available)\n                conn.execute(\n"
+replace = "                copied, capped, unusable = self._copy_legacy_pins(conn, available)\n                if not copied:\n                    return\n                conn.execute(\n"
+
+[[mutant]]
 id = "M-PPR06F"
 bug = "PPR-06"
 # Fit once, always reserving the longer "Showing N of M ..." footer. Safe, and

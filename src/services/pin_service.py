@@ -107,10 +107,29 @@ class PinService:
         unconditionally, so a fresh install -- where `TokenTracker` has created
         `token_usage.db` and it has never held a pin -- burned the one shot
         having copied nothing, and logged it as a success. Any later genuine
-        migration was then gated out forever. An absent legacy table now returns
-        without writing the ledger, so the migration stays armed. Measured cost
-        of staying armed: +0.12 ms per boot, and no FTS rebuild on this path,
-        so nothing like PPR-02's +385.8 ms.
+        migration was then gated out forever.
+
+        Two states mean "nothing to migrate from", and **both** now return
+        without writing the ledger: no legacy `pinned_messages` at all, and one
+        holding no rows. The first fix landed alone, and the distinction it left
+        behind had it backwards. Before `784e71e` `PinService` defaulted to
+        `data/token_usage.db` and created the table in `__init__`, so *every*
+        pre-split install has the table and an install that never used `/pin`
+        has it empty -- which makes the empty table the ordinary pre-split
+        state, not an exotic one. Guarding only the absent case therefore armed
+        the migration for post-split fresh installs, which have no legacy pins
+        to lose, and burned it for the population that does: upgrade, roll back
+        to a pre-split build, pin something, upgrade again, and those pins were
+        gated out forever. Measured cost of staying armed on an empty table:
+        one `ATTACH` and two lookups, +0.11 ms per boot against the burned
+        early return and +0.05 ms against the absent-table branch that was
+        already staying armed. No FTS rebuild on this path, so nothing like
+        PPR-02's +385.8 ms.
+
+        The gate is "the legacy table held no rows", **not** "nothing was
+        copied". A table whose every row is capped or unusable has been fully
+        considered, and leaving *that* pending would retry and re-warn on every
+        boot forever -- the failure `M-DAB068E` exists to catch.
 
         **Every pin admitted here goes through the ceilings `/pin` enforces.**
         This is the only code path that writes `pinned_messages` without going
@@ -180,6 +199,20 @@ class PinService:
                         "copied and the migration is left pending, so it will run "
                         "again once the legacy schema is repaired.",
                         source, ", ".join(missing),
+                    )
+                    return
+
+                # After the schema check, not before it. An empty table with a
+                # broken schema is where the operator most needs the ERROR
+                # above -- the rows they are about to add would not migrate
+                # either -- and returning "no rows" first would hide it.
+                if not conn.execute(
+                    "SELECT 1 FROM legacy.pinned_messages LIMIT 1"
+                ).fetchone():
+                    logger.debug(
+                        "Legacy pinned_messages in %s holds no rows; leaving the "
+                        "pin migration pending rather than recording it as done.",
+                        source,
                     )
                     return
 

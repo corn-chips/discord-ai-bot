@@ -9,6 +9,16 @@ has never held a pin. The migration wrote `legacy_shared_pins_v1` anyway and
 logged `Copied legacy pinned memories from ...` at INFO, having copied nothing.
 Any later genuine migration was gated out forever.
 
+That fix landed for an *absent* legacy table and, for a year of commits, not for
+an *empty* one — which is the state that actually matters. Before `784e71e`
+`PinService` defaulted to `data/token_usage.db` and created `pinned_messages` in
+`__init__`, so every pre-split install has the table and one that never used
+`/pin` has it empty. The half that landed armed the migration for post-split
+fresh installs, which have no legacy pins to lose, and burned it for the
+population that does. Both states leave the ledger unwritten now, and the gate
+is "the table held no rows" rather than "nothing was copied", because a table of
+rows that were all capped or unusable *has* been fully considered.
+
 **The copy was a bulk `INSERT OR IGNORE ... SELECT`,** the only path in the tree
 that writes `pinned_messages` without going through `add_pin`. Measured before
 the fix, 61 legacy pins in one channel: 61 rows stored against a 25-pin cap,
@@ -112,14 +122,42 @@ class PinMigrationTest(unittest.TestCase):
         self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
         self.assertEqual([row[1] for row in service.get_pins(1)], ["remember the milk"])
 
-    def test_an_empty_legacy_table_is_a_real_migration_and_is_recorded(self):
-        # Nothing to copy is not the same as nothing to copy *from*: the table
-        # exists, so the one-shot has genuinely happened.
+    def test_an_empty_legacy_table_does_not_burn_the_one_shot_either(self):
+        # This used to assert the opposite, on the reading that "the table
+        # exists, so the one-shot has genuinely happened". The history says
+        # otherwise: before 784e71e, PinService defaulted to
+        # data/token_usage.db and created the table in __init__, so every
+        # pre-split install has it and one that never used /pin has it empty.
+        # An empty legacy table is therefore the ordinary pre-split state, and
+        # guarding only the absent case armed the migration for post-split
+        # fresh installs -- which have no legacy pins to lose -- while burning
+        # it for the population that does.
         self._create_legacy_table()
+        self._migrate()
+
+        self.assertEqual(self._ledger(), [])
+
+        # And the pins that arrive after the empty boot still migrate. Rolling
+        # back to a pre-split build and pinning is the sequence that used to
+        # lose them.
+        self._seed_legacy([(1, "remember the milk", "ada", "ada", "2026-01-01T00:00:00")])
+        service = self._migrate()
+
+        self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
+        self.assertEqual([row[1] for row in service.get_pins(1)], ["remember the milk"])
+
+    def test_a_legacy_table_of_only_unusable_rows_is_recorded_as_done(self):
+        # The gate is "the table held no rows", not "nothing was copied". Every
+        # row here is considered and rejected, which is work: leaving it pending
+        # would re-read and re-warn on every boot forever, which is the failure
+        # M-DAB068E exists to catch, wearing the empty-table fix as a disguise.
+        self._create_legacy_table()
+        self._seed_legacy([(1, "   ", "ada", "ada", "2026-01-01T00:00:00")])
 
         self._migrate()
 
         self.assertEqual(self._ledger(), ["legacy_shared_pins_v1"])
+        self.assertEqual(self._channel_totals(1), (0, 0, 0))
 
     def test_the_migration_does_not_run_twice(self):
         self._create_legacy_table()

@@ -1243,8 +1243,23 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
 - ~~`M-PPR11C`'s replacement leaves `hostname` computed and unused.~~ **Closed 2026-08-06**, in
   passing: the anchor had to be re-cut when the root dot moved into `_hostname_of`, and the
   replacement is now just the `return True`.
-- `M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
-  one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.
+- ~~`M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
+  one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.~~
+  **Closed 2026-08-06**, and it pulled two further inaccuracies out with it, both re-measured.
+
+  The mutant's comment now describes the mutant. Against its `split("://")` form a trailing slash,
+  a path, a trailing space, a leading space and `HTTP://` are accepted; the embedded tab is not,
+  because the split routes it to `evil.example` — which is the shape the comment singled out. That
+  scenario is real and `M-PPR11C` reproduces it, by answering to any Host.
+
+  The handler's own docstring said `urlsplit` "accepts six shapes ... and every one of them mutated
+  a row against a netloc comparison". It named five, and two of the five do not survive a netloc
+  comparison: `urlsplit` gives the trailing space a netloc of `127.0.0.1:P ` and the embedded tab
+  one of `127.0.0.1:Phttp:`. It is `.hostname` — the more natural parsed comparison — that all of
+  them defeat. And the leading space is not a shape at all: measured against a live aiohttp server,
+  the header arrives stripped, so the handler sees the exact origin and answers 303. Trailing
+  whitespace is preserved. Four shapes reach that line, and the guard loop now carries exactly
+  those four with `HTTP://` in its own test beside them.
 - ~~`M-DAB052B`'s second killer is the literal-equality test above — noise, same root.~~
   **Closed 2026-08-06.** One killer now. The literal moved out from beside the constant and onto
   the request payload inside the declared guard, so the only thing that notices the edit is the

@@ -475,14 +475,31 @@ class ReportWebServerRequestGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._stored(), before)
 
     async def test_an_origin_that_only_looks_right_cannot_change_a_report(self):
-        # These are the shapes a lenient URL parse lets through: they all yield
-        # the correct netloc, and none of them is an origin a browser can
-        # produce. The comparison is an exact string match for that reason.
-        for suffix in ("/", "/path", "\thttp://evil.example", " "):
-            with self.subTest(origin=repr(self.origin + suffix)):
+        # The shapes a lenient URL parse lets through. None is an origin a
+        # browser can produce, and the comparison is an exact string match for
+        # that reason.
+        #
+        # They do NOT all yield the correct netloc, which this comment used to
+        # claim: measured, `urlsplit` gives the trailing space a netloc of
+        # '127.0.0.1:P ' and the embedded tab one of '127.0.0.1:Phttp:'. All
+        # four yield the correct `.hostname`, which is the parsed comparison
+        # more likely to be reached for, and `HTTP://` has its own test below.
+        #
+        # A LEADING space is deliberately not here, though the handler's
+        # docstring used to count it as a sixth shape. Measured against a live
+        # aiohttp server: the header arrives as 'http://127.0.0.1:P', stripped,
+        # so it never reaches the comparison and the request is a 303. Trailing
+        # whitespace is preserved, which is why the case above is a real one.
+        for deformed in (
+            self.origin + "/",
+            self.origin + "/path",
+            self.origin + "\thttp://evil.example",
+            self.origin + " ",
+        ):
+            with self.subTest(origin=repr(deformed)):
                 before = self._stored()
 
-                response = await self._post_status({"Origin": self.origin + suffix})
+                response = await self._post_status({"Origin": deformed})
 
                 self.assertEqual(response.status, 403)
                 self.assertEqual(self._stored(), before)

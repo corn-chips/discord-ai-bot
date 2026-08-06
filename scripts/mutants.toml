@@ -988,9 +988,22 @@ replace = "            origin = request.headers.get(\"Origin\")\n            if 
 [[mutant]]
 id = "M-PPR11E"
 bug = "PPR-11"
-# Parsing the Origin instead of matching it exactly. A netloc comparison
-# accepts a trailing slash, a path, an uppercased scheme and an embedded tab --
-# none of which a browser can produce, all of which mutated a row.
+# Parsing the Origin instead of matching it exactly. Corrected 2026-08-06: this
+# comment described `urlsplit`, which is not what the edit below uses, and it
+# named the one shape the edit does NOT accept.
+#
+# Measured against this `split("://")` form, with `Origin: http://127.0.0.1:P`
+# plus each deformation: a trailing slash, a path, a trailing space, a leading
+# space and `HTTP://` are all accepted; the embedded tab
+# (`http://127.0.0.1:P\thttp://evil.example`) is not, because the split routes
+# it to `evil.example`. That last shape is real -- an origin naming a host the
+# operator never reached is exactly the case the Host allowlist exists for --
+# and `M-PPR11C` is the mutant that reproduces it, by answering to any Host.
+#
+# Two killers, both on the merits: the four-suffix guard covers three of the
+# accepted shapes and test_an_uppercased_scheme_cannot_change_a_report covers
+# the fourth, which is a separate test because a case-folding parse is a
+# separate mistake from a lenient one.
 summary = "Compare the Origin's host part rather than the whole serialised origin"
 guard = "test_an_origin_that_only_looks_right_cannot_change_a_report"
 file = "src/services/report_web_server.py"

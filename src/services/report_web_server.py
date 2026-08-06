@@ -358,10 +358,17 @@ class ReportWebServer:
            local port, must not have their own form rejected. A guard that
            breaks the UI gets switched off, which is worse than no guard.
 
-           Exact match rather than a parsed comparison, because ``urlsplit``
-           accepts six shapes the Fetch ABNF forbids -- a trailing slash, a
-           path, ``HTTP://``, a leading space, an embedded tab -- and every one
-           of them mutated a row against a netloc comparison.
+           Exact match rather than a parsed comparison, because a parse accepts
+           shapes the Fetch ABNF forbids. **Four** of them reach this line: a
+           trailing slash, a path, ``HTTP://`` and a trailing space. This said
+           six and named five, and it named the wrong comparison -- re-measured
+           2026-08-06, ``urlsplit`` gives the trailing space a netloc of
+           ``127.0.0.1:P `` and an embedded tab one of ``127.0.0.1:Phttp:``, so
+           a *netloc* comparison rejects both; it is ``.hostname``, the parsed
+           comparison more natural to reach for, that all four defeat. A leading
+           space was the fifth and is not a shape at all: aiohttp strips it from
+           the header value, so the handler sees the exact origin and answers
+           303. Trailing whitespace it preserves.
 
            A missing Origin is refused. Per Fetch Standard section 3.2, a
            browser appends Origin to every non-GET/HEAD request

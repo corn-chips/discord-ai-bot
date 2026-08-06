@@ -1186,8 +1186,21 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
 - ~~Two `asyncTearDown` loops stop servers without a `try`.~~ **Closed 2026-08-06.** Both are
   `addAsyncCleanup` registrations now, which all run even when one raises; measured on the old
   form, one `stop()` raising left the next server's socket listening.
-- Nothing pins the migrated `pinned_at`, which decides `get_pins` order; nothing asserts the
-  positive INFO record on the `on_ready` skip path.
+- ~~Nothing pins the migrated `pinned_at`, which decides `get_pins` order; nothing asserts the
+  positive INFO record on the `on_ready` skip path.~~ **Closed 2026-08-06.**
+  `test_a_migrated_pin_keeps_the_date_it_was_pinned_on` seeds legacy rows whose `id` order and
+  `pinned_at` order disagree — ids 1, 2, 3 against March, January, February — because the copy
+  reads `ORDER BY id`, so stamping migration time reorders the channel as well as losing its
+  history. Asserted on the real rows through `get_pins` and again through
+  `ContextPackBuilder.build_pinned_context`, which is the order the prompt gets. `M-DAB068I`
+  reintroduces the stamp.
+
+  `test_the_skip_is_recorded_and_only_on_the_reconnect` pins the INFO line from both sides: present
+  once on the second `on_ready`, absent on the first. Every other DAB-003 guard asserts an
+  *absence* — that the two false CRITICALs are gone — and absence is all they can assert, so
+  "skipped, already registered" and "registered 22 commands" were indistinguishable, both ending at
+  the same `Synced N slash command(s) globally`. That is the objection the three-state Report Web
+  UI line answers for DAB-144, in a second place. `M-DAB003G` skips in silence.
 - ~~`tests/test_safety_thresholds.py`: the module docstring does not separate the four
   "a correct config still works" guards from the defect guards, and
   `test_the_fallback_is_the_strictest_threshold_the_sdk_offers` asserts a literal rather than the

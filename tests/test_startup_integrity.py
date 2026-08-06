@@ -244,6 +244,30 @@ class OnReadyReentryTest(OnReadyHarness):
         self.assertEqual(len(self.bot.tree.get_commands()), registered)
         self.assertEqual(self.bot.tree.sync.await_count, 2)
 
+    async def test_the_skip_is_recorded_and_only_on_the_reconnect(self):
+        # The absence of the two false CRITICALs is what the tests above assert,
+        # and absence is all they assert: the operator's log goes from two
+        # alarming records to nothing, and "skipped, because this tree is
+        # already registered" and "registered 22 commands" become
+        # indistinguishable -- both end at the same "Synced 0 slash command(s)
+        # globally". The positive record is what tells the two apart, so it is
+        # a deliverable of DAB-003 rather than incidental output, and it needs
+        # pinning from both sides: it must not appear on the first run either,
+        # or it says the tree was already registered when it was just built.
+        skip = (
+            "Slash commands are already registered on this tree; skipping "
+            "re-registration after the gateway reconnect."
+        )
+
+        first = await self._run_on_ready()
+        self.assertNotIn(skip, [record.getMessage() for record in first])
+
+        second = await self._run_on_ready()
+
+        skipped = [record for record in second if record.getMessage() == skip]
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0].levelno, logging.INFO)
+
     async def test_a_registration_failure_stays_critical_on_every_reconnect(self):
         # The flag must not latch on a run that did not finish, or a genuinely
         # broken tree goes quiet from the first reconnect onward.

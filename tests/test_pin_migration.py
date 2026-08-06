@@ -372,6 +372,45 @@ class PinMigrationTest(unittest.TestCase):
              "user pin 0", "user pin 1", "user pin 2"],
         )
 
+    def test_a_migrated_pin_keeps_the_date_it_was_pinned_on(self):
+        # `pinned_at` is the only migrated column with a consumer other than
+        # display: get_pins orders by it, and that order is the order the pins
+        # reach the prompt and the /pins embed. The copy reads it and passes it
+        # through, and nothing asserted that -- stamping migration time on every
+        # row instead loses the channel's history of what was pinned when, and
+        # silently reorders it to whatever the copy happened to insert in.
+        #
+        # The fixture separates the two orders on purpose: the rows go in with
+        # ids 1, 2, 3 and pinned_at March, January, February, and the copy reads
+        # ORDER BY id. If the timestamps survive, get_pins answers Jan, Feb, Mar.
+        self._create_legacy_table()
+        self._seed_legacy(
+            [
+                (1, "third", "ada", "ada", "2026-03-01T00:00:00"),
+                (1, "first", "ada", "ada", "2026-01-01T00:00:00"),
+                (1, "second", "ada", "ada", "2026-02-01T00:00:00"),
+            ]
+        )
+
+        service = self._migrate()
+
+        self.assertEqual(
+            [(row[1], row[4]) for row in service.get_pins(1)],
+            [
+                ("first", "2026-01-01T00:00:00"),
+                ("second", "2026-02-01T00:00:00"),
+                ("third", "2026-03-01T00:00:00"),
+            ],
+        )
+        # And that order is what the prompt gets. get_pins is the only reader
+        # ContextPackBuilder has, so the two cannot disagree -- but the packed
+        # order is the deliverable, and reading it here says which of the two
+        # this test exists to protect.
+        packed = ContextPackBuilder.build_pinned_context(service.get_pins(1), channel_id=1)
+        self.assertEqual(
+            [item.content.split()[-1] for item in packed], ["first", "second", "third"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1440,6 +1440,23 @@ find = "            cleaned = _sanitise_pin_content(content)\n"
 replace = "            cleaned = (content or \"\").strip()\n"
 
 [[mutant]]
+id = "M-DAB068I"
+bug = "DAB-068"
+# `pinned_at` is the only migrated column with a consumer beyond display:
+# get_pins orders by it, so it decides the order pins reach the prompt and the
+# /pins embed. Stamping migration time on every row loses the channel's record
+# of what was pinned when AND silently reorders it to whatever the copy
+# happened to insert in -- which is ORDER BY id, a different order whenever the
+# legacy rows were not pinned in id order.
+summary = "Stamp every migrated pin with the migration time instead of the date it was pinned"
+guard = "test_a_migrated_pin_keeps_the_date_it_was_pinned_on"
+file = "src/services/pin_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    pinned_at or datetime.utcnow().isoformat(), message_id,\n"
+replace = "                    datetime.utcnow().isoformat(), message_id,\n"
+
+[[mutant]]
 id = "M-PPR06"
 bug = "PPR-06"
 # The defect itself: one field per pin, unbounded. At the permitted 25 pins the
@@ -1589,6 +1606,25 @@ expect = "killed"
 [[mutant.edit]]
 find = "                self._slash_commands_registered = False\n                if not isinstance(e, Exception):"
 replace = "                if not isinstance(e, Exception):"
+
+[[mutant]]
+id = "M-DAB003G"
+bug = "DAB-003"
+# Skip in silence. Every other DAB-003 guard asserts an ABSENCE -- that the two
+# false CRITICALs are gone -- and absence is all they can assert, so the log
+# went from alarming to blank and "skipped, this tree is already registered"
+# became indistinguishable from "registered 22 commands". Both runs end at the
+# same "Synced N slash command(s) globally". The positive record is the answer
+# to the same objection the three-state Report Web UI line answers for DAB-144:
+# if the decision is only visible in the log, the log has to say which decision
+# was taken.
+summary = "Skip re-registration on a reconnect without recording that it was skipped"
+guard = "test_the_skip_is_recorded_and_only_on_the_reconnect"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if registered:\n            logger.info(\n                \"Slash commands are already registered on this tree; skipping \"\n                \"re-registration after the gateway reconnect.\"\n            )\n"
+replace = "        if registered:\n            pass\n"
 
 [[mutant]]
 id = "M-DAB003E"

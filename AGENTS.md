@@ -56,11 +56,11 @@ request only.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 37 test files hold 84 `TestCase` classes, 82 of them named `<Subject>Test`; the two
+ the 37 test files hold 85 `TestCase` classes, 83 of them named `<Subject>Test`; the two
  exceptions are the shared harnesses `LoggingHarness` and `OnReadyHarness`).
 - `python -m compileall -q main.py src scripts tests` — syntax check without booting.
 - `python scripts/mutation_check.py` — reintroduces each fixed bug in a scratch copy and
- reports whether the suite notices. **130 mutants, 220 s with `--jobs 5`** (it was 5 mutants and
+ reports whether the suite notices. **137 mutants, 231 s with `--jobs 5`** (it was 5 mutants and
  ~7 s when the harness landed; the wall time is one full suite run per mutant); exit 0 only when every mutant matches its declared
  expectation in `scripts/mutants.toml`. Use it to prove a new regression test actually fails
  on reintroduction, rather than assuming it does.
@@ -231,7 +231,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 ## Tests
 
 
-- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 82 of 84; the two exceptions are shared harnesses) — not `Test<Subject>`. Async
+- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 83 of 85; the two exceptions are shared harnesses) — not `Test<Subject>`. Async
  tests use `IsolatedAsyncioTestCase` with `asyncSetUp`/`asyncTearDown`.
 - No `conftest.py`, no `tests/__init__.py`, no shared helpers — every file is self-contained.
  The idiom is `types.SimpleNamespace` fakes plus `unittest.mock.AsyncMock` (`MagicMock` is
@@ -248,7 +248,9 @@ suffix, re-debits the limiter and re-bills Gemini.
 
 A repository-wide analysis was completed on 2026-07-29 against `c83f740`, on a `125 tests, OK`
 baseline. Two remediation programmes have since landed **58 implementation commits**
-(`c83f740..083ebea`) plus a documentation phase on top of it, closing every S1. Read the analysis before starting a bug hunt or a refactor; it already covers most of
+(`c83f740..083ebea`) plus a documentation phase on top of it, closing every S1. Four further
+commits (2026-08-06) closed the report web server's nine round 2 review findings, which are the
+tail of the backlog's still-open list rather than part of either programme. Read the analysis before starting a bug hunt or a refactor; it already covers most of
 what a fresh sweep would rediscover — but read the outcome summary first, or you will re-fix
 something that is already fixed.
 
@@ -272,7 +274,7 @@ something that is already fixed.
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 394 in 37 files**; the 13 files that existed at `c83f740` have been joined by 24 more, and
+now 401 in 37 files**; the 13 files that existed at `c83f740` have been joined by 24 more, and
 `git log --diff-filter=A --name-only c83f740..HEAD -- tests/` names each one with its commit.
 Some tickets deliberately change the count on top of that; each says so.
 
@@ -290,7 +292,7 @@ citations in *this* file were re-measured at `083ebea`; five of the fourteen had
 - `docs/README.md` is the index for `docs/`; it marks every file CURRENT, HISTORICAL, or
  SUPERSEDED. Check it before quoting any figure out of that directory.
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (394 stdlib `unittest` tests across 37 files). It now carries a staleness banner listing its
+ (401 stdlib `unittest` tests across 37 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 - `docs/DEEP_BUG_HUNT_REPORT.md` **no longer exists.** It was deleted, not archived: it marked
  BUG-0001 to BUG-0005 "Open" against a build id that is not in this history, and it shipped in

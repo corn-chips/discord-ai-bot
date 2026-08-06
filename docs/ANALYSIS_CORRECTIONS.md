@@ -1,7 +1,7 @@
 # Analysis corrections
 
-Last updated: 2026-08-05 | Repo state: branch `remediation/2026-07-30`, HEAD `083ebea` |
-Baseline suite: 394 tests, OK; mutation harness 130/130. `dev` is frozen at `c83f740` on purpose
+Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
+report web server residual commits | Baseline suite: 401 tests, OK; mutation harness 137/137. `dev` is frozen at `c83f740` on purpose
 
 Items 1-16 and 21 correct the 2026-07-29 analysis corpus. **Items 17-20 and 22 are different in
 kind:** they correct claims made by the remediation programme's own landed commits, found by

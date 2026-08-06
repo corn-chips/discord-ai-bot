@@ -1,8 +1,8 @@
 # Remediation programme, 2026-07-29 to 2026-08-05 — outcome
 
-Last updated: 2026-08-05 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
-Phase 6 documentation commits | Gate: **394 tests, OK**; mutation harness **130/130** (220 s at
-`--jobs 5`)
+Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
+report web server residual commits | Gate: **401 tests, OK**; mutation harness **137/137** (231 s
+at `--jobs 5`)
 
 **Read this before any other document in `docs/`.** The analysis corpus describes the repository
 as it stood at `c83f740`. **58 implementation commits have landed since** (`c83f740..083ebea`),
@@ -86,13 +86,13 @@ budget, no timeout and no size gate (`PPR-21`). Both tickets are marked PARTIAL.
 
 | | At `c83f740` | At HEAD |
 |---|---|---|
-| Test suite | 125 tests in 13 files | **394 tests in 37 files** |
-| Mutation harness | did not exist | **130 mutants, 130/130 matching expectation** (220 s with `--jobs 5`) |
+| Test suite | 125 tests in 13 files | **401 tests in 37 files** |
+| Mutation harness | did not exist | **137 mutants, 137/137 matching expectation** (231 s with `--jobs 5`) |
 
 The suite grew monotonically, commit by commit — every implementation commit records its own
 `Suite: X -> Y` delta, and no commit reduced it. The mutation harness
 (`scripts/mutation_check.py`, `scripts/mutants.toml`) reintroduces each fixed defect in a scratch
-copy and fails if the suite does not notice; it went 5 mutants at `f0938a8` to 130 at HEAD. It is
+copy and fails if the suite does not notice; it went 5 mutants at `f0938a8` to 137 at HEAD. It is
 the instrument that caught the defects review missed — three tests in Phase 5 alone passed for the
 wrong reason and mutation, not reading, found all three.
 
@@ -142,7 +142,11 @@ Six of the 37 tickets are untouched, six are partial, one is refuted.
 
 Plus the twenty-one post-programme findings (`PPR-01` to `PPR-21`) and the still-open code
 findings from the round 2 reviews, all at the foot of
-[`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md).
+[`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md). **Four commits on top of `083ebea` (2026-08-06)
+closed the nine of those that concern the report web server and its tests** — including the
+loopback refusal's bind window, which PPR-19 above recorded as corrected-rather-than-fixed, and
+the suite's own `0.0.0.0` bind, which ran on every gate on every machine. The rest of that list is
+unchanged and unscheduled.
 
 ## Deliberate deferrals, and what would reopen each
 

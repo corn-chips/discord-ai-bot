@@ -1,10 +1,10 @@
 ## Analysis Backlog
 
-Last updated: 2026-08-05 | Repo state: branch `remediation/2026-07-30`, HEAD `083ebea` | Gate:
-394 tests, OK; mutation harness 130/130. `dev` is frozen at `c83f740` on purpose and is **not**
-where this work lives
+Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
+report web server residual commits | Gate: 401 tests, OK; mutation harness 137/137. `dev` is
+frozen at `c83f740` on purpose and is **not** where this work lives
 Findings below were measured at HEAD `c83f740` against a 125-test baseline; the status column is
-current as of 2026-08-05. Trust the finding, re-locate the line number, and quote the 394 gate.
+current as of 2026-08-06. Trust the finding, re-locate the line number, and quote the 401 gate.
 
 **Ticket status at `083ebea`: 24 LANDED, 6 PARTIAL (DAB-029, DAB-042, DAB-073, DAB-087, DAB-095,
 DAB-198), 1 REFUTED (DAB-212), 6 OPEN.**
@@ -376,7 +376,7 @@ TEST-INFRASTRUCTURE CHAIN  (one live obstruction, not two -- see below)
   DAB-204 --> DAB-042        DISCHARGED, round 2 Phase 0. Both obstructing tests (there
                              were two; the graph and both tickets each named one) are
                              replaced by an assertion on the retry BUDGET. A correct
-                             480 s deadline now leaves the suite at 394 OK. DAB-042 can
+                             480 s deadline now leaves the suite at 401 OK. DAB-042 can
                              start today -- but put the budget INSIDE GeminiClient, or
                              DAB-042's acceptance criterion and DAB-204's contradict
 
@@ -1129,15 +1129,19 @@ gate) that would each close part of it.
 
 ---
 
-## STILL-OPEN CODE FINDINGS FROM THE ROUND 2 REVIEWS (recorded 2026-08-05, not fixed)
+## STILL-OPEN CODE FINDINGS FROM THE ROUND 2 REVIEWS (recorded 2026-08-05)
 
 The round 2 phase reviews produced findings that were never given a `PPR-` number because they
 are small. They are recorded here because the reviews themselves are working notes that live
 **outside the checkout** and will not survive; a finding that exists only in a scratch file is a
 finding that will be rediscovered from zero. Each was re-verified at `083ebea` — several items
-from the same reviews have since closed in code and are not listed.
+from the same reviews had already closed in code by then and are not listed.
 
-None of these is scheduled. They are S4 unless marked.
+**The report web server's nine are closed (2026-08-06), in four commits on top of `083ebea`.**
+They are struck through below rather than deleted, because the reason each was recorded still
+reads as the reason it was worth closing, and two of them turned out to matter more than "small":
+the bind window was real, and the suite's own `0.0.0.0` bind ran on every gate on every machine.
+Everything not struck through is still open, still unscheduled, and still S4 unless marked.
 
 **`src/services/report_web_server.py`**
 

@@ -13,8 +13,8 @@
 >
 > This document is a **snapshot measured at `c83f740` on 2026-07-29**. Fifty-eight implementation
 > commits (`c83f740..083ebea`) have landed since, plus a documentation phase. Every figure in the body is present tense and every one of them means "as at
-> `c83f740`" — the gate is **394 tests in 37 files**, plus a mutation harness of **130 mutants,
-> 130/130**, that did not exist when this was written. The classes of figure that have moved
+> `c83f740`" — the gate is **401 tests in 37 files**, plus a mutation harness of **137 mutants,
+> 137/137**, that did not exist when this was written. The classes of figure that have moved
 > most: suite and coverage counts; `except`-handler counts (237 -> 228 under `src/`); command-gate
 > counts (§6 says 1 of 35 nodes is gated — **4 are**, and 6 leaves are now `guild_only`, because
 > DAB-140 and DAB-141 landed); `BotConfig` validation gaps (44-47 of 100 -> **39 of 99**);
@@ -1526,7 +1526,7 @@ two false statements (`DAB-211`, S3):
 recommended moving `docs/DEEP_BUG_HUNT_REPORT.md` to `docs/archive/` with a banner. It was
 **deleted** instead. The banner was tried first and failed on its own terms: the SUPERSEDED
 banner added to the file went stale in turn and ended up asserting a current gate of "140 tests
-in 15 files" against a suite of 394 in 37 — a correction that needed correcting. Git history is
+in 15 files" against a suite of 401 in 37 — a correction that needed correcting. Git history is
 a complete archive; `git show 88e330b:DEEP_BUG_HUNT_REPORT.md` returns the file in full.
 
 Both carry-forwards this paragraph names survive the deletion, which is what made it safe.

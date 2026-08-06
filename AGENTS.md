@@ -38,7 +38,7 @@ request only.
  instead: `python3.12 -m pip --python .venv/bin/python check` works and currently reports
  "No broken requirements found."
 - Tests import `discord`, `google.genai`, `numpy`, `yaml`, `PIL`, and `fitz` at module
- scope. Without deps installed, collection fails outright â€” an environment problem, not
+ scope. Without deps installed, collection fails outright — an environment problem, not
  a code failure.
 - No formatter or linter is configured. Do not run `black`/`ruff` across the repo; match
  adjacent code.
@@ -47,24 +47,24 @@ request only.
 ## Commands
 
 
-- `sh start.sh` (`start.bat` on Windows) â€” create `.venv` if absent, install, run.
+- `sh start.sh` (`start.bat` on Windows) — create `.venv` if absent, install, run.
  `--rebuild` recreates it and clears `__pycache__`, `.mypy_cache`, `.pytest_cache`.
  It installs deps only when `.venv/bin/python` is missing, so a half-failed install leaves a
  `.venv` that later runs accept and launch with packages missing; only `--rebuild` repairs it,
  and on this box `--rebuild` cannot finish (see Environment).
-- `python -m unittest discover -s tests -p "test_*.py"` â€” **must run from the repo root**;
+- `python -m unittest discover -s tests -p "test_*.py"` — **must run from the repo root**;
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
  the 26 test files hold 65 `TestCase` classes, 63 of them named `<Subject>Test`; the two
  exceptions are the shared harnesses `LoggingHarness` and `OnReadyHarness`).
-- `python -m compileall -q main.py src scripts tests` â€” syntax check without booting.
-- `python scripts/mutation_check.py` â€” reintroduces each fixed bug in a scratch copy and
+- `python -m compileall -q main.py src scripts tests` — syntax check without booting.
+- `python scripts/mutation_check.py` — reintroduces each fixed bug in a scratch copy and
  reports whether the suite notices. **56 mutants, ~80 s with `--jobs 5`** (it was 5 mutants
  and ~7 s when the harness landed); exit 0 only when every mutant matches its declared
  expectation in `scripts/mutants.toml`. Use it to prove a new regression test actually fails
  on reintroduction, rather than assuming it does.
-- `python scripts/health_check.py` â€” needs real credentials and network; not an offline check.
+- `python scripts/health_check.py` — needs real credentials and network; not an offline check.
 - **pytest is not configured** (no pyproject/setup.cfg/pytest.ini, not in requirements) and
  async tests would error without `pytest-asyncio`. Use `unittest`.
 
@@ -74,7 +74,7 @@ request only.
 
 `requirements.txt` is only `-c constraints.txt` + `-r requirements.in`. Add direct deps as a
 lower bound in `requirements.in`. `constraints.txt` is a validated exact snapshot regenerated
-with `pip freeze --exclude pip` from a clean 3.12 env (see README "Dependency workflow") â€”
+with `pip freeze --exclude pip` from a clean 3.12 env (see README "Dependency workflow") —
 never hand-edit a version in it.
 
 
@@ -122,12 +122,12 @@ deletes the surviving commands from Discord globally.
 ## Service wiring
 
 
-- No DI container. `DiscordBot.__init__` is hand-wired and **construction order matters** â€”
+- No DI container. `DiscordBot.__init__` is hand-wired and **construction order matters** —
  module-level `_get_or_create_*` factories read attributes set earlier in the constructor.
 - `bot._channel_settings_service`, `_message_visibility_service` and `_user_prefs_service` are
  built in `DiscordBot.__init__` (`discord_bot.py:394-405`), alongside `_pin_service`. They used
  to be attached as a side effect of `register_personalization_commands`, which meant any
- registrar raising left them absent â€” and since every reader reaches them through
+ registrar raising left them absent — and since every reader reaches them through
  `getattr`/`hasattr`, `_is_live_mode_enabled` then returned `False` for every channel and user
  preferences were skipped, silently, for the life of the process (DAB-002). The registrars now
  reuse the eager instances via `getattr(bot, ...) or ...`; keep it that way, and do not move
@@ -149,21 +149,21 @@ deletes the surviving commands from Discord globally.
 ## Message flow (read these first)
 
 
-`DiscordBot.on_message` (`discord_bot.py:827`) â†’ live-mode channels fork to
+`DiscordBot.on_message` (`discord_bot.py:827`) → live-mode channels fork to
 `LiveMessageCoordinator.enqueue` and **return early, skipping the mention gate and the
-router** â†’ `is_bot_mentioned` (`:1417`) â†’ rate limit â†’ `EnhancedCommandHandler.handle_message`
-(an LLM router with an LRU/TTL cache that may fully handle image requests) â†’ context â†’
-`ResponseGenerationCoordinator` â†’ `ResponseDeliveryCoordinator` â†’ the bot's own reply is
+router** → `is_bot_mentioned` (`:1417`) → rate limit → `EnhancedCommandHandler.handle_message`
+(an LLM router with an LRU/TTL cache that may fully handle image requests) → context →
+`ResponseGenerationCoordinator` → `ResponseDeliveryCoordinator` → the bot's own reply is
 re-indexed into RAG.
 
 
 Silent degradation is the house style: any exception during hybrid RAG **retrieval** falls back to
 the legacy `ContextCollector` path with only a warning (`discord_bot.py:1006-1011`), and indexing
-failures log at `debug`. A broken RAG change looks like "nothing happened" â€” check the logs.
+failures log at `debug`. A broken RAG change looks like "nothing happened" — check the logs.
 
 The word *retrieval* is load-bearing. That `try` used to span generation and delivery as well, so
 anything that failed after the model had already answered fell through to the legacy path and
-answered again â€” a duplicate reply and a duplicate Gemini charge (DAB-001). Delivery now sits
+answered again — a duplicate reply and a duplicate Gemini charge (DAB-001). Delivery now sits
 outside it, behind `if rag_context is not None` (`:1022`). Keep it that way: widening the `try`, or
 weakening that gate to a truthiness test, each reintroduce paid duplicate work, and
 `scripts/mutation_check.py` carries `M-DAB001` and `M-DAB001B` for exactly those two mistakes.
@@ -194,7 +194,7 @@ suffix, re-debits the limiter and re-bills Gemini.
  (`message_index`, `message_embeddings`, `message_search_fts`, `message_retrieval_events`,
  `message_backfill_progress`, `pinned_messages`, `rag_migrations`).
 - All access goes through `sqlite_connection` / `sqlite_transaction` in
- `src/services/sqlite_utils.py` â€” the only `sqlite3.connect` site under `src/`. Don't add
+ `src/services/sqlite_utils.py` — the only `sqlite3.connect` site under `src/`. Don't add
  another.
  It sets the lock-wait budget from `bot.sqlite_busy_timeout_ms` (default 5000 ms, applied once by
  `DiscordBot.__init__` via `configure_busy_timeout`). It deliberately does **not** set
@@ -231,13 +231,13 @@ suffix, re-debits the limiter and re-bills Gemini.
 ## Tests
 
 
-- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 63 of 65; the two exceptions are shared harnesses) â€” not `Test<Subject>`. Async
+- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 63 of 65; the two exceptions are shared harnesses) — not `Test<Subject>`. Async
  tests use `IsolatedAsyncioTestCase` with `asyncSetUp`/`asyncTearDown`.
-- No `conftest.py`, no `tests/__init__.py`, no shared helpers â€” every file is self-contained.
+- No `conftest.py`, no `tests/__init__.py`, no shared helpers — every file is self-contained.
  The idiom is `types.SimpleNamespace` fakes plus `unittest.mock.AsyncMock` (`MagicMock` is
  never used), and `object.__new__(Cls)` to bypass heavy constructors before assigning attrs.
 - No network anywhere; SQLite tests write real databases into `tempfile.TemporaryDirectory`.
- Some tests do real work â€” PyMuPDF rendering, matplotlib LaTeX (self-skips if absent).
+ Some tests do real work — PyMuPDF rendering, matplotlib LaTeX (self-skips if absent).
 - `tests/test_rag_optimization.py:94` (assertion at `:104`) asserts a negative 50 ms timing
  window against a real thread; it can flake on a loaded machine.
 - Add regression tests for bug fixes, covering the error path as well as the happy path.
@@ -286,7 +286,7 @@ several tickets, is past the end of an 80-line file, and `on_message` has moved 
 citations in *this* file were re-measured at `922e899` and are current.
 
 
-## Stale docs â€” do not trust at face value
+## Stale docs — do not trust at face value
 
 
 - `docs/README.md` is the index for `docs/`; it marks every file CURRENT, HISTORICAL, or

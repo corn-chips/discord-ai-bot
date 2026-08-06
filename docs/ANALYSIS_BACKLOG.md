@@ -1206,15 +1206,35 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
 
 **`src/config_helpers.py` / `src/services/gemini_client.py`**
 
-- The four `safety_*` parse defaults have no test and no mutant, and nothing runs the shipped
-  `config.yaml` through `validate_config`.
+- ~~The four `safety_*` parse defaults have no test and no mutant, and nothing runs the shipped
+  `config.yaml` through `validate_config`.~~ **Closed 2026-08-06.** Both halves land in
+  `tests/test_config.py`, which is where the parse defaults already belonged:
+  `test_from_yaml_uses_expected_defaults_for_empty_document` now pins the four — `M-DAB052I`
+  drifts them to `BLOCK_MEDIUM_AND_ABOVE` and dies to that test alone — and
+  `test_the_shipped_config_yaml_loads_and_validates` runs the real file through the real parser
+  and `validate_config`, with the two secrets sized from the file's own minimums and the
+  environment cleared so `TOKEN_DB_PATH` / `RAG_DATABASE_PATH` / `LOG_FILE` cannot decide the
+  result. `M-R2CFG` reproduces the direction that matters — not a bad value edited into the file,
+  which shows up in the diff of the file an operator reads, but a **rule tightened past a value
+  the file already holds**. `generation.temperature` ships at exactly `2.0`, so making that
+  ceiling exclusive is a bot that exits 1 for the operator with the suite green, and it is the
+  isolating case for the same reason: every other test of that rule takes the `0.7` dataclass
+  default or sets `2.1` to force the error. Only three other scalar fields differ between
+  `config.yaml` and the dataclass, and all three are model names.
 - The parser stores the raw string, so `canonical_safety_threshold` runs once at validation and
   again per category per request; every future consumer must remember to call it.
 - `canonical_safety_threshold` lives in a module whose docstring scopes it to `src.config`, and a
   service imports it. Moving it to `src/constants.py` is mildly off too, against that file's
   "immutable data definitions" charter.
-- `config.yaml` advertises `HARM_BLOCK_THRESHOLD_UNSPECIFIED` as an operator choice; it is the
-  proto zero-value sentinel, not a policy.
+- ~~`config.yaml` advertises `HARM_BLOCK_THRESHOLD_UNSPECIFIED` as an operator choice; it is the
+  proto zero-value sentinel, not a policy.~~ **Closed 2026-08-06.** The list of operator choices
+  is now the five real policies, and the sentinel is described separately as what it is: the
+  enum's zero value, the name proto3 requires for "this field was not set". It stays *accepted*,
+  because the accepted set is derived from `types.HarmBlockThreshold` rather than hand-written and
+  that derivation is what keeps it honest across SDK versions — it just is not a choice, and the
+  comment now says which of the two it is. Not testable beyond the drift guard that already
+  exists: this is a comment, and `test_the_declared_names_are_exactly_the_sdk_enum` is what makes
+  the accepted set true.
 
 **`src/services/pin_service.py`**
 

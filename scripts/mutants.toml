@@ -1242,6 +1242,47 @@ find = "    name = value if isinstance(value, str) else str(value or \"\")\n"
 replace = "    name = str(value or \"\")\n"
 
 [[mutant]]
+id = "M-DAB052I"
+bug = "DAB-052"
+# The four safety_* parse defaults, which decide what a config with no
+# `safety:` block filters. They had no test and no mutant of any kind, so this
+# is a coverage gap rather than a reintroduction: the value is a product
+# decision -- the same one config.yaml states for the config that DOES mention
+# it -- and it was the only default in that parser nothing pinned. Drifting it
+# tightens every deployment whose config predates the block, silently, with the
+# suite green.
+summary = "Default an absent safety: block to BLOCK_MEDIUM_AND_ABOVE instead of BLOCK_NONE"
+guard = "test_from_yaml_uses_expected_defaults_for_empty_document"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        \"safety_harassment\": get_config_value(\n            config_data, \"safety\", \"harassment\", \"BLOCK_NONE\"\n        ),\n        \"safety_hate_speech\": get_config_value(\n            config_data, \"safety\", \"hate_speech\", \"BLOCK_NONE\"\n        ),\n        \"safety_sexually_explicit\": get_config_value(\n            config_data, \"safety\", \"sexually_explicit\", \"BLOCK_NONE\"\n        ),\n        \"safety_dangerous_content\": get_config_value(\n            config_data, \"safety\", \"dangerous_content\", \"BLOCK_NONE\"\n        ),\n"
+replace = "        \"safety_harassment\": get_config_value(\n            config_data, \"safety\", \"harassment\", \"BLOCK_MEDIUM_AND_ABOVE\"\n        ),\n        \"safety_hate_speech\": get_config_value(\n            config_data, \"safety\", \"hate_speech\", \"BLOCK_MEDIUM_AND_ABOVE\"\n        ),\n        \"safety_sexually_explicit\": get_config_value(\n            config_data, \"safety\", \"sexually_explicit\", \"BLOCK_MEDIUM_AND_ABOVE\"\n        ),\n        \"safety_dangerous_content\": get_config_value(\n            config_data, \"safety\", \"dangerous_content\", \"BLOCK_MEDIUM_AND_ABOVE\"\n        ),\n"
+
+[[mutant]]
+id = "M-R2CFG"
+bug = "R2-CONFIG"
+# One of the unnumbered round 2 review findings recorded in
+# docs/ANALYSIS_BACKLOG.md: nothing ran the shipped config.yaml through
+# validate_config. The interesting direction is this one -- not a bad value
+# edited into the file, which shows up in the diff of the file an operator
+# reads, but a rule tightened past a value the file already holds.
+#
+# generation.temperature is the isolating case, and it is isolating for the
+# reason that makes it dangerous: the shipped config sits exactly ON the
+# boundary at 2.0, and every other test of this rule either takes the 0.7
+# dataclass default or sets 2.1 to force the error, so both survive the bound
+# becoming exclusive. Only three other scalar fields differ between config.yaml
+# and the dataclass, all of them model names.
+summary = "Make the generation.temperature ceiling exclusive, so the shipped 2.0 is refused"
+guard = "test_the_shipped_config_yaml_loads_and_validates"
+file = "src/config_helpers.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    if not (0.0 <= config.temperature <= 2.0):\n"
+replace = "    if not (0.0 <= config.temperature < 2.0):\n"
+
+[[mutant]]
 id = "M-PPR09"
 bug = "PPR-09"
 # The shipped state: str(exc) interpolated into a PUBLIC channel message under

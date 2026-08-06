@@ -154,10 +154,20 @@ generation:
 
 # --- Safety Settings ---
 # One of: BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE,
-# BLOCK_ONLY_HIGH, OFF, HARM_BLOCK_THRESHOLD_UNSPECIFIED. Case and surrounding
-# space are ignored; anything else fails validation at startup and names the
-# values that would have worked. Keep the quotes -- an unquoted OFF is a YAML
-# boolean, not a string.
+# BLOCK_ONLY_HIGH, OFF. Case and surrounding space are ignored; anything else
+# fails validation at startup and names the values that would have worked. Keep
+# the quotes -- an unquoted OFF is a YAML boolean, not a string.
+#
+# HARM_BLOCK_THRESHOLD_UNSPECIFIED is accepted and is deliberately NOT in that
+# list. It is the enum's zero value -- the name proto3 requires for "this field
+# was not set" -- so it is not a filtering policy, and writing it here does not
+# select one. It validates only because the accepted set is derived from
+# `types.HarmBlockThreshold` (src/constants.py) rather than hand-written, which
+# is what keeps the set honest when the SDK changes; the previous version of
+# this line offered it as a sixth operator choice alongside five real ones.
+# Whatever the provider does with an unset threshold is not a decision this
+# file can pin -- if that is what you want, PPR-14's paths already do it by
+# sending no safety settings at all.
 #
 # BLOCK_HIGH_AND_ABOVE is accepted too, as an alias for BLOCK_ONLY_HIGH. It is
 # not a name the SDK defines: it was invented by this bot's own lookup table,

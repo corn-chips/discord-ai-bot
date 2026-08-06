@@ -8,11 +8,20 @@ from unittest.mock import patch
 
 import yaml
 
-from src.config import BotConfig
+from src.config import CONFIG_FILE_PATH, BotConfig
 
 
 class BotConfigTest(unittest.TestCase):
     """Cover the public parsing and validation behavior of BotConfig."""
+
+    @staticmethod
+    def _load_shipped(env):
+        """Load the real config.yaml with a known environment, not this box's."""
+        # Cleared rather than inherited. config.yaml is what is under test, and
+        # TOKEN_DB_PATH / RAG_DATABASE_PATH / LOG_FILE override it when set, so
+        # an inherited environment would let the machine decide the result.
+        with patch.dict(os.environ, env, clear=True):
+            return BotConfig.from_yaml(CONFIG_FILE_PATH)
 
     def _load_yaml(self, data, env=None):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -69,6 +78,38 @@ class BotConfigTest(unittest.TestCase):
         )
         self.assertIn("auto", config.valid_languages)
         self.assertEqual(config.max_text_file_size_bytes, 5 * 1024 * 1024)
+        # A document with no `safety:` block must still filter nothing. That is
+        # the same product decision config.yaml states explicitly, and it is
+        # taken twice -- once in the file and once here, for the config that
+        # does not mention it -- so both need pinning. The four were the only
+        # parse defaults in the file with no test at all.
+        self.assertEqual(config.safety_harassment, "BLOCK_NONE")
+        self.assertEqual(config.safety_hate_speech, "BLOCK_NONE")
+        self.assertEqual(config.safety_sexually_explicit, "BLOCK_NONE")
+        self.assertEqual(config.safety_dangerous_content, "BLOCK_NONE")
+
+    def test_the_shipped_config_yaml_loads_and_validates(self):
+        # The file that actually boots this bot, through the real parser and
+        # the real validator. Every other test in this class builds a BotConfig
+        # by hand or from a synthetic document, so nothing ran the shipped
+        # config.yaml through validate_config: a value edited past a rule, or a
+        # rule tightened past a value, was a green suite and a bot that exits 1
+        # on the operator's machine.
+        #
+        # The two secrets are the only settings config.yaml cannot supply. Their
+        # lengths are read out of the shipped file rather than written here, so
+        # this asserts the config's own minimums are satisfiable rather than
+        # re-stating today's numbers.
+        minimums = self._load_shipped({})
+        config = self._load_shipped(
+            {
+                "DISCORD_BOT_TOKEN": "d" * minimums.min_token_length_discord,
+                "GEMINI_API_KEY": "g" * minimums.min_token_length_gemini,
+            }
+        )
+
+        self.assertEqual(config.validate(), [])
+        self.assertEqual(config.validate_tokens(), (True, []))
 
     def test_from_yaml_preserves_environment_and_explicit_false_zero_values(self):
         data = {

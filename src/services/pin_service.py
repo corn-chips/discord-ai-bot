@@ -225,7 +225,8 @@ class PinService:
         # _sanitise_pin_content anyway, and the pins this migration exists to
         # move are precisely the ones created before any length cap existed:
         # on 2,000 x 100 KB legacy pins, an unbounded fetchall costs +194 MB
-        # inside DiscordBot.__init__ against +11 MB with the substr.
+        # inside DiscordBot.__init__ against 7.8 MB with the substr (re-measured at
+        # 083ebea; this comment and ANALYSIS_CORRECTIONS item 22 both said +11 MB).
         #
         # ORDER BY id, not pinned_at. `pinned_at` is TEXT and carries two
         # formats -- add_pin's isoformat "T" separator and the column default's

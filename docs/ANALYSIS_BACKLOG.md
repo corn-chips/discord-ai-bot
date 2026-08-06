@@ -21,7 +21,8 @@ The six open tickets are DAB-027, DAB-028, DAB-032, DAB-096, DAB-106 and DAB-180
 partial — DAB-029, DAB-042, DAB-073, DAB-087, DAB-095 and DAB-198 — and DAB-212 is refuted.
 Everything else in Tiers 0-2 is closed, deferred with a measurement, or refuted. See [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for
 the programme that closed them, and the "Post-programme findings" section at the foot of this
-document for the nineteen post-programme findings, `PPR-01` to `PPR-19`.
+document for the twenty-one post-programme findings, `PPR-01` to `PPR-21`, and for the still-open
+code findings the round 2 reviews produced.
 
 ### What this is
 
@@ -89,7 +90,9 @@ loop**.
 
 ## TIER 0 — DO FIRST
 
-High impact, cheap, and mostly independent. This tier contains all nine recalibrated S1 defects
+High impact, cheap, and mostly independent. This tier contains seven of the nine recalibrated S1
+defects (DAB-002 is Tier 1 and DAB-019 is Tier 1; see the S1 table in
+[`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for all nine). It contains the S1 defects
 plus every quick win whose payoff was measured on a prototype. Fourteen of the twenty are XS or S.
 
 | # | ID(s) | Title | Type | Severity / payoff | Effort | Score | Depends on | Ticket |
@@ -192,6 +195,8 @@ here.
 | DAB-048 | Thinking tokens never billed: `thoughts_token_count` never read | cost |
 | DAB-049 | Token usage attached only to successful responses | cost |
 | DAB-050 | Router / selector / embedding call sites entirely unaccounted | cost |
+<!-- Row order note: DAB-052, DAB-143 and DAB-144 sit below out of numeric order, grouped with the
+     rows they were landed beside rather than sorted. Search by ID, not by position. -->
 | DAB-069 | Lost update on `hidden`: `/hide` racing a re-index re-exposes hidden content | rag |
 | DAB-070 | `store_embedding` accepts a wrong-width vector, marks it `done`, drops it at search | rag |
 | DAB-071 | No FTS rebuild path; FTS drifts out of sync with `message_index` | rag |
@@ -334,19 +339,22 @@ should not exist and bound what is unbounded.
 
 ## DEPENDENCY GRAPH
 
-> **Mostly discharged as of 2026-07-31.** Of the roots and edges below, only these still bind:
-> `DAB-204 --> DAB-042` (the obstructing test is still in place), `DAB-077 --> DAB-087` (the
-> fingerprint DAB-087 must bump does not exist yet, because DAB-077 was not taken), and
-> `DAB-027 --> DAB-028`. `DAB-083 --> DAB-077` and `DAB-095 --> DAB-065` are discharged — both
-> prerequisites landed. `DAB-203 -?> DAB-141` was refuted and DAB-141 landed without it.
-> The remaining open tickets — DAB-029, DAB-032, DAB-096, DAB-106, DAB-180, DAB-203 — have no
+> **Almost entirely discharged as of 2026-08-05.** Of the roots and edges below, only
+> `DAB-027 --> DAB-028` still binds. `DAB-204 --> DAB-042` is discharged — the obstructing test
+> was replaced in `9e9db61`. `DAB-077 --> DAB-087` is discharged — the fingerprint exists
+> (`f96717a`) and DAB-087's lexical half has landed. `DAB-083 --> DAB-077` and
+> `DAB-095 --> DAB-065` are discharged; `DAB-203 -?> DAB-141` was refuted and DAB-141 landed
+> without it. (This banner claimed the first two still bound while the graph body 30 lines below
+> already recorded both as DISCHARGED.)
+> The remaining open tickets — DAB-032, DAB-096, DAB-106, DAB-180 — have no
 > live inbound edge and can start today.
 
 Read `A --> B` as "A must land before B". Items with no inbound edge are independent and can start
 immediately.
 
 ```
-INDEPENDENT ROOTS (start any of these today; DAB-157 is DONE -- landed as b5851ab,
+INDEPENDENT ROOTS (start any of these today; DAB-157 is DONE -- landed as f0938a8,
+                   which is b5851ab rewritten by the path scrub and is the hash in this history;
                    guarded by tests/test_repo_hygiene.py)
   DAB-041   DAB-001   DAB-114   DAB-039   DAB-157   DAB-197   DAB-115
   DAB-019   DAB-212   DAB-078   DAB-165   DAB-166   DAB-203   DAB-204
@@ -417,10 +425,13 @@ VECTOR CHAIN
 
 ### Cross-cutting hazards recorded on the graph
 
-- **`tests/test_command_registration.py` is a chokepoint.** Its `EXPECTED_SIGNATURE` (`:26`), the
-  `== 22` (`:147`) and `== 35` (`:148`) literals, the `[5:10]` slice (**`:323`**, was `:239` when
-  this was written) and the "`/rag delete` has no checks" assertion each break independently. Five
-  tickets touch it. `DAB-203` exists to make that stop, and is still open.
+- **`tests/test_command_registration.py` was a chokepoint; `DAB-203` closed it** (`6b735fa`). The
+  `== 22` literal and the `[5:10]` positional slice are gone, replaced by `EXPECTED_TOP_LEVEL_ORDER`
+  (22 names) and `EXPECTED_TOP_LEVEL_ORDER_WITH_IMAGES` (24). What survives is
+  `EXPECTED_SIGNATURE` and `len(EXPECTED_SIGNATURE) == 35` at `:183`. Adding a command still
+  touches at least two of the three lists — that is the point — but a failure now names what
+  moved instead of shifting an index. Ten places in this document set still tell you to look for
+  the `[5:10]` slice; they are wrong.
 - **`docs/DEEP_BUG_HUNT_REPORT.md` has been deleted** (`DAB-210`); it cited a build (`8bc80f9`)
   that is not in this history, and `BUG_ANALYSIS_2026-07-29.md` §8.1/§8.2 carry both the reason
   and the true status of its five bugs. `docs/tech-debt-register.md` was re-assessed on 2026-07-31 and its TD-009 to TD-019
@@ -444,8 +455,11 @@ repository was pushed. **None of these existed in the 211-finding register**, so
 `PPR-` prefix rather than a `DAB-` number: the master register lives outside this repository and
 cannot be extended from here.
 
-Every figure below was measured on 2026-07-31 at `922e899` with `.venv/bin/python` (CPython
-3.12.13), on this machine. **Nothing here has been fixed** — this section is a record.
+Every figure in `PPR-01` to `PPR-10` was measured on 2026-07-31 at `922e899` with
+`.venv/bin/python` (CPython 3.12.13), on this machine; `PPR-11` onwards were measured later in
+round 2 at the commit each names. **Nine of the nineteen have since been fixed** and say so in
+their headings (PPR-02, 04, 05, 06, 07, 08, 09, 11, 19). The rest are a record. This paragraph
+read "Nothing here has been fixed" while eight CLOSED headings sat below it.
 
 ### PPR-01 (S3) — DAB-078's stated justification is false; three call paths lost their index
 
@@ -727,7 +741,11 @@ count.
 
 </details>
 
-### PPR-07 (S3) — `/clear-cache` is administrator-gated in guilds and ungated in DMs
+### PPR-07 (S3) — `/clear-cache` is administrator-gated in guilds and ungated in DMs — **CLOSED, round 2 Phase 2 (`7da959d`)**
+
+**Closed.** `/clear-cache` now carries `guild_only()` alongside its `administrator` payload
+permission, plus a runtime check in the body (`configuration.py:390-405`) — the same pair `/dev`
+got in `d4b91a5`. The finding as written below is the pre-fix state.
 
 Measured from the serialized payload: `/clear-cache` has `default_member_permissions = 8`
 (administrator) and `dm_permission = true`, no `guild_only()`, no `checks`, and no runtime
@@ -741,7 +759,11 @@ with the bot could DM /dev and flip the flag"). `/dev` got `guild_only()` **and*
 `/clear-cache`, two commands above it in the same file, got neither. Impact is low — a cache
 clear, not a state mutation — which is why it is S3 and not S2.
 
-### PPR-08 (S3) — `/live` is completely ungated, and is the largest remaining spend lever
+### PPR-08 (S3) — `/live` is completely ungated, and is the largest remaining spend lever — **CLOSED, round 2 Phase 2 (`7da959d`)**
+
+**Closed.** `/live` now requires `manage_channels`, is `guild_only`, and re-checks at runtime
+(`personalization.py:219-245`). The spend argument below is why it was worth doing, and it stands
+as the reason to keep the gate; the "completely ungated" state it describes is the pre-fix one.
 
 `/live` (`personalization.py:90-125`) has no payload permission, no `guild_only`, no runtime
 check and no cooldown. Any member can switch a channel into mention-free live mode, after which
@@ -782,8 +804,9 @@ unfixed remainder rather than as a new defect.
 
 ### PPR-10 — residual risks confirmed still open
 
-Verified at `922e899` and unchanged by the programme. Listed together because a public push is
-the moment they matter.
+Listed together because a public push is the moment they matter. **Four of the five bullets below
+are now struck through and closed**; this line read "Verified at `922e899` and unchanged by the
+programme" while sitting directly above them.
 
 - ~~**DAB-143 / DAB-144 — the report web server.**~~ **Closed in round 2 Phase 2.3.** The socket
   refuses any bind whose *actually bound* addresses are not all loopback, the URL reports the
@@ -918,7 +941,8 @@ bot do the work anyway. The `Host` allowlist does not see it, because the `Host`
 `127.0.0.1`. Recorded rather than fixed: `Sec-Fetch-Site: cross-site` would identify it, but that
 header can only ever be used to reject and never to allow, and a second, weaker guard beside the
 one that already protects every state change is not a trade worth making for a request that
-changes nothing. Same event-loop-blocking class as DAB-178, which already covers the synchronous
+changes nothing. Same event-loop-blocking class as DAB-178 — which has **no row in this register**; it exists only
+at `BUG_ANALYSIS_2026-07-29.md:1292` and has no ticket. It covers the synchronous
 SQLite in these two handlers.
 
 ### PPR-14 (S4) — three of the four request configs send no safety settings at all
@@ -1057,3 +1081,112 @@ docstring described the refusal as absolute; it now states the window.
 
 `M-RWS01` through `M-RWS07` pin all seven decisions. The remaining 29 findings from that pile are
 documentation and are Phase 6's.
+
+### PPR-20 (S3) — the DAB-073 retrieval floor makes a paid rerank reachable whose output is then discarded
+
+Found in Phase 6 while reconciling `DAB-073`'s Status header, and measured at `083ebea`.
+
+`available_retrieval_slots` (`context_pack_builder.py`) carries a floor of
+`MIN_RETRIEVAL_SLOTS = 2`, which is the DAB-073 fix and is correct: it stops the index going
+unsearched. But `hybrid_context_retriever.py:592` gates the reranker on the same number
+(`if available_slots <= 0: reranker_reason = "no_available_slots"`), and `build_context_pack`
+does **not** use it — it re-derives pin priority from scratch.
+
+Measured with 20 pins at `max_messages=8`:
+
+```
+available_retrieval_slots     = 2      (0 before DAB-073)
+build_context_pack            = 8 items, 0 of them non-pin
+```
+
+So before DAB-073 the `<= 0` gate held and no rerank was possible at that shape. After it, the
+gate is open, and an `ambiguous_boundary` verdict can reach `select_relevant_context` at `:609` —
+a billed Gemini call — whose entire output is then dropped by the packer. This is the DAB-001
+shape: paid work performed and discarded, introduced by a fix, and reachable only in the
+configuration the fix exists to serve.
+
+Not fixed here; Phase 6 is documentation. The cheap repair is to gate the reranker on what
+`build_context_pack` will actually accept rather than on the pre-retrieval budget, which also
+makes `DAB-073`'s acceptance criterion 2 meaningful. Note that
+[`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 7 argues the packing arithmetic was
+never the defect — that argument is about *starvation*, and does not cover spending money on a
+result that is thrown away.
+
+### PPR-21 (S3) — nothing bounds the rendered megapixels between the PDF renderer and the paid request
+
+`DAB-198`'s clamp is **per page**. Measured at `083ebea` on that ticket's own 3,630-byte,
+20-page fixture: 792 MP and 2.2 GB of `PIL.Image` retained in the returned list, at 3.3 GB peak
+RSS, all of which is handed onward. `grep -n "thumbnail\|resize\|LANCZOS"` over
+`gemini_client.py`, `image_utils.py` and `media_extraction.py` returns nothing, so there is no
+downscale between the renderer and the request. This is merged ID `C4-15`'s "billed enormously",
+and it is the live half of DAB-198 — see that ticket's Status line for the four acceptance
+criteria (total-megapixel budget, `asyncio.wait_for`, failure-streak `break`, `attachment.size`
+gate) that would each close part of it.
+
+---
+
+## STILL-OPEN CODE FINDINGS FROM THE ROUND 2 REVIEWS (recorded 2026-08-05, not fixed)
+
+The round 2 phase reviews produced findings that were never given a `PPR-` number because they
+are small. They are recorded here because the reviews themselves are working notes that live
+**outside the checkout** and will not survive; a finding that exists only in a scratch file is a
+finding that will be rediscovered from zero. Each was re-verified at `083ebea` — several items
+from the same reviews have since closed in code and are not listed.
+
+None of these is scheduled. They are S4 unless marked.
+
+**`src/services/report_web_server.py`**
+
+- The loopback refusal is not atomic for a host *name*: `site.start()` binds before the post-bind
+  check runs. Documented in the class docstring since `083ebea`; the window is still real.
+- `_hostname_of` does not strip a trailing dot; `_is_own_host` does. A second caller has to
+  remember.
+- The `not bound` half of `if not bound or exposed:` has no test and no isolating mutant —
+  `M-DAB143`/`M-DAB143B` delete the whole block and are killed through `exposed`.
+- The three-state "Report Web UI" status line in `on_ready` and the identical branch in
+  `get_status` have no test and no mutant, while `DAB-144`'s row cites the status line as part of
+  what it delivered.
+
+**`tests/`**
+
+- `tests/test_report_web_server.py` binds `0.0.0.0` — every interface — for the duration of one
+  refusal check, on **every** run of the suite. Harmless on a laptop; worth knowing on a shared
+  box. It is the one item here that changes what running the gate does.
+- `_free_port()` is a TOCTOU window another process can win: a second flake source beside the one
+  already recorded at `test_rag_optimization.py:94`.
+- Two `asyncTearDown` loops stop servers without a `try`, so one `stop()` raising skips the rest.
+- Nothing pins the migrated `pinned_at`, which decides `get_pins` order; nothing asserts the
+  positive INFO record on the `on_ready` skip path.
+- `tests/test_safety_thresholds.py`: the module docstring does not separate the four
+  "a correct config still works" guards from the defect guards, and
+  `test_the_fallback_is_the_strictest_threshold_the_sdk_offers` asserts a literal rather than the
+  property its name promises (the SDK exposes no ordering, so the literal is the best available —
+  the objection is the name). No test pins the position of the safety errors in the ordered list.
+
+**`scripts/mutants.toml` / `scripts/mutation_check.py`**
+
+- `M-DAB144B` is killed by a crash, not by the bracketing property; nothing mutates `_format_url`
+  to stop bracketing.
+- `M-PPR11C`'s replacement leaves `hostname` computed and unused.
+- `M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
+  one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.
+- `M-DAB052B`'s second killer is the literal-equality test above — noise, same root.
+- The harness's own wrong-guard reporting is `PPR-17`.
+
+**`src/config_helpers.py` / `src/services/gemini_client.py`**
+
+- The four `safety_*` parse defaults have no test and no mutant, and nothing runs the shipped
+  `config.yaml` through `validate_config`.
+- The parser stores the raw string, so `canonical_safety_threshold` runs once at validation and
+  again per category per request; every future consumer must remember to call it.
+- `canonical_safety_threshold` lives in a module whose docstring scopes it to `src.config`, and a
+  service imports it. Moving it to `src/constants.py` is mildly off too, against that file's
+  "immutable data definitions" charter.
+- `config.yaml` advertises `HARM_BLOCK_THRESHOLD_UNSPECIFIED` as an operator choice; it is the
+  proto zero-value sentinel, not a policy.
+
+**`src/services/pin_service.py`**
+
+- An **empty** legacy `pinned_messages` table still burns the one-shot ledger. An *absent* one
+  correctly does not, and `DAB-068`'s write-up says so — but it does not say the empty case
+  differs, and the distinction is the whole of DAB-068.

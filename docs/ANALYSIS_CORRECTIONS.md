@@ -782,7 +782,9 @@ Two errors in the same finding, both settled by running the SDK and grepping the
 `IMPROVEMENT_ANALYSIS_2026-07-29.md:2210` gives the permitted set as
 `{BLOCK_NONE, BLOCK_LOW_AND_ABOVE, BLOCK_MEDIUM_AND_ABOVE, BLOCK_HIGH_AND_ABOVE, BLOCK_ONLY_HIGH, OFF}`
 and prescribes validating against it. Five of those six are right. `BLOCK_HIGH_AND_ABOVE` is not a
-member of `types.HarmBlockThreshold` and never has been -- it was invented by this repo's own
+member of `types.HarmBlockThreshold`. "And never has been" is **not verified**: only
+google-genai 2.11.0 is installed here and there is no network, so only the present tense was
+checked. The circumstantial evidence is that it was invented by this repo's own
 lookup table -- and the set omits `HARM_BLOCK_THRESHOLD_UNSPECIFIED`, which is. Executed against
 google-genai 2.11.0:
 
@@ -851,7 +853,7 @@ source comment or a document it was fixed in place.
 | that guard's band | "holds **nine**" | **18** | Nine is the count at 25 pins alone; the sweep covers 25 **and** 26 |
 | clear-and-rebuild damage | "22 commands to **6**" | **5** | 6 is `register_admin_commands`; 5 is `register_feature_commands`, which is the registrar the test beside that comment actually patches |
 | the reconnect sync payload | "**8,695** bytes" | **8,048** | 8,695 is `json.dumps` with default separators; discord.py serialises compact. (`json.dumps` defaults give 8,713 here, so even the loose reading does not match) |
-| unbounded `fetchall` | "**+192 MB** against +11 MB" | **+194 MB** against +11 MB | Within noise across three runs (191, 192, 194) — the claim stands, the number is restated |
+| unbounded `fetchall` | "**+192 MB** against +11 MB" | **+194 MB** against **7.8 MB** | The first half is within noise across three runs (191, 192, 194) and the claim stands. The second half was carried through uncorrected by this very item and is wrong: re-measured at `083ebea`, 2,000 rows through `substr(content,1,4001)` peaks at **7.8 MB**, which is what 2,000 x 4,001 bytes has to cost. The source comment at `pin_service.py:228` said +11 MB too and is corrected. |
 | the pre-fix pin fixture | "61 rows, **300,871** characters, a 5,014-character pin" | reproduces **only with the fixture stated** | 61 pins of `"legacy pin {i} " + "y"*5000` plus one delimiter pin. A re-creation using plain 5,000-character pins gives 300,059. The fixture is not in the tree, so the figure needs it quoted |
 
 **The lesson is discipline 5 applied to a figure rather than to a payoff.** Every one of the seven

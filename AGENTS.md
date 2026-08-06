@@ -258,7 +258,9 @@ something that is already fixed.
  Read it before acting on any ticket.
 - `docs/ANALYSIS_BACKLOG.md`: the prioritized worklist, tiers 0-3, derived from a 211-finding
  register, each row reconciled against the landed commits. Also carries the nineteen
- post-programme findings, `PPR-01` to `PPR-19`; nine are closed, the rest are recorded, not fixed.
+ post-programme findings, `PPR-01` to `PPR-21`; nine are closed, the rest are recorded, not fixed.
+ Its foot also records the still-open code findings the round 2 reviews produced, because those
+ reviews are working notes that live outside the checkout.
 - `docs/analysis-tickets/`: 37 files, one per actionable finding, each with file:line evidence,
  a reproduction, acceptance criteria, and the regression test to add. Every one now opens with a
  `**Status:**` line — 24 LANDED, 6 PARTIAL, 1 REFUTED, 6 OPEN. Read the Status line before the

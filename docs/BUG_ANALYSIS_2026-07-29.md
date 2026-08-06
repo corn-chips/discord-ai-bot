@@ -1284,7 +1284,7 @@ I cold start/ops, J dead code, K performance, L adversarial input, M tests/histo
 | M | **DAB-203** | `test_command_registration.py` pins the DEGRADED (22-command) tree, not the production one, so `/edit-image` and `/image-queue` are invisible to reference-counting AND to the suite | `tests/test_command_registration.py:147` |
 | M | **DAB-205** | BUG-0002 has no end-to-end guard: reinstating the buggy assignment leaves all 125 tests green | `tests/test_bug_regressions.py:37` |
 | M | **DAB-209** | `test_live_batch_rate_limits_each_participating_user` PINS message-dropping for rate-limited users - decide whether that is intended | `tests/test_bug_regressions.py:208` |
-| M | **DAB-210** | `docs/DEEP_BUG_HUNT_REPORT.md` is self-refuting: build `8bc80f9` never existed, the report shipped in the same commit as all five fixes, every Status field was stale on arrival | `docs/DEEP_BUG_HUNT_REPORT.md` |
+| M | **DAB-210** | **CLOSED (round 2 Phase 6) — the file was deleted.** `docs/DEEP_BUG_HUNT_REPORT.md` was self-refuting: build `8bc80f9` never existed, the report shipped in the same commit as all five fixes, every Status field was stale on arrival | (deleted; §8.1 and §8.2 below) |
 | M | **DAB-211** | `docs/tech-debt-register.md`: 6 of 8 evidence rows HOLD, 2 DRIFTED, TD-004's evidence is FALSE, and the "no cross-file duplicate blocks" scan note is FALSE (26 windows at HEAD) | `docs/tech-debt-register.md` |
 
 ### S4 (43)
@@ -1418,6 +1418,10 @@ copy*, and the regression tests were re-run there). Both are misleading in ways 
 
 ### 8.1 `docs/DEEP_BUG_HUNT_REPORT.md` is self-refuting
 
+> The file was **deleted** in round 2 Phase 6 on the strength of this section; see the
+> disposition note at the end of §8.3. Everything below was measured while it was still in the
+> tree, and `git show 88e330b:DEEP_BUG_HUNT_REPORT.md` still reproduces it.
+
 **The build identifier does not exist.** `git cat-file -t 8bc80f9` → *not a valid object name*.
 No match across all 824 objects in the repository (commits, trees and blobs); 69 commits scanned
 across all branches; `git fsck --lost-found` empty. The code the report describes —
@@ -1499,12 +1503,21 @@ two false statements (`DAB-211`, S3):
 | Scan notes: module and function size | DRIFTED | 16 of 51 modules over 500 lines → **17**; 94 functions over 50 lines → **101**. |
 | Header date | Wrong | Dated 2026-07-12; the resolution content is from `5e45599` (2026-07-13). |
 
-**Recommended disposition.** Move `docs/DEEP_BUG_HUNT_REPORT.md` to `docs/archive/` with a banner:
-its build id is fictitious, every status field is wrong, and it shipped in the same commit as its
-own fixes. Carry forward only BUG-0003's root-cause analysis and BUG-0001's "outer budget that
-includes every attempt" recommendation, which `DAB-042` now needs. Correct
-`docs/tech-debt-register.md` in place: the date, TD-001's numbers, TD-003's counts, TD-004's
-evidence (retract), the two size heuristics, and the duplicate-block scan note (retract).
+**Recommended disposition — superseded by what was done, round 2 Phase 6.** This paragraph
+recommended moving `docs/DEEP_BUG_HUNT_REPORT.md` to `docs/archive/` with a banner. It was
+**deleted** instead. The banner was tried first and failed on its own terms: the SUPERSEDED
+banner added to the file went stale in turn and ended up asserting a current gate of "140 tests
+in 15 files" against a suite of 394 in 37 — a correction that needed correcting. Git history is
+a complete archive; `git show 88e330b:DEEP_BUG_HUNT_REPORT.md` returns the file in full.
+
+Both carry-forwards this paragraph names survive the deletion, which is what made it safe.
+BUG-0003's root-cause analysis is in §8.2 above and in `AGENTS.md`, re-measured at `083ebea`: a
+6,918-char fenced response still splits into 4 pages, every one `hard_split=True`. BUG-0001's
+"outer budget that includes every attempt" is in `analysis-tickets/DAB-042.md:22`, which also
+records where the budget must go — `GeminiClient._run_response_attempts`, not
+`response_generation.py`, or DAB-042 and DAB-204 contradict each other.
+
+The `docs/tech-debt-register.md` corrections listed here were applied on 2026-07-31.
 
 ---
 

@@ -265,7 +265,7 @@ something that is already fixed.
  body: the bodies were never rewritten, and on **12** of the 37 the fix landed by a route the
  body does not describe, or was refuted outright.
 - `docs/BUG_ANALYSIS_2026-07-29.md`: correctness findings with reproductions and current status.
- Supersedes `DEEP_BUG_HUNT_REPORT.md`.
+ Supersedes the deleted `DEEP_BUG_HUNT_REPORT.md`.
 - `docs/IMPROVEMENT_ANALYSIS_2026-07-29.md`: architecture, data layer, performance, cost
  accounting, config, and testing/DX, with measured before/after figures.
 
@@ -291,41 +291,23 @@ citations in *this* file were re-measured at `922e899` and are current.
 
 - `docs/README.md` is the index for `docs/`; it marks every file CURRENT, HISTORICAL, or
  SUPERSEDED. Check it before quoting any figure out of that directory.
-- `docs/DEEP_BUG_HUNT_REPORT.md` marks BUG-0001 to BUG-0005 "Open" against build `8bc80f9`,
- which is not in this history (`git cat-file -t 8bc80f9` fails). It now carries a SUPERSEDED
- banner; the body is unedited. All five do have regression tests in
- `tests/test_bug_regressions.py`, but "has a regression test" is not "fixed and guarded":
- - **BUG-0003 is only partially fixed.** Overflow is closed: the guard at
-   `message_splitter.py:125-133` falls back to `_hard_split_parts` (`:138-166`), so no page
-   exceeds the limit. The root cause is untouched and fence preservation is now effectively
-   dead. A 6,076-char fenced-code response splits into 4 pages, every one `hard_split=True`,
-   cutting mid-token, page 1 left with an unterminated fence and the last page an orphan
-   close.
-  - **BUG-0002's original regression test did not reach the buggy site — now closed.**
-   `test_request_model_precedence` (`test_bug_regressions.py:45`) unit-tests
-   `_resolve_request_preferences` in isolation, so reinstating `model_override = routed_model`
-   after `discord_bot.py:904` left all 125 tests green. `4fc5063` added
-   `tests/test_on_message_flow.py`, whose
-   `test_router_complexity_never_hardens_into_a_model_override` asserts the contract at the
-   caller. `python scripts/mutation_check.py M-BUG0002` now reports KILLED; the full run is
-   56/56.
-  - **BUG-0005's obstructing test is fixed (DAB-204, round 2 Phase 0).** It was
-   `test_main_response_path_does_not_wrap_client_retry_timeout`, which patched
-   `src.bot.discord_bot.asyncio.wait_for` with an `AssertionError` side effect. That attribute
-   is the singleton `asyncio` module, so the patch was global and failed *any* whole-sequence
-   deadline, correct ones included. There was a **second** copy of the same patch at
-   `tests/test_response_generation.py:107-110` that neither DAB-204 nor DAB-042 mentioned.
-   Both are gone, replaced by `test_main_response_path_preserves_the_full_client_retry_budget`,
-   which patches the module's `asyncio` *binding* with a recorder and asserts that no deadline
-   is shorter than `per_attempt x (max_retries + 1)`. DAB-042 is unblocked; put the budget
-   inside `GeminiClient._run_response_attempts`, not in `response_generation.py`, or the two
-   tickets' acceptance criteria contradict each other.
-
- Current status of all five: `docs/BUG_ANALYSIS_2026-07-29.md`.
-
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
  (273 stdlib `unittest` tests across 26 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
+- `docs/DEEP_BUG_HUNT_REPORT.md` **no longer exists.** It was deleted, not archived: it marked
+ BUG-0001 to BUG-0005 "Open" against a build id that is not in this history, and it shipped in
+ the same commit as the fixes for all five. `docs/BUG_ANALYSIS_2026-07-29.md` §8.1 records why
+ it was self-refuting and §8.2 carries the true status of all five bugs. Git history is the
+ archive.
+
+
+**BUG-0003 is only partially fixed, and this one is live.** Overflow is closed: the guard at
+`message_splitter.py:125-133` falls back to `_hard_split_parts` (`:138-166`), so no page exceeds
+the limit. The root cause is untouched, and fence preservation is now effectively dead — a
+6,918-char fenced-code response splits into 4 pages, every one `hard_split=True`, cutting
+mid-token, page 1 left with an unterminated fence and the last page an orphan close (re-measured
+at `083ebea`; the figure was 6,076 chars on the original fixture). Do not read "has a regression
+test in `tests/test_bug_regressions.py`" as "fixed and guarded". Root cause: `DAB-207`.
 
 
 ## Security

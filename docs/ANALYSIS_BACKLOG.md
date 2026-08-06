@@ -419,8 +419,9 @@ VECTOR CHAIN
   `== 22` (`:147`) and `== 35` (`:148`) literals, the `[5:10]` slice (**`:323`**, was `:239` when
   this was written) and the "`/rag delete` has no checks" assertion each break independently. Five
   tickets touch it. `DAB-203` exists to make that stop, and is still open.
-- **`docs/DEEP_BUG_HUNT_REPORT.md` is stale**; it cites a build (`8bc80f9`) that is not in this
-  history. `docs/tech-debt-register.md` was re-assessed on 2026-07-31 and its TD-009 to TD-019
+- **`docs/DEEP_BUG_HUNT_REPORT.md` has been deleted** (`DAB-210`); it cited a build (`8bc80f9`)
+  that is not in this history, and `BUG_ANALYSIS_2026-07-29.md` §8.1/§8.2 carry both the reason
+  and the true status of its five bugs. `docs/tech-debt-register.md` was re-assessed on 2026-07-31 and its TD-009 to TD-019
   rows now carry measured verdicts, so it is usable again — but read the bracketed 2026-07-31
   note on a row, not just its description, because two descriptions (TD-012, TD-017) are
   substantially false at HEAD and are corrected only in the note.

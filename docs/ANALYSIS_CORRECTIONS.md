@@ -12,7 +12,8 @@ document, that was fixed in place.
 
 **A note on commit hashes.** This history was rewritten once, to scrub absolute paths. Hashes
 quoted inside commit messages written before that rewrite may name objects that are no longer
-reachable from `dev` — the same failure mode `docs/DEEP_BUG_HUNT_REPORT.md` is superseded for.
+reachable from `dev` — the same failure mode that got `docs/DEEP_BUG_HUNT_REPORT.md` deleted (it
+cited a build id no object in this history matches; see `BUG_ANALYSIS_2026-07-29.md` §8.1).
 Check with `git merge-base --is-ancestor <sha> HEAD` before trusting a hash you find in a message.
 
 ## What this is

@@ -1152,9 +1152,15 @@ None of these is scheduled. They are S4 unless marked.
   reports no addresses for a real socket, and `M-DAB143G` (`if exposed:`) is killed by that test
   alone. It dies as an `IndexError` on `bound[0][1]` rather than as a quiet wrong answer, which is
   what dropping the half actually does — the mutant row says so.
-- The three-state "Report Web UI" status line in `on_ready` and the identical branch in
-  `get_status` have no test and no mutant, while `DAB-144`'s row cites the status line as part of
-  what it delivered.
+- ~~The three-state "Report Web UI" status line in `on_ready` and the identical branch in
+  `get_status` have no test and no mutant.~~ **Closed 2026-08-06 by covering it, not by correcting
+  the row.** `2107aa5` called the line "a log string and deliberately not asserted anywhere", and
+  that is the wrong side of the trade: the same commit made the third state *the answer* to the
+  audit's objection that a refusal "degrades to a log line", so the wording is the deliverable
+  rather than incidental output. `ReportWebStatusTest` in `tests/test_startup_integrity.py` drives
+  the real `on_ready` through all three states, each from its real cause, and asserts both the line
+  and `get_service_health_status`. `M-DAB144D` restores the two-state line verbatim; `M-DAB144E`
+  collapses the `/config` branch.
 
 **`tests/`**
 
@@ -1179,8 +1185,10 @@ None of these is scheduled. They are S4 unless marked.
 
 **`scripts/mutants.toml` / `scripts/mutation_check.py`**
 
-- `M-DAB144B` is killed by a crash, not by the bracketing property; nothing mutates `_format_url`
-  to stop bracketing.
+- ~~`M-DAB144B` is killed by a crash, not by the bracketing property; nothing mutates `_format_url`
+  to stop bracketing.~~ **Closed 2026-08-06.** `M-DAB144C` does, and its guard now fetches `.url`
+  before comparing it: unbracketed, aiohttp rejects `http://::1:8080/` outright, so the property is
+  "the operator can open what they are told to open" rather than "the string matches".
 - `M-PPR11C`'s replacement leaves `hostname` computed and unused.
 - `M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
   one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.

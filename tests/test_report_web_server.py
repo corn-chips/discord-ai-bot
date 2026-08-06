@@ -350,6 +350,14 @@ class ReportWebServerUrlTest(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertTrue(server.is_running)
             bound_port = server.bound_addresses[0][1]
+            # Surviving the crash is not the whole property: an IPv6 URL
+            # without brackets is not a URL. `.url` is the string the operator
+            # is told to open, so open it -- unbracketed, aiohttp rejects it
+            # outright (`InvalidUrlClientError`, measured), which is what
+            # M-DAB144C reintroduces.
+            async with aiohttp.ClientSession() as session:
+                async with session.get(server.url) as response:
+                    self.assertEqual(response.status, 200)
             self.assertEqual(server.url, f"http://[::1]:{bound_port}/")
         finally:
             await server.stop()

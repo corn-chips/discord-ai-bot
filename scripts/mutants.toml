@@ -871,6 +871,53 @@ find = "        bound = [(str(address[0]), int(address[1])) for address in runne
 replace = "        bound = [(str(host), int(port)) for host, port in runner.addresses]\n"
 
 [[mutant]]
+id = "M-DAB144C"
+bug = "DAB-144"
+# The bracketing itself. M-DAB144B is the crash -- unpacking a 4-tuple -- and
+# it is killed by the ValueError, so nothing was left asserting the property
+# that survives it: an IPv6 URL without brackets is not a URL. `http://::1:8080/`
+# has no host aiohttp can resolve, which is what the guard proves by fetching
+# the string this returns rather than only comparing it.
+summary = "Render an IPv6 address without brackets, producing an unusable URL"
+guard = "test_an_ipv6_address_is_bracketed_rather_than_crashing"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    return f\"http://[{host}]:{port}/\" if bracket else f\"http://{host}:{port}/\"\n"
+replace = "    return f\"http://{host}:{port}/\"\n"
+
+[[mutant]]
+id = "M-DAB144D"
+bug = "DAB-144"
+# The two-state status line exactly as it stood before DAB-144. A loopback
+# refusal -- which the operator did not ask for and has to act on -- rendered
+# in the same word as "you switched this off". The third state is the whole of
+# the answer to the audit's objection that a check inside start() degrades to a
+# log line.
+summary = "Report a refused report web UI as Disabled, as though it were switched off"
+guard = "test_a_refused_bind_is_reported_as_unavailable_not_disabled"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if self.report_web_server and self.report_web_server.is_running:\n            report_web_state = \"Active\"\n        elif self.config.report_web_enabled:\n            report_web_state = \"Unavailable\"\n        else:\n            report_web_state = \"Disabled\"\n        logger.info(\"  - Report Web UI: %s\", report_web_state)\n"
+replace = "        logger.info(\n            \"  - Report Web UI: %s\",\n            \"Active\" if self.report_web_server and self.report_web_server.is_running else \"Disabled\",\n        )\n"
+
+[[mutant]]
+id = "M-DAB144E"
+bug = "DAB-144"
+# The same collapse in get_service_health_status, which is the branch an
+# operator reaches through /config rather than through the boot log. It was
+# already three-state when DAB-144 landed -- on_ready was made to match it --
+# so nothing in the tree pinned it either way.
+summary = "Collapse the /config report web UI health to two states"
+guard = "test_a_refused_bind_is_reported_as_unavailable_not_disabled"
+file = "src/bot/discord_bot.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if self.report_web_server and self.report_web_server.is_running:\n            status['report_web_ui'] = \"Available\"\n        elif self.config.report_web_enabled:\n            status['report_web_ui'] = \"Unavailable\"\n        else:\n            status['report_web_ui'] = \"Disabled\"\n"
+replace = "        status['report_web_ui'] = (\n            \"Available\"\n            if self.report_web_server and self.report_web_server.is_running\n            else \"Disabled\"\n        )\n"
+
+[[mutant]]
 id = "M-PPR11"
 bug = "PPR-11"
 # The shipped state before this landed: `_update_status` reads a

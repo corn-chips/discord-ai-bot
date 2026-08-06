@@ -23,8 +23,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, patch
 
+import aiohttp
+
 from src.bot.discord_bot import DiscordBot
 from src.config import BotConfig
+from src.services.report_service import ReportService
+from src.services.report_web_server import ReportWebServer
 
 
 def make_config(tmp):
@@ -311,6 +315,91 @@ class OnReadyReentryTest(OnReadyHarness):
             len(self._critical(second)), 2,
             "an incomplete tree went quiet on reconnect",
         )
+
+
+class ReportWebStatusTest(OnReadyHarness):
+    """DAB-144: a refusal must not read as an operator having switched it off.
+
+    `on_ready`'s line used to be two-state, `Active` or `Disabled`, so a
+    loopback refusal -- a security decision the operator did not make and does
+    need to act on -- was rendered in the same word as "you turned this off".
+    The three-state wording is the whole of the answer to the audit's objection
+    that a check inside `start()` "degrades to a log line": it does, so the log
+    line has to say which of the three things happened.
+    `get_service_health_status` carries the identical branch and reaches an
+    operator through /config.
+
+    It went untested on the grounds that it is only a log string. It is also
+    the only signal the operator gets, and each of the three states below is
+    produced by its real cause: a server that starts and serves, a server that
+    refuses 0.0.0.0, and the feature switched off.
+    """
+
+    def _web_server(self, host):
+        service = ReportService(str(Path(self._dir.name) / "reports.db"))
+        # Port 0: the harness nulls the bot's own server precisely because the
+        # configured 8080 would be held for the rest of the suite.
+        server = ReportWebServer(service, host=host, port=0)
+        self.bot.report_web_server = server
+        self.addAsyncCleanup(server.stop)
+        return server
+
+    async def _on_ready_status(self):
+        """`on_ready`'s rendered log records, and the /config health mapping.
+
+        Captured at `src` rather than at `src.bot.discord_bot`, because the
+        pair the operator reads is split across two of them: the status line is
+        the bot's, and the refusal that explains it is the web server's.
+        """
+
+        with self.assertLogs("src", "INFO") as captured, patch(
+            "src.bot.discord_bot.setup_commands", AsyncMock()
+        ):
+            await self.bot.on_ready()
+        health = await self.bot.get_service_health_status()
+        return [record.getMessage() for record in captured.records], health
+
+    async def test_a_server_that_starts_is_reported_as_active(self):
+        server = self._web_server("127.0.0.1")
+
+        lines, health = await self._on_ready_status()
+
+        # "Active" has to mean the page is up, not that an attribute is set --
+        # and since on_ready is what starts it, this is also the proof that it
+        # did.
+        async with aiohttp.ClientSession() as session:
+            async with session.get(server.url) as response:
+                self.assertEqual(response.status, 200)
+        self.assertIn("  - Report Web UI: Active", lines)
+        self.assertEqual(health["report_web_ui"], "Available")
+
+    async def test_a_refused_bind_is_reported_as_unavailable_not_disabled(self):
+        # The state that had no word of its own before DAB-144:
+        # `reports.web_enabled` is true and the page is not there, which is
+        # neither "Active" nor a choice anybody made.
+        self._web_server("0.0.0.0")
+
+        lines, health = await self._on_ready_status()
+
+        self.assertIn("  - Report Web UI: Unavailable", lines)
+        self.assertEqual(health["report_web_ui"], "Unavailable")
+        # And the reason is in the same startup log, where an operator reading
+        # "Unavailable" will look for it.
+        self.assertTrue(
+            [line for line in lines if "NOT started" in line and "loopback" in line],
+            "the status line said Unavailable without saying why",
+        )
+
+    async def test_the_feature_switched_off_is_reported_as_disabled(self):
+        # The harness has already nulled the server; this is the operator
+        # having set reports.web_enabled to false, and it keeps its own word.
+        self.bot.report_web_server = None
+        self.bot.config.report_web_enabled = False
+
+        lines, health = await self._on_ready_status()
+
+        self.assertIn("  - Report Web UI: Disabled", lines)
+        self.assertEqual(health["report_web_ui"], "Disabled")
 
 
 if __name__ == "__main__":

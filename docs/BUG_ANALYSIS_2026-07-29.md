@@ -9,6 +9,25 @@
 | Test baseline | 125 tests, OK — re-confirmed 7 consecutive times, 0 flakes |
 | Repo mutation during analysis | none (`git status --porcelain` empty at start and end of every agent run) |
 
+> **Read this before quoting any figure below. Re-dated 2026-08-05 at `083ebea`.**
+>
+> This document is a **snapshot measured at `c83f740` on 2026-07-29**. Fifty-eight commits have
+> landed since. Every figure in the body is present tense and every one of them means "as at
+> `c83f740`" — the gate is **394 tests in 37 files**, plus a mutation harness of **130 mutants,
+> 130/130**, that did not exist when this was written. The classes of figure that have moved
+> most: suite and coverage counts; `except`-handler counts (237 -> 228 under `src/`); command-gate
+> counts (§6 says 1 of 35 nodes is gated — **4 are**, and 6 leaves are now `guild_only`, because
+> DAB-140 and DAB-141 landed); `BotConfig` validation gaps (44-47 of 100 -> **39 of 99**);
+> module and function sizes; and `tests/test_command_registration.py`'s structure, which DAB-203
+> replaced entirely.
+>
+> The **findings** are what this document is for, and they hold. The per-finding rows carry no
+> status column, so a row reading like an open defect may well be closed: check
+> [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md) or the ticket's own `Status:` header first.
+> Three rows added after the programme began — `DAB-003`, `DAB-068`, `DAB-163` — are all closed
+> in round 2 Phase 3, and DAB-068's row states its defect **backwards** (see the note on it).
+
+
 ## 1. Scope, method and headline counts
 
 ### Scope
@@ -1068,7 +1087,7 @@ one fix closes all of them.
 | **DAB-153** | Error handling is unsafe by construction: raw exception text is echoed to Discord by default with no secret scrubbing (the `?key=` exfiltration claim is REFUTED for this SDK) | `error_manager.py:89,435-479` | `B7-14`, `B7-16` |
 | **DAB-157** | `.gitignore` covers `.env`, `data/`, `*.db`, `bot.log` but NOT rotated log files (`bot.log.1`, `logs/*.log.N`) - exactly the files holding user content | `.gitignore`:71-72,78 | `B7-19`, `C6-19` |
 | **DAB-159** | Indirect prompt injection: retrieved message content can forge the RAG context fence (`--- End Context ---`, `User:`) | `gemini_client.py:format_prompt` | `C4-08` |
-| **DAB-163** | `/pins` breaks permanently at 26 pins (Discord's 25-field embed cap), making a pin flood unrecoverable through the UI | `personalization.py:202-230` | `C4-12` |
+| **DAB-163** | **CLOSED** (round 2 Phase 3, `56bd52c`, corrected in `01f75ba`). Two residuals recorded under `PPR-06` remain open: any member can delete any pin, and a 60-pin channel still needs multiple rounds. `/pins` breaks permanently at 26 pins (Discord's 25-field embed cap), making a pin flood unrecoverable through the UI | `personalization.py:202-230` | `C4-12` |
 
 ### H. Observability and error handling — 6 S2
 
@@ -1204,7 +1223,7 @@ I cold start/ops, J dead code, K performance, L adversarial input, M tests/histo
 
 | Area | ID | Finding | File:line |
 |---|---|---|---|
-| A | **DAB-003** | No `on_ready` re-entry guard -> `CommandAlreadyRegistered` on gateway re-IDENTIFY | `discord_bot.py:461` |
+| A | **DAB-003** | **CLOSED** (round 2 Phase 3, `a55c601`, `CancelledError` half in `01f75ba`). No `on_ready` re-entry guard -> `CommandAlreadyRegistered` on gateway re-IDENTIFY | `discord_bot.py:461` |
 | A | **DAB-004** | `close()` has two unguarded awaits that abort PDF-executor drain and `super().close()` | `discord_bot.py:632-692` |
 | A | **DAB-005** | "Processing..." status message orphaned on 3 of 5 failure paths | `response_generation.py:331-430` |
 | A | **DAB-008** | Direct image attachments gated on `content_type` only; context images also accept by extension | `media_extraction.py:95-190` |
@@ -1229,7 +1248,7 @@ I cold start/ops, J dead code, K performance, L adversarial input, M tests/histo
 | C | **DAB-058** | `/summarize` is the only path that falls through to `_current_model_name` + the frozen `low` tier (4096 cap, "be brief" prompt) | `research.py:302-381` |
 | C | **DAB-059** | Live mode answers users with the *router* model and drops every user preference | `live_message_coordinator.py:268,309` |
 | C | **DAB-062** | Seven in-memory-only mutations, five with replies that imply durability (settings silently lost on restart) | `configuration.py:40-170` |
-| D | **DAB-068** | Pin legacy migration fails silently and retries on every boot forever | `pin_service.py:55-70` |
+| D | **DAB-068** | **CLOSED (round 2 Phase 3, `0fb7016` + `01f75ba`). This description is backwards** — the migration wrote its ledger unconditionally, so it burned its one shot and never retried; "retries on every boot forever" was the sibling defect. Pin legacy migration fails silently and retries on every boot forever | `pin_service.py:55-70` |
 | D | **DAB-074** | Audio path truncates the finished pack with `context[-5:]`, dropping pins and reply anchors first | `response_generation.py:217-239` |
 | D | **DAB-075** | Rank fusion discards bm25/cosine magnitudes; recency is inert and double-counted | `hybrid_context_retriever.py:470-570` |
 | D | **DAB-079** | `search_lexical` ORs every token and its cost is proportional to matching rows | `message_index_service.py:1108-1169` |

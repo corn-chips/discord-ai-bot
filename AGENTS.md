@@ -56,12 +56,12 @@ request only.
  there is no `tests/__init__.py` and no `sys.path` shim.
 - Focused run: `python -m unittest tests.test_message_rag_services` or
  `python -m unittest tests.test_config.BotConfigTest` (there is no `ConfigParsingTest`;
- the 26 test files hold 65 `TestCase` classes, 63 of them named `<Subject>Test`; the two
+ the 37 test files hold 84 `TestCase` classes, 82 of them named `<Subject>Test`; the two
  exceptions are the shared harnesses `LoggingHarness` and `OnReadyHarness`).
 - `python -m compileall -q main.py src scripts tests` — syntax check without booting.
 - `python scripts/mutation_check.py` — reintroduces each fixed bug in a scratch copy and
- reports whether the suite notices. **56 mutants, ~80 s with `--jobs 5`** (it was 5 mutants
- and ~7 s when the harness landed); exit 0 only when every mutant matches its declared
+ reports whether the suite notices. **130 mutants, 220 s with `--jobs 5`** (it was 5 mutants and
+ ~7 s when the harness landed; the wall time is one full suite run per mutant); exit 0 only when every mutant matches its declared
  expectation in `scripts/mutants.toml`. Use it to prove a new regression test actually fails
  on reintroduction, rather than assuming it does.
 - `python scripts/health_check.py` — needs real credentials and network; not an offline check.
@@ -134,7 +134,7 @@ deletes the surviving commands from Discord globally.
  construction back into a registrar.
 - `_pin_service` is **not** in that group, despite sitting next to them in
  `personalization.py`. `DiscordBot.__init__` builds it at `discord_bot.py:377` and hands it
- to `HybridContextRetriever` at `:409`; `personalization.py:129` only reuses it
+ to `HybridContextRetriever` at `:409`; `personalization.py:282` only reuses it
  (`getattr(bot, "_pin_service", None) or PinService(...)`), so the fallback construction
  fires only for bots that never ran `DiscordBot.__init__`, i.e. test doubles. Pinned
  memories are available before `on_ready`.
@@ -149,22 +149,22 @@ deletes the surviving commands from Discord globally.
 ## Message flow (read these first)
 
 
-`DiscordBot.on_message` (`discord_bot.py:827`) → live-mode channels fork to
+`DiscordBot.on_message` (`discord_bot.py:889`) → live-mode channels fork to
 `LiveMessageCoordinator.enqueue` and **return early, skipping the mention gate and the
-router** → `is_bot_mentioned` (`:1417`) → rate limit → `EnhancedCommandHandler.handle_message`
+router** → `is_bot_mentioned` (`:1479`) → rate limit → `EnhancedCommandHandler.handle_message`
 (an LLM router with an LRU/TTL cache that may fully handle image requests) → context →
 `ResponseGenerationCoordinator` → `ResponseDeliveryCoordinator` → the bot's own reply is
 re-indexed into RAG.
 
 
 Silent degradation is the house style: any exception during hybrid RAG **retrieval** falls back to
-the legacy `ContextCollector` path with only a warning (`discord_bot.py:1006-1011`), and indexing
+the legacy `ContextCollector` path with only a warning (`discord_bot.py:1069-1074`), and indexing
 failures log at `debug`. A broken RAG change looks like "nothing happened" — check the logs.
 
 The word *retrieval* is load-bearing. That `try` used to span generation and delivery as well, so
 anything that failed after the model had already answered fell through to the legacy path and
 answered again — a duplicate reply and a duplicate Gemini charge (DAB-001). Delivery now sits
-outside it, behind `if rag_context is not None` (`:1022`). Keep it that way: widening the `try`, or
+outside it, behind `if rag_context is not None` (`:1084`). Keep it that way: widening the `try`, or
 weakening that gate to a truthiness test, each reintroduce paid duplicate work, and
 `scripts/mutation_check.py` carries `M-DAB001` and `M-DAB001B` for exactly those two mistakes.
 
@@ -189,7 +189,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 
 
 - Two databases, and config validation **requires them to be distinct**
- (`config_helpers.py:525`): `data/token_usage.db` (`token_usage`, `bot_reports`,
+ (`config_helpers.py:562`): `data/token_usage.db` (`token_usage`, `bot_reports`,
  `channel_settings`, `user_preferences`, `hidden_messages`) and `data/message_rag.db`
  (`message_index`, `message_embeddings`, `message_search_fts`, `message_retrieval_events`,
  `message_backfill_progress`, `pinned_messages`, `rag_migrations`).
@@ -205,7 +205,7 @@ suffix, re-debits the limiter and re-bills Gemini.
  in `_ensure_table` / `_ensure_schema` at construction.
  - New table: add `CREATE TABLE IF NOT EXISTS` to the owning service.
   - New column: you must *also* call the idempotent `_ensure_column` helper
-   (`message_index_service.py:125`, `channel_settings_service.py:49`). Editing the
+   (`message_index_service.py:164`, `channel_settings_service.py:49`). Editing the
    `CREATE TABLE` body alone silently leaves existing databases without the column.
  - One-shot data migrations are gated by named rows in the `rag_migrations` ledger.
 - FTS5 degrades gracefully to `fts_enabled = False` when unavailable.
@@ -221,7 +221,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 - Adding a setting touches four places: the `config.yaml` key, a parser in
  `src/config_helpers.py`, a field on `BotConfig` in `src/config.py`, and a rule in the
  matching `_validate_*` helper (the four are aggregated by `validate_config`,
- `config_helpers.py:754`). `tests/test_config.py` asserts parsed defaults. 39 of the 99
+ `config_helpers.py:809`). `tests/test_config.py` asserts parsed defaults. 39 of the 99
  annotated `BotConfig` fields are still mentioned by no `_validate_*` helper (TD-011).
 - Fixed protocol limits go in `src/constants.py`; anything tunable goes in `config.yaml`.
 - Config loading and startup diagnostics use `print` on purpose (visible before logging is
@@ -231,7 +231,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 ## Tests
 
 
-- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 63 of 65; the two exceptions are shared harnesses) — not `Test<Subject>`. Async
+- stdlib `unittest`. Classes are `<Subject>Test` (suffix, 82 of 84; the two exceptions are shared harnesses) — not `Test<Subject>`. Async
  tests use `IsolatedAsyncioTestCase` with `asyncSetUp`/`asyncTearDown`.
 - No `conftest.py`, no `tests/__init__.py`, no shared helpers — every file is self-contained.
  The idiom is `types.SimpleNamespace` fakes plus `unittest.mock.AsyncMock` (`MagicMock` is
@@ -247,7 +247,7 @@ suffix, re-debits the limiter and re-bills Gemini.
 
 
 A repository-wide analysis was completed on 2026-07-29 against `c83f740`, on a `125 tests, OK`
-baseline. A four-phase remediation programme then landed **34 commits** on top of it, closing
+baseline. Two remediation programmes have since landed **58 commits** on top of it, closing
 every S1. Read the analysis before starting a bug hunt or a refactor; it already covers most of
 what a fresh sweep would rediscover — but read the outcome summary first, or you will re-fix
 something that is already fixed.
@@ -257,33 +257,29 @@ something that is already fixed.
 - `docs/ANALYSIS_CORRECTIONS.md`: claims from the analysis that later verification refuted.
  Read it before acting on any ticket.
 - `docs/ANALYSIS_BACKLOG.md`: the prioritized worklist, tiers 0-3, derived from a 211-finding
- register, each row reconciled against the landed commits. Also carries the ten post-programme
- findings the 2026-07-31 pre-push review added, which are recorded but **not** fixed.
+ register, each row reconciled against the landed commits. Also carries the nineteen
+ post-programme findings, `PPR-01` to `PPR-19`; nine are closed, the rest are recorded, not fixed.
 - `docs/analysis-tickets/`: 37 files, one per actionable finding, each with file:line evidence,
  a reproduction, acceptance criteria, and the regression test to add. Every one now opens with a
- `**Status:**` line — 23 LANDED, 1 PARTIAL, 1 REFUTED, 12 OPEN. Read the Status line before the
- body: the bodies were never rewritten, and on **12** of the 37 the fix landed by a route the
- body does not describe, or was refuted outright.
+ `**Status:**` line — 24 LANDED, 6 PARTIAL, 1 REFUTED, 6 OPEN. Read the Status line before the
+ body: the bodies were never rewritten, and on **16** of the 37 the fix landed by a route the
+ body does not describe, was refuted, or left an acceptance criterion the body still ticks.
 - `docs/BUG_ANALYSIS_2026-07-29.md`: correctness findings with reproductions and current status.
  Supersedes the deleted `DEEP_BUG_HUNT_REPORT.md`.
 - `docs/IMPROVEMENT_ANALYSIS_2026-07-29.md`: architecture, data layer, performance, cost
  accounting, config, and testing/DX, with measured before/after figures.
 
 Ticket baselines are quoted against the 125-test suite that existed at `c83f740`. **The gate is
-now 273 in 26 files** (`f0938a8` added `tests/test_repo_hygiene.py`, `4fc5063` added
-`tests/test_on_message_flow.py`, Phase 1 added `tests/test_context_fallback.py`,
-`tests/test_error_classification.py` and `tests/test_message_splitter_scaling.py`, Phases 2-3
-added `tests/test_command_cooldowns.py`, `tests/test_pin_limits.py`,
-`tests/test_config_command_gate.py` and `tests/test_startup_integrity.py`, and Phase 3b added
-`tests/test_live_message_coordinator.py` and `tests/test_logging_config.py`, and Phase 4
-added `tests/test_rag_query_plans.py` and `tests/test_sqlite_utils.py`).
+now 394 in 37 files**; the 13 files that existed at `c83f740` have been joined by 24 more, and
+`git log --diff-filter=A --name-only c83f740..HEAD -- tests/` names each one with its commit.
 Some tickets deliberately change the count on top of that; each says so.
 
-The `file:line` evidence in those documents was measured at `c83f740`. **34 commits have landed
+The `file:line` evidence in those documents was measured at `c83f740`. **58 commits have landed
 since**, so most of those offsets have moved (for example `src/bot/commands.py:91`, cited in
 several tickets, is past the end of an 80-line file, and `on_message` has moved from `:725` to
-`:827`). Trust the finding and re-locate the symbol; do not trust the line number. The `file:line`
-citations in *this* file were re-measured at `922e899` and are current.
+`:889`). Trust the finding and re-locate the symbol; do not trust the line number. The `file:line`
+citations in *this* file were re-measured at `083ebea`; five of the fourteen had drifted since
+`922e899`, which is how fast this decays.
 
 
 ## Stale docs — do not trust at face value
@@ -292,7 +288,7 @@ citations in *this* file were re-measured at `922e899` and are current.
 - `docs/README.md` is the index for `docs/`; it marks every file CURRENT, HISTORICAL, or
  SUPERSEDED. Check it before quoting any figure out of that directory.
 - `docs/BOT_SYSTEM_REPORT.md` cites `pytest -q` and 9 tests; both runner and count are wrong
- (273 stdlib `unittest` tests across 26 files). It now carries a staleness banner listing its
+ (394 stdlib `unittest` tests across 37 files). It now carries a staleness banner listing its
  known-wrong claims; the body is unedited.
 - `docs/DEEP_BUG_HUNT_REPORT.md` **no longer exists.** It was deleted, not archived: it marked
  BUG-0001 to BUG-0005 "Open" against a build id that is not in this history, and it shipped in

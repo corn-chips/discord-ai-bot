@@ -1,25 +1,27 @@
 ## Analysis Backlog
 
-Last updated: 2026-07-31 | Repo state: branch `dev`, HEAD `922e899` | Gate: 273 tests, OK;
-mutation harness 56/56
+Last updated: 2026-08-05 | Repo state: branch `remediation/2026-07-30`, HEAD `083ebea` | Gate:
+394 tests, OK; mutation harness 130/130. `dev` is frozen at `c83f740` on purpose and is **not**
+where this work lives
 Findings below were measured at HEAD `c83f740` against a 125-test baseline; the status column is
-current as of 2026-07-31. Trust the finding, re-locate the line number, and quote the 273 gate.
+current as of 2026-08-05. Trust the finding, re-locate the line number, and quote the 394 gate.
 
-**Ticket status at `922e899`: 23 LANDED, 1 PARTIAL (DAB-095), 1 REFUTED (DAB-212), 12 OPEN.**
+**Ticket status at `083ebea`: 24 LANDED, 6 PARTIAL (DAB-029, DAB-042, DAB-073, DAB-087, DAB-095,
+DAB-198), 1 REFUTED (DAB-212), 6 OPEN.**
 
 | Tier | Rows | Landed | Partial | Refuted | Open |
 |---|---|---|---|---|---|
-| 0 | 20 | 15 | 1 | 1 | 3 |
-| 1 | 12 | 7 | — | — | 5 |
-| 2 | 5 | 1 | — | — | 4 |
-| **Tickets** | **37** | **23** | **1** | **1** | **12** |
-| 3 (compact, no tickets) | 47 | 6 | 1 | — | 40 |
+| 0 | 20 | 15 | 3 | 1 | 1 |
+| 1 | 12 | 8 | 2 | — | 2 |
+| 2 | 5 | 1 | 1 | — | 3 |
+| **Tickets** | **37** | **24** | **6** | **1** | **6** |
+| 3 (compact, no tickets) | 49 | 13 | 1 | — | 35 |
 
-The twelve open tickets are DAB-027, DAB-028, DAB-029, DAB-032, DAB-042, DAB-077, DAB-087,
-DAB-096, DAB-106, DAB-180, DAB-203 and DAB-204. Everything else in Tiers 0-2 is closed, deferred
-with a measurement, or refuted. See [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for
+The six open tickets are DAB-027, DAB-028, DAB-032, DAB-096, DAB-106 and DAB-180. Six more are
+partial — DAB-029, DAB-042, DAB-073, DAB-087, DAB-095 and DAB-198 — and DAB-212 is refuted.
+Everything else in Tiers 0-2 is closed, deferred with a measurement, or refuted. See [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) for
 the programme that closed them, and the "Post-programme findings" section at the foot of this
-document for the ten findings the 2026-07-31 pre-push review added.
+document for the nineteen post-programme findings, `PPR-01` to `PPR-19`.
 
 ### What this is
 
@@ -366,7 +368,7 @@ TEST-INFRASTRUCTURE CHAIN  (one live obstruction, not two -- see below)
   DAB-204 --> DAB-042        DISCHARGED, round 2 Phase 0. Both obstructing tests (there
                              were two; the graph and both tickets each named one) are
                              replaced by an assertion on the retry BUDGET. A correct
-                             480 s deadline now leaves the suite at 273 OK. DAB-042 can
+                             480 s deadline now leaves the suite at 394 OK. DAB-042 can
                              start today -- but put the budget INSIDE GeminiClient, or
                              DAB-042's acceptance criterion and DAB-204's contradict
 
@@ -429,14 +431,15 @@ VECTOR CHAIN
   attached during command registration; in fact `DiscordBot.__init__` constructs it
   (`discord_bot.py:377` at `922e899`) and `personalization.py:129` only reuses it. The current
   `AGENTS.md` ("Service wiring") says exactly that. Its `file:line` citations were re-measured at
-  `922e899`; the ones in *this* document and in the ticket bodies were not, and 34 commits have
+  `083ebea`; the ones in *this* document and in the ticket bodies were not, and 58 commits have
   moved most of them.
 
 ---
 
 ## POST-PROGRAMME FINDINGS (2026-07-31)
 
-Found by reviewing the combined diff of the 34 remediation commits against `c83f740`, before the
+`PPR-01` to `PPR-10` were found by reviewing the combined diff of round 1's 34 commits against
+`c83f740`, before the
 repository was pushed. **None of these existed in the 211-finding register**, so they carry a
 `PPR-` prefix rather than a `DAB-` number: the master register lives outside this repository and
 cannot be extended from here.

@@ -18,7 +18,8 @@ summary = "Outer wait_for reclaims ownership of the Gemini retry budget"
 # banned asyncio.wait_for outright by patching the singleton module, so it also
 # failed every CORRECT whole-sequence deadline and blocked DAB-042. Its
 # replacement asserts the budget instead. Deleting that test without moving this
-# guard would have left M-BUG0001 an unkillable survivor -- 56/56 -> 55/56 -- and
+# guard would have left M-BUG0001 an unkillable survivor -- 56/56 -> 55/56 at the time,
+# 130/130 -> 129/130 today -- and
 # turned the mutation gate red on a commit that passes unittest.
 guard = "test_main_response_path_preserves_the_full_client_retry_budget"
 file = "src/bot/response_generation.py"

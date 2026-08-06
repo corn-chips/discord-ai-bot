@@ -1,7 +1,7 @@
 # Analysis corrections
 
-Last updated: 2026-07-31 | Repo state: branch `dev`, HEAD `922e899` | Baseline suite: 273 tests,
-OK; mutation harness 56/56
+Last updated: 2026-08-05 | Repo state: branch `remediation/2026-07-30`, HEAD `083ebea` |
+Baseline suite: 394 tests, OK; mutation harness 130/130. `dev` is frozen at `c83f740` on purpose
 
 Items 1-16 and 21 correct the 2026-07-29 analysis corpus. **Items 17-20 and 22 are different in
 kind:** they correct claims made by the remediation programme's own landed commits, found by
@@ -653,7 +653,7 @@ comment is read as a statement about the current system:
 No behaviour changed; the limits, the call sites and `M-DAB213` are untouched. `docs`-side, the
 `DAB-213` row in `ANALYSIS_BACKLOG.md` and the ticket header now carry the correction.
 
-The review that found this counted further, smaller inaccuracies across the 34 commit messages —
+The review that found this counted further, smaller inaccuracies across the 34 commit messages that existed when it ran —
 mostly restated figures and hashes that the rewrite moved. Only this one changes what a reader
 would believe about how the code works, and only this one reached the source, so only this one is
 reproduced here.
@@ -889,7 +889,7 @@ Two rules follow, and they are the ones this file keeps re-deriving:
 | Claim | As published | Corrected | Why |
 |---|---|---|---|
 | `DAB-077` startup reconcile | "1938 ms -> 0.034 ms (57,000x)" | ~25 ms at 2k rows, ~120 ms at 10k, 1938 ms at 100k | The ratio is against a no-op, so it is unbounded and says nothing about the saving. The 1938 ms reproduces, but only at 100k indexed messages; this deployment is two orders of magnitude smaller. Quote the absolute saving at your corpus size. |
-| `DAB-106` validation gaps | "44-47 of 100 config fields" | **40-43 of 96** | `9894bcc` deleted four dead `BotConfig` fields, three of which were on the unvalidated list. |
+| `DAB-106` validation gaps | "44-47 of 100 config fields" | **39 of 99** (this row read "40-43 of 96" when written; re-measured at `083ebea`) | `9894bcc` deleted four dead `BotConfig` fields, three of which were on the unvalidated list. |
 | `DAB-194` dead code | "-2,027 lines, 23,973 -> 21,946" | delivered **2,111 deletions** across 25 files, 23,973 -> 21,895 | Landed as `9894bcc`; the extra came from 96 unused import bindings rather than the predicted 87. |
 | `docs/tech-debt-register.md` TD-004 | "`README.md` still lists `BOT_SYSTEM_REPORT.md`, `pipeline.html` and `message-sequence-flowchart.html` at the repo root" | Already repaired | `README.md:234` now states the report lives in `docs/` and that neither diagram exists. `find . -name '*.html'` returns nothing. The TD-004 retraction was itself stale. |
 

@@ -4,8 +4,8 @@ An honest front door to `docs/`. Several documents here are historical snapshots
 never re-measured after the code moved on; the Status column says which is which, so nothing in
 this directory has to be taken on trust.
 
-> **Start with [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md).** A four-phase
-> remediation programme landed **34 commits** over `c83f740` and closed all nine S1 defects.
+> **Start with [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md).** Two
+> remediation programmes landed **58 commits** over `c83f740` and closed all nine S1 defects.
 > Every other document in this directory was written before or during that programme, so a
 > finding described as open in one of them has a good chance of being closed. The outcome summary
 > says which.
@@ -13,7 +13,7 @@ this directory has to be taken on trust.
 Status key:
 
 - **CURRENT** - the findings are measured and still worth acting on, but they were measured
-  against branch `dev`, HEAD `c83f740`, on 2026-07-29. **34 commits have landed since**, so
+  against branch `dev`, HEAD `c83f740`, on 2026-07-29. **58 commits have landed since**, so
   (a) many findings are now closed — check the outcome summary or the ticket's own `Status:`
   header before starting one — and (b) essentially every `file:line` reference has shifted.
   Trust the finding, re-locate the symbol, do not trust the line number.
@@ -24,14 +24,14 @@ Status key:
 
 | Document | What it is | Status | Date |
 |---|---|---|---|
-| [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) | The outcome of the four-phase remediation programme: the phases, all nine S1 defects with the commit that closed each, the suite going 125 -> 273 and the mutation harness 0 -> 56 mutants, what was refuted rather than applied, and what remains open. Read before any other document here. | CURRENT | 2026-07-31 |
-| [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) | The record of claims made by the 2026-07-29 analysis that later verification refuted, with the evidence that overturned each one, plus the corrections the 2026-07-31 pre-push review added (items 17-19) and round 2's own (items 20-21). Read it before acting on any ticket, so a corrected claim is not re-implemented. | CURRENT | 2026-07-31 |
+| [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) | The outcome of the four-phase remediation programme: the phases, all nine S1 defects with the commit that closed each, the suite going 125 -> 394 and the mutation harness 0 -> 130 mutants, what was refuted rather than applied, and what remains open. Read before any other document here. | CURRENT | 2026-07-31 |
+| [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) | The record of claims made by the 2026-07-29 analysis that later verification refuted, with the evidence that overturned each one, plus the corrections the 2026-07-31 pre-push review added (items 17-19) and round 2's own (items 20-22). Read it before acting on any ticket, so a corrected claim is not re-implemented. | CURRENT | 2026-07-31 |
 | [`BUG_ANALYSIS_2026-07-29.md`](BUG_ANALYSIS_2026-07-29.md) | Correctness findings from the 2026-07-29 repository-wide bug sweep: reproduction, evidence, severity, and current status for each defect. Replaces the deleted `DEEP_BUG_HUNT_REPORT.md`; §8.1 records why that report was self-refuting and §8.2 carries the true status of BUG-0001 to BUG-0005. | CURRENT | 2026-07-29 |
 | [`IMPROVEMENT_ANALYSIS_2026-07-29.md`](IMPROVEMENT_ANALYSIS_2026-07-29.md) | Improvement lanes from the same sweep: architecture, data layer, performance, cost accounting, configuration, and testing/DX, with measured before-and-after figures rather than estimates. | CURRENT | 2026-07-29 |
-| [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md) | The reconciled finding register behind both analyses: one row per finding, deduplicated across lanes, with severity and source, each row reconciled against the landed commits. Also carries the post-programme findings: ten from the 2026-07-31 pre-push review, PPR-11 to PPR-13 from round 2 Phase 2.3. The index to read first when tracing where a number came from. | CURRENT | 2026-07-31 |
-| [`analysis-tickets/`](analysis-tickets/) | One file per actionable finding, sized for a single change: problem, evidence, proposed fix, and verification. Derived from `ANALYSIS_BACKLOG.md`. All 37 carry a `Status:` header as of 2026-07-31: 23 LANDED, 1 PARTIAL, 1 REFUTED, 12 OPEN. On 12 of the 37 the fix landed by a route the body does not describe, or was refuted; the Status line says so and the body was not rewritten. | CURRENT | 2026-07-31 |
+| [`ANALYSIS_BACKLOG.md`](ANALYSIS_BACKLOG.md) | The reconciled finding register behind both analyses: one row per finding, deduplicated across lanes, with severity and source, each row reconciled against the landed commits. Also carries the post-programme findings: nineteen in all, PPR-01 to PPR-19 — ten from the 2026-07-31 pre-push review, the rest from round 2. The index to read first when tracing where a number came from. | CURRENT | 2026-07-31 |
+| [`analysis-tickets/`](analysis-tickets/) | One file per actionable finding, sized for a single change: problem, evidence, proposed fix, and verification. Derived from `ANALYSIS_BACKLOG.md`. All 37 carry a `Status:` header, reconciled against their bodies on 2026-08-05: 24 LANDED, 6 PARTIAL, 1 REFUTED, 6 OPEN. On 16 of the 37 the fix landed by a route the body does not describe, was refuted, or left an acceptance criterion the body still ticks; the Status line says so and the body was not rewritten. | CURRENT | 2026-07-31 |
 | [`tech-debt-register.md`](tech-debt-register.md) | The technical debt register. Nine resolved items with re-measured evidence, plus TD-009 to TD-019, re-assessed at `922e899`: TD-017 is now partially resolved and TD-012 substantially so, and the rest are unchanged. Uses a `(impact x frequency) / effort` priority score. | CURRENT | 2026-07-31 |
-| [`tech-debt-sprints/`](tech-debt-sprints/) | The four phased plans that closed TD-001 to TD-008, plus the roadmap README. A record of how those items were retired, not a live plan. Some figures inside are stale: the gate count of 98 tests is now 273 in 26 files, the `DiscordBot` class is 1,258 lines not 1,131, and `BotConfig` has 99 fields not 93. Sprint 1's TD-004 project-layout claim was false when written; the README has since been repaired and that criterion now holds. | HISTORICAL | 2026-07-12 / 2026-07-13 |
+| [`tech-debt-sprints/`](tech-debt-sprints/) | The four phased plans that closed TD-001 to TD-008, plus the roadmap README. A record of how those items were retired, not a live plan. Some figures inside are stale: the gate count of 98 tests is now 394 in 37 files, the `DiscordBot` class is 1,258 lines not 1,131, and `BotConfig` has 99 fields not 93. Sprint 1's TD-004 project-layout claim was false when written; the README has since been repaired and that criterion now holds. | HISTORICAL | 2026-07-12 / 2026-07-13 |
 | [`BOT_SYSTEM_REPORT.md`](BOT_SYSTEM_REPORT.md) | Full read-only architecture and message-pipeline review, including the hybrid RAG design. Predates the four tech-debt sprints, so its architecture narrative describes the pre-sprint shape. Carries a staleness banner listing every known-wrong claim; the body is unedited. | HISTORICAL | 2026-06-17 |
 | `README.md` (this file) | Index of `docs/`. | CURRENT | 2026-07-31 |
 
@@ -51,15 +51,15 @@ edges and four prescribed fixes, and the ticket *bodies* were not rewritten.
 
 ## Verified baseline
 
-Every CURRENT document in this directory has been re-checked on 2026-07-31 against branch `dev`,
-HEAD `922e899`, using `.venv/bin/python` (CPython 3.12.13). The findings themselves were measured
-on 2026-07-29 against `c83f740`, and **34 commits have landed since**, so `file:line` evidence in
+Every CURRENT document in this directory has been re-checked on 2026-08-05 against branch
+`remediation/2026-07-30`, HEAD `083ebea`, using `.venv/bin/python` (CPython 3.12.13). The findings themselves were measured
+on 2026-07-29 against `c83f740`, and **58 commits have landed since**, so `file:line` evidence in
 the analysis documents and the ticket bodies no longer resolves; re-locate the symbol rather than
-trusting the offset. `AGENTS.md`'s citations, by contrast, were re-measured at `922e899` and are
+trusting the offset. `AGENTS.md`'s citations, by contrast, were re-measured at `083ebea` and are
 current.
 
 The test baseline is `python -m unittest discover -s tests -p "test_*.py"` run from the repository
-root: **125 tests, OK** in 13 files when the analysis was written, **273 tests, OK** in 26 files at
-HEAD. Ticket baselines quote the 125 figure; the gate is 273. There is a second gate the analysis
-documents predate: `python scripts/mutation_check.py --jobs 5`, **56/56 mutants**, ~80 s.
+root: **125 tests, OK** in 13 files when the analysis was written, **394 tests, OK** in 37 files at
+HEAD. Ticket baselines quote the 125 figure; the gate is 394. There is a second gate the analysis
+documents predate: `python scripts/mutation_check.py --jobs 5`, **130/130 mutants**, 220 s measured at `--jobs 5`.
 pytest is not configured in this repository.

@@ -7,6 +7,26 @@
 **Production size:** 19,405 lines across 54 files (`src/` + `main.py`); 23,973 Python lines
 counting `tests/` and `scripts/`.
 
+> **Read this before quoting any figure below. Re-dated 2026-08-05 at `083ebea`.**
+>
+> This is a **snapshot measured at `c83f740`**; 58 commits have landed since and the gate is now
+> **394 tests in 37 files** with a **130-mutant** harness. Every present-tense figure below means
+> "as at `c83f740`". Two corrections that a date alone does not cover, because the numbers are
+> not stale — they are **wrong to act on**:
+>
+> - **I2-09's "1844x" (`:130`, `:206`, `:655`, `:981`, `:3073`) is REFUTED, not merely old.** It
+>   was measured on an unscoped query production never issues. On the real channel-scoped form,
+>   once I2-08/DAB-078 has landed, the rewrite is **111x slower** and reintroduces the temp
+>   B-tree it exists to remove. `M-DAB212` exists to stop it being re-applied. Do not apply it:
+>   [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) item 13 and
+>   [`analysis-tickets/DAB-212.md`](analysis-tickets/DAB-212.md).
+> - **I2-08/I3-04's "+46 % writes (52.3 -> 76.7 µs/row)" (`:132`, `:950`) overstates the cost
+>   that was actually paid by 3x.** It landed by *replacing* the composite index rather than
+>   adding to it, measured at **+15 %** with no size growth (`ANALYSIS_BACKLOG.md:98`).
+> - I3-08's "11.67x" (`:133`, `:204`, `:1454`, `:3070`) re-measures at **6.72x** at `083ebea`
+>   (1.278 s -> 0.190 s). The direction and the pixel-identity hold.
+
+
 ---
 
 ## 1. Header — scope and method

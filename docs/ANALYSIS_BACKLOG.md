@@ -1145,8 +1145,11 @@ None of these is scheduled. They are S4 unless marked.
   resolved once and the resolved addresses are what gets bound, so the refusal is decided before
   any socket exists for a name as well as for a literal. `M-DAB143E` reintroduces the window,
   `M-DAB143F` the traceback the new resolution can raise. See PPR-19 above.
-- `_hostname_of` does not strip a trailing dot; `_is_own_host` does. A second caller has to
-  remember.
+- ~~`_hostname_of` does not strip a trailing dot; `_is_own_host` does. A second caller has to
+  remember.~~ **Closed 2026-08-06.** The dot is dropped in `_hostname_of`, with the port and the
+  brackets, because there is no reading of "the host name in this header" that includes it. Case
+  folding stays in `_is_own_host`, which is a property of the comparison. `M-PPR11F` pins it from
+  both sides: `localhost.` must still save, `evil.example.` must still 421.
 - ~~The `not bound` half of `if not bound or exposed:` has no test and no isolating mutant.~~
   **Closed 2026-08-06.** `test_a_bind_that_cannot_be_read_back_is_torn_down` refuses a runner that
   reports no addresses for a real socket, and `M-DAB143G` (`if exposed:`) is killed by that test
@@ -1189,7 +1192,9 @@ None of these is scheduled. They are S4 unless marked.
   to stop bracketing.~~ **Closed 2026-08-06.** `M-DAB144C` does, and its guard now fetches `.url`
   before comparing it: unbracketed, aiohttp rejects `http://::1:8080/` outright, so the property is
   "the operator can open what they are told to open" rather than "the string matches".
-- `M-PPR11C`'s replacement leaves `hostname` computed and unused.
+- ~~`M-PPR11C`'s replacement leaves `hostname` computed and unused.~~ **Closed 2026-08-06**, in
+  passing: the anchor had to be re-cut when the root dot moved into `_hostname_of`, and the
+  replacement is now just the `return True`.
 - `M-PPR11E`'s guard-test comment describes a `urlsplit` implementation, not the `split("://")`
   one the mutant uses; the scenario is real but `M-PPR11C` is the mutant that reproduces it.
 - `M-DAB052B`'s second killer is the literal-equality test above — noise, same root.

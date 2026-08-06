@@ -74,12 +74,23 @@ def _format_url(host: str, port: int) -> str:
 
 
 def _hostname_of(host_header: str) -> str:
-    """Strip the port and IPv6 brackets from a Host header value."""
+    """The host name in a Host header: no port, no IPv6 brackets, no root dot.
+
+    The trailing dot is dropped here rather than at the call site. It is a
+    syntactic part of the header value in the same way the port and the
+    brackets are -- ``localhost.`` is ``localhost`` with the DNS root written
+    out, and a browser sends whatever the operator typed -- so a second caller
+    must not be able to get a different answer from the first. Case is not
+    dropped here: that is a property of the comparison in ``_is_own_host``, not
+    of the name.
+    """
 
     host_header = host_header.strip()
     if host_header.startswith("["):
-        return host_header[1 : host_header.find("]")] if "]" in host_header else ""
-    return host_header.split(":", 1)[0]
+        hostname = host_header[1 : host_header.find("]")] if "]" in host_header else ""
+    else:
+        hostname = host_header.split(":", 1)[0]
+    return hostname.rstrip(".")
 
 
 class ReportWebServer:
@@ -394,7 +405,7 @@ class ReportWebServer:
         different local port keeps working.
         """
 
-        hostname = _hostname_of(host_header).lower().rstrip(".")
+        hostname = _hostname_of(host_header).lower()
         if not hostname:
             return False
         return (

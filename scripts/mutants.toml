@@ -966,8 +966,8 @@ guard = "test_a_rebound_dns_name_cannot_change_a_report"
 file = "src/services/report_web_server.py"
 expect = "killed"
 [[mutant.edit]]
-find = "        hostname = _hostname_of(host_header).lower().rstrip(\".\")\n        if not hostname:\n            return False\n"
-replace = "        hostname = _hostname_of(host_header).lower().rstrip(\".\")\n        return True\n"
+find = "        hostname = _hostname_of(host_header).lower()\n        if not hostname:\n            return False\n"
+replace = "        return True\n"
 
 [[mutant]]
 id = "M-PPR11D"
@@ -998,6 +998,27 @@ expect = "killed"
 [[mutant.edit]]
 find = "            if request.headers.get(\"Origin\") != f\"http://{host_header}\":\n"
 replace = "            netloc = (request.headers.get(\"Origin\") or \"\").split(\"://\")[-1].split(\"/\")[0].strip()\n            if netloc != host_header:\n"
+
+[[mutant]]
+id = "M-PPR11F"
+bug = "PPR-11"
+# The root dot. `_is_own_host` stripped it and `_hostname_of` did not, so the
+# rule lived at the call site and the next caller of the parser would have got
+# a different answer -- the reason it moved into the parser is that there is no
+# reading of "the host name in this header" under which the trailing dot is
+# part of it.
+#
+# Dropping it entirely is the failure that matters: `localhost.` is a name an
+# operator can type, a browser sends it verbatim in Host and Origin, and the
+# page's own form then 421s. A guard that rejects the operator's own form gets
+# switched off.
+summary = "Leave the DNS root dot on the Host name, so localhost. is a stranger"
+guard = "test_reaching_the_page_by_its_absolute_name_still_changes_the_report"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    return hostname.rstrip(\".\")\n"
+replace = "    return hostname\n"
 
 [[mutant]]
 id = "M-DAB143C"

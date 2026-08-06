@@ -517,6 +517,36 @@ class ReportWebServerRequestGuardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 303)
         self.assertEqual(self._stored(), ("declined", "written by the request"))
 
+    async def test_reaching_the_page_by_its_absolute_name_still_changes_the_report(self):
+        # `localhost.` is `localhost` with the DNS root written out. It is a
+        # name an operator can type and a browser will send verbatim, in both
+        # the Host and the Origin, so refusing it 421s a form submitted from
+        # the page itself -- the failure mode the whole guard is built to avoid.
+        response = await self._post_status(
+            {
+                "Host": f"localhost.:{self.port}",
+                "Origin": f"http://localhost.:{self.port}",
+            }
+        )
+
+        self.assertEqual(response.status, 303)
+        self.assertEqual(self._stored(), ("declined", "written by the request"))
+
+    async def test_a_rebound_name_with_a_root_dot_still_cannot_change_a_report(self):
+        # And the same spelling must not become a way around the allowlist:
+        # dropping the root dot is a normalisation, not a relaxation.
+        before = self._stored()
+
+        response = await self._post_status(
+            {
+                "Host": f"evil.example.:{self.port}",
+                "Origin": f"http://evil.example.:{self.port}",
+            }
+        )
+
+        self.assertEqual(response.status, 421)
+        self.assertEqual(self._stored(), before)
+
     async def test_reaching_the_page_through_a_port_forward_still_works(self):
         # `ssh -L 9000:127.0.0.1:8080` is the supported way to reach this UI
         # from another machine, and it is why no non-loopback bind flag is

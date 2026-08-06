@@ -13,8 +13,8 @@
 >
 > This document is a **snapshot measured at `c83f740` on 2026-07-29**. Fifty-eight implementation
 > commits (`c83f740..083ebea`) have landed since, plus a documentation phase. Every figure in the body is present tense and every one of them means "as at
-> `c83f740`" — the gate is **401 tests in 37 files**, plus a mutation harness of **137 mutants,
-> 137/137**, that did not exist when this was written. The classes of figure that have moved
+> `c83f740`" — the gate is **405 tests in 37 files**, plus a mutation harness of **144 mutants,
+> 144/144**, that did not exist when this was written. The classes of figure that have moved
 > most: suite and coverage counts; `except`-handler counts (237 -> 228 under `src/`); command-gate
 > counts (§6 says 1 of 35 nodes is gated — **4 are**, and 6 leaves are now `guild_only`, because
 > DAB-140 and DAB-141 landed); `BotConfig` validation gaps (44-47 of 100 -> **39 of 99**);

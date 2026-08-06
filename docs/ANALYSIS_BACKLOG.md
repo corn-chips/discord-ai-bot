@@ -1,10 +1,10 @@
 ## Analysis Backlog
 
-Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
-report web server residual commits | Gate: 401 tests, OK; mutation harness 137/137. `dev` is
+Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of
+the round 2 safety/config, pin_service and test-hygiene closures | Gate: 405 tests, OK; mutation harness 144/144. `dev` is
 frozen at `c83f740` on purpose and is **not** where this work lives
 Findings below were measured at HEAD `c83f740` against a 125-test baseline; the status column is
-current as of 2026-08-06. Trust the finding, re-locate the line number, and quote the 401 gate.
+current as of 2026-08-06. Trust the finding, re-locate the line number, and quote the 405 gate.
 
 **Ticket status at `083ebea`: 24 LANDED, 6 PARTIAL (DAB-029, DAB-042, DAB-073, DAB-087, DAB-095,
 DAB-198), 1 REFUTED (DAB-212), 6 OPEN.**
@@ -1141,11 +1141,23 @@ are small. They are recorded here because the reviews themselves are working not
 finding that will be rediscovered from zero. Each was re-verified at `083ebea` — several items
 from the same reviews had already closed in code by then and are not listed.
 
-**The report web server's nine are closed (2026-08-06), in four commits on top of `083ebea`.**
-They are struck through below rather than deleted, because the reason each was recorded still
-reads as the reason it was worth closing, and two of them turned out to matter more than "small":
-the bind window was real, and the suite's own `0.0.0.0` bind ran on every gate on every machine.
-Everything not struck through is still open, still unscheduled, and still S4 unless marked.
+**Every finding in this section is now closed (2026-08-06), bar one, which is closed as a
+decision.** The report web server's nine went first, in four commits on top of `083ebea`; the
+safety/config, `pin_service` and remaining test and mutant findings followed in six more. They are
+struck through below rather than deleted, because the reason each was recorded still reads as the
+reason it was worth closing, and several turned out to matter more than "small": the bind window
+was real, the suite's own `0.0.0.0` bind ran on every gate on every machine, and the `pin_service`
+distinction was backwards rather than merely undocumented.
+
+The exception is the one bullet still in bold rather than struck through — canonicalising the
+safety thresholds at parse time. It was weighed and declined, and the bullet carries the argument
+and the measurement. An open finding with a decision attached is not the same as an unread one.
+
+Three of these closures **corrected a document rather than adding a test**, and each says so in
+place: `config.yaml`'s `HARM_BLOCK_THRESHOLD_UNSPECIFIED` line, `config_helpers.py`'s module
+docstring, and `report_web_server.py`'s account of what a parsed `Origin` comparison accepts. The
+last was re-measured and was wrong in three separate ways, which is the argument for re-measuring
+a claim before quoting it rather than after.
 
 **`src/services/report_web_server.py`**
 

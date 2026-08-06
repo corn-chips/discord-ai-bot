@@ -1,8 +1,8 @@
 # Remediation programme, 2026-07-29 to 2026-08-05 — outcome
 
-Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of the
-report web server residual commits | Gate: **401 tests, OK**; mutation harness **137/137** (231 s
-at `--jobs 5`)
+Last updated: 2026-08-06 | Repo state: branch `remediation/2026-07-30`, HEAD at the tip of
+the round 2 safety/config, pin_service and test-hygiene closures | Gate: **405 tests, OK**;
+mutation harness **144/144** (250 s at `--jobs 5`)
 
 **Read this before any other document in `docs/`.** The analysis corpus describes the repository
 as it stood at `c83f740`. **58 implementation commits have landed since** (`c83f740..083ebea`),
@@ -86,13 +86,13 @@ budget, no timeout and no size gate (`PPR-21`). Both tickets are marked PARTIAL.
 
 | | At `c83f740` | At HEAD |
 |---|---|---|
-| Test suite | 125 tests in 13 files | **401 tests in 37 files** |
-| Mutation harness | did not exist | **137 mutants, 137/137 matching expectation** (231 s with `--jobs 5`) |
+| Test suite | 125 tests in 13 files | **405 tests in 37 files** |
+| Mutation harness | did not exist | **144 mutants, 144/144 matching expectation** (250 s with `--jobs 5`) |
 
 The suite grew monotonically, commit by commit — every implementation commit records its own
 `Suite: X -> Y` delta, and no commit reduced it. The mutation harness
 (`scripts/mutation_check.py`, `scripts/mutants.toml`) reintroduces each fixed defect in a scratch
-copy and fails if the suite does not notice; it went 5 mutants at `f0938a8` to 137 at HEAD. It is
+copy and fails if the suite does not notice; it went 5 mutants at `f0938a8` to 144 at HEAD. It is
 the instrument that caught the defects review missed — three tests in Phase 5 alone passed for the
 wrong reason and mutation, not reading, found all three.
 

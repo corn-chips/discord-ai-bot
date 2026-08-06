@@ -26,7 +26,7 @@ Status key:
 
 | Document | What it is | Status | Date |
 |---|---|---|---|
-| [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) | The outcome of **both** remediation rounds: the phases of each, all nine S1 defects with the commit that closed each (and the two whose ticket is only partly discharged), the suite going 125 -> 401 and the mutation harness 0 -> 137 mutants, what was refuted rather than applied, what remains open, the eight deliberate deferrals with the condition that would reopen each, and what a reader should not trust. Read before any other document here. | CURRENT | 2026-08-06 |
+| [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md) | The outcome of **both** remediation rounds: the phases of each, all nine S1 defects with the commit that closed each (and the two whose ticket is only partly discharged), the suite going 125 -> 405 and the mutation harness 0 -> 144 mutants, what was refuted rather than applied, what remains open, the eight deliberate deferrals with the condition that would reopen each, and what a reader should not trust. Read before any other document here. | CURRENT | 2026-08-06 |
 | [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) | The record of claims made by the 2026-07-29 analysis that later verification refuted, with the evidence that overturned each one, plus the corrections the 2026-07-31 pre-push review added (items 17-19) and round 2's own (items 20-22). Read it before acting on any ticket, so a corrected claim is not re-implemented. | CURRENT | 2026-08-06 |
 | [`BUG_ANALYSIS_2026-07-29.md`](BUG_ANALYSIS_2026-07-29.md) | Correctness findings from the 2026-07-29 repository-wide bug sweep: reproduction, evidence, severity, and current status for each defect. Replaces the deleted `DEEP_BUG_HUNT_REPORT.md`; §8.1 records why that report was self-refuting and §8.2 carries the true status of BUG-0001 to BUG-0005. | CURRENT | 2026-07-29 |
 | [`IMPROVEMENT_ANALYSIS_2026-07-29.md`](IMPROVEMENT_ANALYSIS_2026-07-29.md) | Improvement lanes from the same sweep: architecture, data layer, performance, cost accounting, configuration, and testing/DX, with measured before-and-after figures rather than estimates. | CURRENT | 2026-07-29 |
@@ -62,7 +62,7 @@ trusting the offset. `AGENTS.md`'s citations, by contrast, were re-measured at `
 current.
 
 The test baseline is `python -m unittest discover -s tests -p "test_*.py"` run from the repository
-root: **125 tests, OK** in 13 files when the analysis was written, **401 tests, OK** in 37 files at
-HEAD. Ticket baselines quote the 125 figure; the gate is 401. There is a second gate the analysis
-documents predate: `python scripts/mutation_check.py --jobs 5`, **137/137 mutants**, 231 s measured at `--jobs 5`.
+root: **125 tests, OK** in 13 files when the analysis was written, **405 tests, OK** in 37 files at
+HEAD. Ticket baselines quote the 125 figure; the gate is 405. There is a second gate the analysis
+documents predate: `python scripts/mutation_check.py --jobs 5`, **144/144 mutants**, 250 s measured at `--jobs 5`.
 pytest is not configured in this repository.

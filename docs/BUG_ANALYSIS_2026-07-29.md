@@ -11,8 +11,8 @@
 
 > **Read this before quoting any figure below. Re-dated 2026-08-05 at `083ebea`.**
 >
-> This document is a **snapshot measured at `c83f740` on 2026-07-29**. Fifty-eight commits have
-> landed since. Every figure in the body is present tense and every one of them means "as at
+> This document is a **snapshot measured at `c83f740` on 2026-07-29**. Fifty-eight implementation
+> commits (`c83f740..083ebea`) have landed since, plus a documentation phase. Every figure in the body is present tense and every one of them means "as at
 > `c83f740`" — the gate is **394 tests in 37 files**, plus a mutation harness of **130 mutants,
 > 130/130**, that did not exist when this was written. The classes of figure that have moved
 > most: suite and coverage counts; `except`-handler counts (237 -> 228 under `src/`); command-gate

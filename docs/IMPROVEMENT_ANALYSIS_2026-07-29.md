@@ -9,7 +9,8 @@ counting `tests/` and `scripts/`.
 
 > **Read this before quoting any figure below. Re-dated 2026-08-05 at `083ebea`.**
 >
-> This is a **snapshot measured at `c83f740`**; 58 commits have landed since and the gate is now
+> This is a **snapshot measured at `c83f740`**; 58 implementation commits (`c83f740..083ebea`)
+> have landed since and the gate is now
 > **394 tests in 37 files** with a **130-mutant** harness. Every present-tense figure below means
 > "as at `c83f740`". Two corrections that a date alone does not cover, because the numbers are
 > not stale — they are **wrong to act on**:

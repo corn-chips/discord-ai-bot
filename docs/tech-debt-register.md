@@ -7,7 +7,8 @@ Original Sprint 1-4 estimate: 1 XL + 2 L + 5 M | Current open estimate: 2 S + 4 
 
 The nineteen rows were registered on 2026-07-29 against `4baa29c`. **TD-009 to TD-019 were
 re-assessed on 2026-07-31 against `922e899`**, after the four-phase remediation programme landed
-58 commits (see [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md)). Each of those rows now
+58 implementation commits, `c83f740..083ebea`
+(see [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md)). Each of those rows now
 carries a bracketed **2026-07-31** verdict — Open, Partially resolved, or Resolved — with the
 measurement behind it. TD-001 to TD-008 are untouched by that programme and were not re-derived;
 their Resolution Evidence still reads as taken at `4baa29c`, except where the figure quoted there

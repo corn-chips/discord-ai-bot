@@ -5,7 +5,8 @@ Phase 6 documentation commits | Gate: **394 tests, OK**; mutation harness **130/
 `--jobs 5`)
 
 **Read this before any other document in `docs/`.** The analysis corpus describes the repository
-as it stood at `c83f740`. **58 commits have landed since**, across two rounds, and they closed
+as it stood at `c83f740`. **58 implementation commits have landed since** (`c83f740..083ebea`),
+across two rounds, plus this documentation phase, and they closed
 most of what that corpus reports as open. Working from the analysis alone, you would re-fix work
 that is already done.
 
@@ -26,8 +27,10 @@ in [`ANALYSIS_CORRECTIONS.md`](ANALYSIS_CORRECTIONS.md) and inline at the top of
 Each phase was followed by a review of its own output. Six of those reviews found defects in the
 phase that had just landed, and each is a commit of its own — `4fd2409`, `05d4912`, `01f75ba`,
 `8168151`, `083ebea`, and the DAB-198 correction in Phase 6. That is the programme's single most
-productive habit: **more than a third of the defects closed here were introduced by the commit
-before.**
+productive habit. Counting only what is attributable: the **nine** post-programme findings now
+marked CLOSED (`PPR-02`, `04`, `05`, `06`, `07`, `08`, `09`, `11`, `19`) were all introduced or
+missed by the programme itself, against 24 tickets closed from the original register. Prefer the
+absolute figure to a ratio — the denominators are not comparable.
 
 ## Round 1 — 34 commits, `9894bcc` to `922e899`
 
@@ -74,9 +77,10 @@ measured and found wrong: DAB-019, DAB-065, DAB-066 and DAB-141. Each ticket say
 **Two of the nine close the S1 without closing the ticket, and the tickets say which is which.**
 DAB-002's S1 is closed, but three observability criteria were not taken. DAB-198's S1 is closed —
 the fixture that cost 107 s and produced nothing now returns 20 pages in 5.8 s — but **seven of
-its eight acceptance criteria are untaken**, and the residual is spend: the clamp is per page, so
-that fixture still rasterises to 792 MP and hands all of it to a paid request with no total
-budget, no timeout and no size gate (`PPR-21`). Both are marked PARTIAL.
+its eight acceptance criteria are untaken**. The clamp is per page, so nothing bounds the
+attachment as a whole: that fixture still rasterises to 792 MP across 20 pages at 3.3 GB peak —
+criterion 6, "no 1.6 GB spike", is unmet — and all 792 MP reach a paid request with no total
+budget, no timeout and no size gate (`PPR-21`). Both tickets are marked PARTIAL.
 
 ## The verification instruments
 
@@ -169,7 +173,7 @@ to-do is a regression.
 
 ## What a reader should not trust
 
-- **Any `file:line` in the analysis corpus or a ticket body.** Measured at `c83f740`; 58 commits
+- **Any `file:line` in the analysis corpus or a ticket body.** Measured at `c83f740`; 58 implementation commits
   have moved most of them. Trust the finding, re-locate the symbol.
 - **Any present-tense figure in `BUG_ANALYSIS_2026-07-29.md` or
   `IMPROVEMENT_ANALYSIS_2026-07-29.md`.** Both are `c83f740` snapshots. Their banners name the

@@ -247,8 +247,8 @@ suffix, re-debits the limiter and re-bills Gemini.
 
 
 A repository-wide analysis was completed on 2026-07-29 against `c83f740`, on a `125 tests, OK`
-baseline. Two remediation programmes have since landed **58 commits** on top of it, closing
-every S1. Read the analysis before starting a bug hunt or a refactor; it already covers most of
+baseline. Two remediation programmes have since landed **58 implementation commits**
+(`c83f740..083ebea`) plus a documentation phase on top of it, closing every S1. Read the analysis before starting a bug hunt or a refactor; it already covers most of
 what a fresh sweep would rediscover — but read the outcome summary first, or you will re-fix
 something that is already fixed.
 
@@ -257,7 +257,7 @@ something that is already fixed.
 - `docs/ANALYSIS_CORRECTIONS.md`: claims from the analysis that later verification refuted.
  Read it before acting on any ticket.
 - `docs/ANALYSIS_BACKLOG.md`: the prioritized worklist, tiers 0-3, derived from a 211-finding
- register, each row reconciled against the landed commits. Also carries the nineteen
+ register, each row reconciled against the landed commits. Also carries the twenty-one
  post-programme findings, `PPR-01` to `PPR-21`; nine are closed, the rest are recorded, not fixed.
  Its foot also records the still-open code findings the round 2 reviews produced, because those
  reviews are working notes that live outside the checkout.
@@ -276,8 +276,8 @@ now 394 in 37 files**; the 13 files that existed at `c83f740` have been joined b
 `git log --diff-filter=A --name-only c83f740..HEAD -- tests/` names each one with its commit.
 Some tickets deliberately change the count on top of that; each says so.
 
-The `file:line` evidence in those documents was measured at `c83f740`. **58 commits have landed
-since**, so most of those offsets have moved (for example `src/bot/commands.py:91`, cited in
+The `file:line` evidence in those documents was measured at `c83f740`. **58 implementation commits have landed
+since** (`c83f740..083ebea`), so most of those offsets have moved (for example `src/bot/commands.py:91`, cited in
 several tickets, is past the end of an 80-line file, and `on_message` has moved from `:725` to
 `:889`). Trust the finding and re-locate the symbol; do not trust the line number. The `file:line`
 citations in *this* file were re-measured at `083ebea`; five of the fourteen had drifted since

@@ -5,7 +5,8 @@ never re-measured after the code moved on; the Status column says which is which
 this directory has to be taken on trust.
 
 > **Start with [`REMEDIATION_2026-07-30.md`](REMEDIATION_2026-07-30.md).** Two
-> remediation programmes landed **58 commits** over `c83f740` and closed all nine S1 defects.
+> remediation programmes landed **58 implementation commits** (`c83f740..083ebea`) plus a
+> documentation phase over `c83f740`, and closed all nine S1 defects.
 > Every other document in this directory was written before or during that programme, so a
 > finding described as open in one of them has a good chance of being closed. The outcome summary
 > says which.
@@ -13,7 +14,8 @@ this directory has to be taken on trust.
 Status key:
 
 - **CURRENT** - the findings are measured and still worth acting on, but they were measured
-  against branch `dev`, HEAD `c83f740`, on 2026-07-29. **58 commits have landed since**, so
+  against branch `dev`, HEAD `c83f740`, on 2026-07-29. **58 implementation commits have landed
+  since** (`c83f740..083ebea`), so
   (a) many findings are now closed — check the outcome summary or the ticket's own `Status:`
   header before starting one — and (b) essentially every `file:line` reference has shifted.
   Trust the finding, re-locate the symbol, do not trust the line number.
@@ -53,7 +55,8 @@ edges and four prescribed fixes, and the ticket *bodies* were not rewritten.
 
 Every CURRENT document in this directory has been re-checked on 2026-08-05 against branch
 `remediation/2026-07-30`, HEAD `083ebea`, using `.venv/bin/python` (CPython 3.12.13). The findings themselves were measured
-on 2026-07-29 against `c83f740`, and **58 commits have landed since**, so `file:line` evidence in
+on 2026-07-29 against `c83f740`, and **58 implementation commits have landed since**
+(`c83f740..083ebea`), so `file:line` evidence in
 the analysis documents and the ticket bodies no longer resolves; re-locate the symbol rather than
 trusting the offset. `AGENTS.md`'s citations, by contrast, were re-measured at `083ebea` and are
 current.

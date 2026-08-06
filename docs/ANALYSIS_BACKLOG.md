@@ -1147,8 +1147,11 @@ None of these is scheduled. They are S4 unless marked.
   `M-DAB143F` the traceback the new resolution can raise. See PPR-19 above.
 - `_hostname_of` does not strip a trailing dot; `_is_own_host` does. A second caller has to
   remember.
-- The `not bound` half of `if not bound or exposed:` has no test and no isolating mutant —
-  `M-DAB143`/`M-DAB143B` delete the whole block and are killed through `exposed`.
+- ~~The `not bound` half of `if not bound or exposed:` has no test and no isolating mutant.~~
+  **Closed 2026-08-06.** `test_a_bind_that_cannot_be_read_back_is_torn_down` refuses a runner that
+  reports no addresses for a real socket, and `M-DAB143G` (`if exposed:`) is killed by that test
+  alone. It dies as an `IndexError` on `bound[0][1]` rather than as a quiet wrong answer, which is
+  what dropping the half actually does — the mutant row says so.
 - The three-state "Report Web UI" status line in `on_ready` and the identical branch in
   `get_status` have no test and no mutant, while `DAB-144`'s row cites the status line as part of
   what it delivered.

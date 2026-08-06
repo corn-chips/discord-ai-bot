@@ -69,6 +69,24 @@ def _socket_recorder():
     return RecordingSite, opened
 
 
+def _runner_reporting(addresses):
+    """An ``AppRunner`` that reports ``addresses`` whatever it really bound.
+
+    The post-bind read-back is a backstop that no value of ``reports.web_host``
+    can reach any more -- the resolution decides what gets bound, so what comes
+    back is what went in. Injecting the fault is the only way left to exercise
+    it. What is faked is the environment's report of the bind; the socket, the
+    decision and the teardown under test are all real.
+    """
+
+    class ReportingRunner(web.AppRunner):
+        @property
+        def addresses(self):
+            return list(addresses)
+
+    return ReportingRunner
+
+
 class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
     """The socket may only bind a loopback address."""
 
@@ -212,23 +230,14 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(server.is_running)
 
     async def test_a_bind_the_runner_reports_as_off_box_is_torn_down(self):
-        # The post-bind read-back, which is now a backstop: with the resolution
-        # above deciding what gets bound, no value of `reports.web_host` can
-        # reach it, so the fault is injected instead. What is faked is the
-        # environment's report of the bind -- not the decision under test,
-        # which is still the real one running on a real socket. The socket
-        # really is opened, and the assertion is that it really is closed
-        # again.
+        # The `exposed` half of the post-bind read-back. 203.0.113.7 is
+        # TEST-NET-3, and off this box. The socket really is opened on
+        # 127.0.0.1, and the assertion is that it really is closed again.
         site, opened = _socket_recorder()
-
-        class LyingRunner(web.AppRunner):
-            @property
-            def addresses(self):
-                return [("203.0.113.7", 8080)]  # TEST-NET-3, and off this box.
 
         server = self._server("127.0.0.1")
         with patch.object(report_web_server.web, "TCPSite", site), patch.object(
-            report_web_server.web, "AppRunner", LyingRunner
+            report_web_server.web, "AppRunner", _runner_reporting([("203.0.113.7", 8080)])
         ):
             with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
                 await server.start()
@@ -240,6 +249,37 @@ class ReportWebServerBindTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             await self._nothing_is_listening(opened[0][1]),
             f"the bind reported as off-box is still listening on {opened[0][1]}",
+        )
+
+    async def test_a_bind_that_cannot_be_read_back_is_torn_down(self):
+        # The `not bound` half, which had no test of its own: M-DAB143 and
+        # M-DAB143B delete the whole branch and are killed through `exposed`,
+        # so nothing distinguished "refuse an off-box address" from "refuse an
+        # address list you cannot read". They are not the same rule. An empty
+        # list names nothing to complain about, and a bind that cannot be read
+        # back cannot be claimed to be loopback -- the alternative is a server
+        # that either publishes a `.urls` it never bound or, as the isolating
+        # mutant M-DAB143G shows, dies on `bound[0][1]` inside on_ready.
+        #
+        # Reachable without injection only if getaddrinfo returns an empty list
+        # instead of raising, which POSIX does not allow it to do. That is what
+        # a backstop is.
+        site, opened = _socket_recorder()
+
+        server = self._server("127.0.0.1")
+        with patch.object(report_web_server.web, "TCPSite", site), patch.object(
+            report_web_server.web, "AppRunner", _runner_reporting([])
+        ):
+            with self.assertLogs("src.services.report_web_server", "ERROR") as logs:
+                await server.start()  # must refuse, not raise
+        self.assertIn("bound no readable address", "".join(logs.output))
+
+        self.assertFalse(server.is_running)
+        self.assertEqual(server.bound_addresses, [])
+        self.assertEqual(len(opened), 1, f"expected one socket, got {opened}")
+        self.assertTrue(
+            await self._nothing_is_listening(opened[0][1]),
+            f"the unreadable bind is still listening on {opened[0][1]}",
         )
 
     async def test_a_host_that_needs_stripping_still_starts(self):

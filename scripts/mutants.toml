@@ -1014,6 +1014,26 @@ find = "            try:\n                bind_targets = _resolve_bind_targets(s
 replace = "            bind_targets = _resolve_bind_targets(self.host, self.port)\n"
 
 [[mutant]]
+id = "M-DAB143G"
+bug = "DAB-143"
+# Isolates the `not bound` half of the read-back, which M-DAB143 and M-DAB143B
+# delete along with everything else and are then killed through `exposed`.
+# This is the form an author writes when an empty address list looks
+# impossible -- and it is: `bound[0][1]` three lines later turns "the bind
+# could not be read" into an IndexError out of start(), which on_ready renders
+# as "Failed to start report web UI" with a traceback. So the mutant is killed
+# by the raise, and the guard is the test that the refusal happens instead:
+# start() returns, the socket is closed, and the server does not claim to be
+# running on an address nobody could read.
+summary = "Assume the bound address list is never empty"
+guard = "test_a_bind_that_cannot_be_read_back_is_torn_down"
+file = "src/services/report_web_server.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        if not bound or exposed:\n"
+replace = "        if exposed:\n"
+
+[[mutant]]
 id = "M-DAB143D"
 bug = "DAB-143"
 # config_helpers strips reports.web_host only for its emptiness test and stores

@@ -1,4 +1,22 @@
-"""Internal parsing and validation helpers for :mod:`src.config`."""
+"""Parsing and validation helpers for :mod:`src.config`, plus one shared rule.
+
+Everything here is internal to :mod:`src.config` and imported by nothing else,
+with a single deliberate exception: :func:`canonical_safety_threshold`, which
+:mod:`src.services.gemini_client` also imports.
+
+That is not a leak, and the docstring used to say "internal" while a service
+imported it. The two sides of the safety-threshold contract are
+``_validate_feature_values``, which refuses a boot on the values it cannot
+resolve, and ``GeminiClient``, which falls back at request time on the same
+ones. They have to be the same rule or the boot check guards a different set
+from the one the client enforces -- which is the shape of the defect the rule
+exists to close. Sharing the function is what makes them the same set.
+
+:mod:`src.constants` would be the obvious other home, since it holds the
+vocabulary this reads, and it is the wrong one: that module is chartered for
+"fixed values defined by external APIs or immutable data definitions", and this
+is behaviour. A module of its own for one four-line function buys nothing.
+"""
 
 import os
 import sys
@@ -37,6 +55,19 @@ def canonical_safety_threshold(value: Any) -> str:
     * a ``HarmBlockThreshold`` member, which is a ``str`` subclass whose
       ``str()`` is ``'HarmBlockThreshold.BLOCK_NONE'``. Using it directly reads
       the value.
+
+    The parser deliberately does **not** canonicalise, so this runs once at
+    validation and again per category per request. Weighed and rejected, on
+    three counts. It would not remove the obligation it looks like it removes:
+    ``resolve_safety_threshold`` takes an arbitrary value and has to normalise
+    it whatever the parser did, because a ``BotConfig`` can be built in code
+    without going through ``parse_config_values`` at all -- the ERROR it logs
+    says exactly that is what has happened. It would make
+    ``config.safety_harassment`` no longer the string the operator wrote, which
+    is what ``_validate_feature_values`` quotes back in ``got %r``. And the cost
+    it saves is 225 ns a call, 0.9 us for all four categories, against a network
+    round trip to Gemini. Recorded rather than fixed; see the round 2 list in
+    ``docs/ANALYSIS_BACKLOG.md``.
     """
 
     if value is False:

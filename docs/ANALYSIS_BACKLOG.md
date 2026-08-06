@@ -1221,11 +1221,30 @@ Everything not struck through is still open, still unscheduled, and still S4 unl
   isolating case for the same reason: every other test of that rule takes the `0.7` dataclass
   default or sets `2.1` to force the error. Only three other scalar fields differ between
   `config.yaml` and the dataclass, and all three are model names.
-- The parser stores the raw string, so `canonical_safety_threshold` runs once at validation and
-  again per category per request; every future consumer must remember to call it.
-- `canonical_safety_threshold` lives in a module whose docstring scopes it to `src.config`, and a
+- **The parser stores the raw string, so `canonical_safety_threshold` runs once at validation and
+  again per category per request; every future consumer must remember to call it.** Weighed
+  2026-08-06 and **deliberately left as it is**, with the reasoning now in the function's own
+  docstring rather than only here. Canonicalising at parse time does not remove the obligation it
+  appears to remove: `resolve_safety_threshold` takes an arbitrary value and must normalise it
+  whatever the parser did, because a `BotConfig` can be built in code without going through
+  `parse_config_values` — the ERROR it logs says precisely that this is what has happened, and
+  every test in `tests/test_safety_thresholds.py` constructs one that way. It would also make
+  `config.safety_harassment` no longer the string the operator wrote, which is what
+  `_validate_feature_values` quotes back in `got %r` and what
+  `test_the_error_names_the_values_that_would_work` asserts. Measured cost of the duplication:
+  **225 ns a call, 0.9 µs for all four categories**, against a network round trip. `071f442`'s
+  guard is unaffected either way — `test_the_shipped_default_still_sends_block_none` reads
+  `config.yaml` with `yaml.safe_load` and never goes through the parser — so it did not decide
+  this.
+- ~~`canonical_safety_threshold` lives in a module whose docstring scopes it to `src.config`, and a
   service imports it. Moving it to `src/constants.py` is mildly off too, against that file's
-  "immutable data definitions" charter.
+  "immutable data definitions" charter.~~ **Closed 2026-08-06 by correcting the docstring, not by
+  moving the function.** `src/config_helpers.py` now states that everything in it is internal to
+  `src.config` bar this one function, and why that one is shared: the boot refusal and the
+  request-time fallback have to be the same rule, or the check guards a different set from the one
+  the client enforces, which is the shape of the defect the rule exists to close. `src/constants.py`
+  is chartered for "fixed values defined by external APIs or immutable data definitions" and this
+  is behaviour; a module of its own for four lines buys nothing.
 - ~~`config.yaml` advertises `HARM_BLOCK_THRESHOLD_UNSPECIFIED` as an operator choice; it is the
   proto zero-value sentinel, not a policy.~~ **Closed 2026-08-06.** The list of operator choices
   is now the five real policies, and the sentinel is described separately as what it is: the

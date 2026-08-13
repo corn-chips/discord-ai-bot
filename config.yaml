@@ -64,12 +64,42 @@ rag:
   rerank_candidates: 12                 # Maximum ambiguous candidates offered to reranker
   rerank_min_boundary_margin: 0.15       # Relative boundary gap below which reranking runs
   recency_half_life_hours: 72           # Recency decay half-life for fusion scoring
-  max_context_messages_low: 4
-  max_context_messages_medium: 6
-  max_context_messages_high: 8
+  max_context_messages_low: 6
+  max_context_messages_medium: 10
+  max_context_messages_high: 14
   embedding_min_words: 2                 # Trivial messages remain in FTS but skip embeddings
   embedding_min_alphanumeric_chars: 12
   vector_cache_enabled: true             # Cache completed float32 vectors in process RAM
+  embedding_batch_delay_seconds: 1.0    # Pause between embedding batches during a drain
+  embedding_drain_max_batches: 200      # Batch ceiling for one drain pass
+  embedding_timeout_seconds: 30.0       # Per-call embedding timeout
+  embedding_retry_reset_hours: 24.0     # Age at which a failed embedding row becomes retryable
+  bm25_weight_content: 1.0              # BM25 field weight for message content
+  bm25_weight_author: 0.1               # BM25 field weight for author name
+  bm25_weight_attachment: 0.5           # BM25 field weight for attachment text
+  fts_stopwords_enabled: true           # Strip stopwords from FTS queries
+  fts_min_and_results: 5                # Below this many AND matches, fall back to OR
+  rrf_k: 60.0                           # Reciprocal rank fusion constant
+  fusion_weight_recent: 0.7             # Fusion weight for recent-window messages
+  fusion_weight_lexical: 2.0            # Fusion weight for lexical hits
+  fusion_weight_semantic: 2.0           # Fusion weight for semantic hits
+  context_char_budget: 8000             # Max characters of retrieved context per prompt
+  query_embedding_cache_size: 128       # Max cached query embeddings
+  query_embedding_cache_ttl: 900        # Query embedding cache TTL in seconds
+  conversation_enabled: true            # Group retrieved messages into conversations
+  conversation_gap_minutes: 10.0        # Silence that ends a conversation
+  conversation_max_messages: 40         # Message ceiling for one conversation
+  conversation_reply_merge_max_hours: 6.0 # Max reply age still merged into its conversation
+  conversation_turnover_window: 3       # Messages inspected for speaker turnover
+  conversation_turnover_min_gap_minutes: 3.0 # Minimum gap counted as turnover
+  conversation_expand_full_max_messages: 12 # Conversations this size or smaller expand in full
+  conversation_expand_window_messages: 8 # Messages kept around the hit in larger conversations
+  query_rewrite_enabled: true           # Rewrite follow-up queries using recent history
+  query_rewrite_history_turns: 4        # Turns of history fed to the rewriter
+  entity_profiles_enabled: true         # Build per-user entity profiles
+  entity_profile_min_messages: 20       # Messages required before a profile is built
+  entity_profile_refresh_hours: 24.0    # Profile staleness threshold
+  entity_profile_max_chars: 1200        # Max characters of profile text in the prompt
 
 # --- Response Settings ---
 response:

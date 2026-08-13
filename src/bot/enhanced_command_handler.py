@@ -39,6 +39,9 @@ class RoutingDecision:
     complexity: str = "low"
     edit_type: Optional[EditType] = None
     needs_context: bool = True
+    # A standalone retrieval query from the same router call; None when the
+    # router gave nothing usable and callers should use the raw message.
+    search_query: Optional[str] = None
 
 
 class EnhancedCommandHandler:
@@ -152,7 +155,8 @@ Return JSON with this schema:
   "intent": "image_generate" | "image_edit" | "text",
   "complexity": "low" | "medium" | "high",
   "edit_type": "object_removal" | "background" | "style" | "color" | "general" | null,
-  "needs_context": true | false
+  "needs_context": true | false,
+  "search_query": string | null
 }}
 
 Intent rules:
@@ -175,6 +179,10 @@ Edit type rules:
 
 Context rule: needs_context=false only when the request is fully self-contained and
 does not benefit from conversation history. When uncertain, return true.
+
+Search query rule: "search_query" is a standalone keyword query for searching chat
+history, with pronouns and references resolved using the message itself. Return null
+when the message is already self-contained or nothing can be resolved.
 """
 
             # Create router model instance for classification.
@@ -241,6 +249,7 @@ does not benefit from conversation history. When uncertain, return true.
                     complexity_level = result.get("complexity", "low").lower()
                     edit_type_str = result.get("edit_type")
                     needs_context = result.get("needs_context")
+                    search_query = result.get("search_query")
                     logger.debug(f"Router raw response: intent={intent_str}, complexity={complexity_level}")
                 else:
                     logger.warning(f"Unexpected router response type: {type(result)}, value: {result}")
@@ -248,12 +257,14 @@ does not benefit from conversation history. When uncertain, return true.
                     complexity_level = "low"
                     edit_type_str = None
                     needs_context = True
+                    search_query = None
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse router JSON response: {response.text}")
                 intent_str = "text"
                 complexity_level = "low"
                 edit_type_str = None
                 needs_context = True
+                search_query = None
             
             # Parse the response
             intent = CommandIntent.UNKNOWN
@@ -276,7 +287,11 @@ does not benefit from conversation history. When uncertain, return true.
 
             if not isinstance(needs_context, bool):
                 needs_context = True
-            decision = RoutingDecision(intent, complexity_level, edit_type, needs_context)
+            if isinstance(search_query, str):
+                search_query = re.sub(r"\s+", " ", search_query).strip()[:300] or None
+            else:
+                search_query = None
+            decision = RoutingDecision(intent, complexity_level, edit_type, needs_context, search_query)
             self._set_cached_router_result(cache_key, decision)
 
             logger.info(

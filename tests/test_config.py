@@ -88,6 +88,69 @@ class BotConfigTest(unittest.TestCase):
         self.assertEqual(config.safety_sexually_explicit, "BLOCK_NONE")
         self.assertEqual(config.safety_dangerous_content, "BLOCK_NONE")
 
+    def test_rag_settings_parse_the_same_defaults_from_the_parser_and_config_yaml(self):
+        expected = {
+            "rag_max_context_messages_low": 6,
+            "rag_max_context_messages_medium": 10,
+            "rag_max_context_messages_high": 14,
+            "rag_embedding_batch_delay_seconds": 1.0,
+            "rag_embedding_drain_max_batches": 200,
+            "rag_embedding_timeout_seconds": 30.0,
+            "rag_embedding_retry_reset_hours": 24.0,
+            "rag_bm25_weight_content": 1.0,
+            "rag_bm25_weight_author": 0.1,
+            "rag_bm25_weight_attachment": 0.5,
+            "rag_fts_stopwords_enabled": True,
+            "rag_fts_min_and_results": 5,
+            "rag_rrf_k": 60.0,
+            "rag_fusion_weight_recent": 0.7,
+            "rag_fusion_weight_lexical": 2.0,
+            "rag_fusion_weight_semantic": 2.0,
+            "rag_context_char_budget": 8000,
+            "rag_query_embedding_cache_size": 128,
+            "rag_query_embedding_cache_ttl": 900,
+            "rag_conversation_enabled": True,
+            "rag_conversation_gap_minutes": 10.0,
+            "rag_conversation_max_messages": 40,
+            "rag_conversation_reply_merge_max_hours": 6.0,
+            "rag_conversation_turnover_window": 3,
+            "rag_conversation_turnover_min_gap_minutes": 3.0,
+            "rag_conversation_expand_full_max_messages": 12,
+            "rag_conversation_expand_window_messages": 8,
+            "rag_query_rewrite_enabled": True,
+            "rag_query_rewrite_history_turns": 4,
+            "rag_entity_profiles_enabled": True,
+            "rag_entity_profile_min_messages": 20,
+            "rag_entity_profile_refresh_hours": 24.0,
+            "rag_entity_profile_max_chars": 1200,
+        }
+
+        sources = {
+            "parser": self._load_yaml(None),
+            "config.yaml": self._load_shipped({}),
+        }
+        for source, config in sources.items():
+            for name, value in expected.items():
+                with self.subTest(source=source, field=name):
+                    self.assertEqual(getattr(config, name), value)
+
+    def test_rag_boolean_settings_are_coerced_to_bool(self):
+        data = {
+            "rag": {
+                "fts_stopwords_enabled": 0,
+                "conversation_enabled": "",
+                "query_rewrite_enabled": 1,
+                "entity_profiles_enabled": "yes",
+            }
+        }
+
+        config = self._load_yaml(data)
+
+        self.assertIs(config.rag_fts_stopwords_enabled, False)
+        self.assertIs(config.rag_conversation_enabled, False)
+        self.assertIs(config.rag_query_rewrite_enabled, True)
+        self.assertIs(config.rag_entity_profiles_enabled, True)
+
     def test_the_shipped_config_yaml_loads_and_validates(self):
         # The file that actually boots this bot, through the real parser and
         # the real validator. Every other test in this class builds a BotConfig

@@ -29,6 +29,9 @@ class MessageContext:
     retrieval_score: Optional[float] = None
     retrieval_reason: Optional[str] = None
     is_pinned_memory: bool = False
+    # Parent-document retrieval: a hit is expanded into its surrounding conversation.
+    conversation_id: Optional[int] = None  # None = standalone, not part of an expanded block
+    is_conversation_filler: bool = False  # True = surrounding context, not itself a hit
 
     def __post_init__(self):
         """Validate the message context after initialization."""

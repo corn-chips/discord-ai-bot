@@ -10,11 +10,11 @@ import hashlib
 import inspect
 import json
 import logging
-import math
 import re
 import sqlite3
 import threading
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -65,6 +65,18 @@ _MIGRATION_KEYS = {
     "message_backfill_progress": "channel_id",
 }
 
+#: Query-side only: the FTS index still holds every one of these, so this
+#: narrows what a question asks for, never what is searchable.
+_FTS_STOPWORDS = frozenset(
+    """
+    about all also am an and any are as at be been being but by can could did do does
+    doing done for from had has have having he her hers him his how if in into is it
+    its just me my no not of off on once only or other our out over own she should so
+    some such than that the their them then there these they this those to too was we
+    were what when where which while who whom why will with would you your
+    """.split()
+)
+
 
 class MessageIndexWriteError(RuntimeError):
     """A write to the message index failed for an infrastructure reason.
@@ -90,6 +102,7 @@ class IndexedMessage:
     created_at: datetime
     content_text: str
     attachment_summary: str = ""
+    conversation_id: Optional[int] = None
     lexical_score: float = 0.0
     semantic_score: float = 0.0
 
@@ -99,6 +112,7 @@ class IndexedMessage:
         retrieval_source: Optional[str] = None,
         retrieval_score: Optional[float] = None,
         retrieval_reason: Optional[str] = None,
+        is_conversation_filler: bool = False,
     ) -> MessageContext:
         return MessageContext(
             content=self.content_text,
@@ -111,6 +125,8 @@ class IndexedMessage:
             retrieval_source=retrieval_source,
             retrieval_score=retrieval_score,
             retrieval_reason=retrieval_reason,
+            conversation_id=self.conversation_id,
+            is_conversation_filler=is_conversation_filler,
         )
 
 
@@ -132,6 +148,18 @@ class MessageIndexService:
         embedding_min_words: int = 2,
         embedding_min_alphanumeric_chars: int = 12,
         vector_cache_enabled: bool = True,
+        embedding_retry_reset_hours: float = 24.0,
+        bm25_weight_content: float = 1.0,
+        bm25_weight_author: float = 0.1,
+        bm25_weight_attachment: float = 0.5,
+        fts_stopwords_enabled: bool = True,
+        fts_min_and_results: int = 5,
+        conversation_enabled: bool = True,
+        conversation_gap_minutes: float = 10.0,
+        conversation_max_messages: int = 40,
+        conversation_reply_merge_max_hours: float = 6.0,
+        conversation_turnover_window: int = 3,
+        conversation_turnover_min_gap_minutes: float = 3.0,
         legacy_db_path: Optional[str] = None,
     ):
         self.db_path = Path(db_path).expanduser()
@@ -141,6 +169,20 @@ class MessageIndexService:
         self.embedding_min_words = max(0, int(embedding_min_words))
         self.embedding_min_alphanumeric_chars = max(0, int(embedding_min_alphanumeric_chars))
         self.vector_cache_enabled = bool(vector_cache_enabled)
+        self.embedding_retry_reset_hours = max(0.0, float(embedding_retry_reset_hours))
+        self.bm25_weights = (
+            float(bm25_weight_content),
+            float(bm25_weight_author),
+            float(bm25_weight_attachment),
+        )
+        self.fts_stopwords_enabled = bool(fts_stopwords_enabled)
+        self.fts_min_and_results = max(0, int(fts_min_and_results))
+        self.conversation_enabled = bool(conversation_enabled)
+        self.conversation_gap = timedelta(minutes=max(0.0, float(conversation_gap_minutes)))
+        self.conversation_max_messages = max(1, int(conversation_max_messages))
+        self.conversation_reply_merge_max = timedelta(hours=max(0.0, float(conversation_reply_merge_max_hours)))
+        self.conversation_turnover_window = max(1, int(conversation_turnover_window))
+        self.conversation_turnover_min_gap = timedelta(minutes=max(0.0, float(conversation_turnover_min_gap_minutes)))
         self._vector_lock = threading.RLock()
         self._vector_loaded = False
         self._vector_count = 0
@@ -194,9 +236,19 @@ class MessageIndexService:
                         embedding_eligibility_text TEXT,
                         content_hash TEXT NOT NULL,
                         hidden INTEGER NOT NULL DEFAULT 0,
-                        deleted_at TEXT
+                        deleted_at TEXT,
+                        conversation_id INTEGER
                     )
                     """
+                )
+                # Before the indexes below, one of which is on this column: an
+                # installed database predating it would otherwise fail the
+                # CREATE INDEX with "no such column".
+                self._ensure_column(
+                    conn,
+                    table_name="message_index",
+                    column_name="conversation_id",
+                    column_definition="INTEGER",
                 )
                 # Two scope indexes, one per scope the retrieval path actually
                 # uses, replacing the single (guild_id, channel_id, created_at)
@@ -235,6 +287,18 @@ class MessageIndexService:
                     """
                     CREATE INDEX IF NOT EXISTS idx_message_index_reply
                     ON message_index (reply_to_message_id)
+                    """
+                )
+                # Conversation expansion reads a whole conversation in
+                # chronological order; the same partial predicate keeps it off
+                # tombstoned rows, as the two scope indexes above do. Named
+                # without a `_time` suffix on purpose: the DAB-078 guard in
+                # tests/test_rag_query_plans.py counts `idx_message_index_%_time`.
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_message_index_conversation
+                    ON message_index (channel_id, conversation_id, created_at)
+                    WHERE hidden = 0 AND deleted_at IS NULL
                     """
                 )
                 conn.execute(
@@ -452,6 +516,7 @@ class MessageIndexService:
             created_at=self._parse_datetime(row["created_at"]),
             content_text=row["content_text"],
             attachment_summary=row["attachment_summary"] or "",
+            conversation_id=row["conversation_id"] if "conversation_id" in row.keys() else None,
             lexical_score=float(row["lexical_score"]) if "lexical_score" in row.keys() and row["lexical_score"] is not None else 0.0,
             semantic_score=float(row["semantic_score"]) if "semantic_score" in row.keys() and row["semantic_score"] is not None else 0.0,
         )
@@ -572,9 +637,18 @@ class MessageIndexService:
         try:
             with self._connection(transaction=True) as conn:
                 existing = conn.execute(
-                    "SELECT content_hash, hidden, deleted_at FROM message_index WHERE message_id = ?",
+                    "SELECT content_hash, hidden, deleted_at, conversation_id FROM message_index WHERE message_id = ?",
                     (message_id,),
                 ).fetchone()
+                conversation_id = existing["conversation_id"] if existing is not None else None
+                if conversation_id is None and self.conversation_enabled:
+                    conversation_id = self._assign_conversation_inline(
+                        conn,
+                        message_id=message_id,
+                        channel_id=channel_id,
+                        reply_to_message_id=reply_to_message_id,
+                        created_at=created_at,
+                    )
                 resolved_hidden = (
                     bool(existing["hidden"])
                     if hidden is None and existing is not None
@@ -587,9 +661,9 @@ class MessageIndexService:
                         message_id, guild_id, channel_id, author_id, author_name, is_bot,
                         reply_to_message_id, created_at, indexed_at, content_text,
                         attachment_summary, embedding_eligibility_text,
-                        content_hash, hidden, deleted_at
+                        content_hash, hidden, deleted_at, conversation_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
                     ON CONFLICT(message_id) DO UPDATE SET
                         guild_id = excluded.guild_id,
                         channel_id = excluded.channel_id,
@@ -603,7 +677,8 @@ class MessageIndexService:
                         attachment_summary = excluded.attachment_summary,
                         embedding_eligibility_text = excluded.embedding_eligibility_text,
                         content_hash = excluded.content_hash,
-                        hidden = excluded.hidden
+                        hidden = excluded.hidden,
+                        conversation_id = excluded.conversation_id
                     """,
                     (
                         message_id,
@@ -620,6 +695,7 @@ class MessageIndexService:
                         eligibility_text,
                         content_hash,
                         1 if resolved_hidden else 0,
+                        conversation_id,
                     ),
                 )
                 if self.fts_enabled:
@@ -1124,15 +1200,23 @@ class MessageIndexService:
                 self._vector_channel_ids[index] = self._vector_channel_ids[last]
             self._vector_count -= 1
 
+    @staticmethod
+    def _unit_vector(vector: np.ndarray) -> np.ndarray:
+        # The cache holds unit vectors, so a search is one dot product and no
+        # per-query norm pass. A zero vector stays zero and scores 0.
+        norm = float(np.linalg.norm(vector))
+        return vector if norm == 0.0 else vector / norm
+
     def _cache_upsert(self, message_id: int, guild_id: Optional[int], channel_id: int, vector: np.ndarray) -> None:
         if not self.vector_cache_enabled or vector.size != self.embedding_dimensions:
             return
+        unit = self._unit_vector(vector)
         with self._vector_lock:
             if not self._vector_loaded:
                 return
             self._cache_remove(message_id); self._ensure_vector_capacity(self._vector_count + 1)
             index = self._vector_count
-            self._vector_matrix[index] = vector; self._vector_message_ids[index] = int(message_id)
+            self._vector_matrix[index] = unit; self._vector_message_ids[index] = int(message_id)
             self._vector_guild_ids[index] = -1 if guild_id is None else int(guild_id); self._vector_channel_ids[index] = int(channel_id)
             self._vector_count += 1
 
@@ -1149,6 +1233,9 @@ class MessageIndexService:
                     continue
                 index = self._vector_count; self._vector_matrix[index] = vector
                 self._vector_message_ids[index] = int(row["message_id"]); self._vector_guild_ids[index] = -1 if row["guild_id"] is None else int(row["guild_id"]); self._vector_channel_ids[index] = int(row["channel_id"]); self._vector_count += 1
+            loaded = self._vector_matrix[:self._vector_count]
+            norms = np.linalg.norm(loaded, axis=1, keepdims=True)
+            np.divide(loaded, np.where(norms > 0, norms, np.float32(1.0)), out=loaded)
             self._vector_loaded = True
 
     @staticmethod
@@ -1478,7 +1565,7 @@ class MessageIndexService:
         return await asyncio.to_thread(self.search_recent, **kwargs)
 
     @staticmethod
-    def _build_fts_query(query: str) -> Optional[str]:
+    def _fts_terms(query: str, *, drop_stopwords: bool = False) -> list[str]:
         # `\w` rather than `A-Za-z0-9_`: the lexical half of DAB-087.
         #
         # The token class was Latin-only, so a query in any other script
@@ -1502,8 +1589,10 @@ class MessageIndexService:
         # The punctuation set is unchanged, so mentions, URLs and paths
         # tokenise exactly as before.
         tokens = re.findall(r"[\w@#./:-]{2,}", query or "")
-        if not tokens:
-            return None
+        if drop_stopwords:
+            # Keep them when they are all there is: "what did he do" has to
+            # search for something.
+            tokens = [token for token in tokens if token.lower() not in _FTS_STOPWORDS] or tokens
         terms = []
         seen = set()
         for token in tokens[:24]:
@@ -1513,6 +1602,12 @@ class MessageIndexService:
                 continue
             seen.add(lowered)
             terms.append(f'"{cleaned}"')
+        return terms
+
+    @staticmethod
+    def _build_fts_query(query: str) -> Optional[str]:
+        """The OR form, unfiltered. `search_lexical` prefers AND; see there."""
+        terms = MessageIndexService._fts_terms(query)
         return " OR ".join(terms) if terms else None
 
     def search_lexical(
@@ -1527,34 +1622,49 @@ class MessageIndexService:
     ) -> list[IndexedMessage]:
         if not self.fts_enabled:
             return []
-        fts_query = self._build_fts_query(query)
-        if not fts_query:
+        terms = self._fts_terms(query, drop_stopwords=self.fts_stopwords_enabled)
+        if not terms:
             return []
-        params: list = [fts_query]
-        scope = self._scope_clause(guild_id, channel_id, cross_channel, params)
-        exclude = self._exclude_clause(exclude_message_ids or [], params)
-        params.append(limit)
+        # bm25() is unweighted by default, and author_name is a one-token
+        # column: its short-field normalisation made a match on the AUTHOR
+        # outrank every match in a message BODY. Measured on a 50k corpus, the
+        # query "alice" returned 30 messages she had sent and none about her.
+        # bm25 is negative and better is more negative, so ORDER BY ASC stays.
+        scope_params: list = []
+        scope = self._scope_clause(guild_id, channel_id, cross_channel, scope_params)
+        exclude = self._exclude_clause(exclude_message_ids or [], scope_params)
+        sql = f"""
+            SELECT m.*, bm25(message_search_fts, ?, ?, ?) AS lexical_score, 0.0 AS semantic_score
+            FROM message_search_fts
+            JOIN message_index m ON m.message_id = message_search_fts.rowid
+            WHERE message_search_fts MATCH ?
+              AND {scope}
+              AND m.hidden = 0
+              AND m.deleted_at IS NULL
+              {exclude}
+            ORDER BY lexical_score ASC
+            LIMIT ?
+            """
+        # AND first: joining every token with OR matched 29,385 of 50,000 rows
+        # for one ordinary question. OR is the fallback when AND is too thin.
+        #
+        # Capped at `limit`, because the AND form cannot return more rows than
+        # were asked for: a threshold above the caller's limit is unreachable, so
+        # the AND query ran, was discarded and OR ran on every single retrieval.
+        enough = min(self.fts_min_and_results, limit)
+        forms = [" AND ".join(terms)]
+        if len(terms) > 1:
+            forms.append(" OR ".join(terms))
         try:
+            rows = []
             with self._connection() as conn:
-                rows = conn.execute(
-                    f"""
-                    SELECT m.*, bm25(message_search_fts) AS lexical_score, 0.0 AS semantic_score
-                    FROM message_search_fts
-                    JOIN message_index m ON m.message_id = message_search_fts.rowid
-                    WHERE message_search_fts MATCH ?
-                      AND {scope}
-                      AND m.hidden = 0
-                      AND m.deleted_at IS NULL
-                      {exclude}
-                    ORDER BY lexical_score ASC
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
-            messages = [self._row_to_indexed(row) for row in rows]
-            for rank, message in enumerate(messages, start=1):
-                message.lexical_score = 1.0 / rank
-            return messages
+                for fts_query in forms:
+                    rows = conn.execute(
+                        sql, [*self.bm25_weights, fts_query, *scope_params, limit]
+                    ).fetchall()
+                    if len(rows) >= enough:
+                        break
+            return [self._row_to_indexed(row) for row in rows]
         except sqlite3.OperationalError as exc:
             logger.warning("FTS RAG query failed; lexical retrieval skipped: %s", exc)
             return []
@@ -1571,6 +1681,10 @@ class MessageIndexService:
         *,
         channel_id: Optional[int] = None,
     ) -> list[tuple[int, str, str]]:
+        # 'failed' is a pause, not a tombstone: a terminal failure parks
+        # next_retry_at one reset window out and the row returns here on its
+        # own. A NULL there on a failed row is a terminal failure recorded
+        # before that was true, and is retryable now.
         try:
             channel_clause = ""
             params: list = [self.embedding_model, self._now_iso()]
@@ -1585,7 +1699,7 @@ class MessageIndexService:
                     FROM message_embeddings e
                     JOIN message_index m ON m.message_id = e.message_id
                     WHERE e.embedding_model = ?
-                      AND e.embedding_status = 'pending'
+                      AND e.embedding_status IN ('pending', 'failed')
                       AND (e.next_retry_at IS NULL OR e.next_retry_at <= ?)
                       AND m.hidden = 0
                       AND m.deleted_at IS NULL
@@ -1664,8 +1778,21 @@ class MessageIndexService:
                 ).fetchone()
                 attempts = int(row["embedding_attempts"] or 0) + 1 if row else 1
                 terminal = attempts >= self.max_embedding_attempts
-                retry_delay_seconds = min(60 * (2 ** max(0, attempts - 1)), 3600)
-                next_retry_at = None if terminal else (
+                # Terminal parks the row for one reset window instead of
+                # forever: a rate-limit storm mid-backfill used to leave rows
+                # unembeddable until somebody hand-edited SQLite.
+                #
+                # Policy: each terminal failure doubles the next reset window
+                # (24h, 48h, 96h ...), capped at ten doublings, so a permanently
+                # bad row costs a handful of embedding calls in total rather than
+                # one per window forever, and a transient outage still recovers.
+                resets = min(attempts - self.max_embedding_attempts, 10)
+                retry_delay_seconds = (
+                    self.embedding_retry_reset_hours * 3600.0 * 2 ** resets
+                    if terminal
+                    else min(60 * (2 ** max(0, attempts - 1)), 3600)
+                )
+                next_retry_at = (
                     datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)
                 ).isoformat()
                 conn.execute(
@@ -1692,15 +1819,18 @@ class MessageIndexService:
         await asyncio.to_thread(self.mark_embedding_failed, message_id, error)
 
     @staticmethod
-    def _cosine_similarity(left: list[float], right: list[float]) -> float:
-        if not left or not right or len(left) != len(right):
-            return 0.0
-        dot = sum(a * b for a, b in zip(left, right))
-        left_norm = math.sqrt(sum(a * a for a in left))
-        right_norm = math.sqrt(sum(b * b for b in right))
-        if left_norm == 0.0 or right_norm == 0.0:
-            return 0.0
-        return dot / (left_norm * right_norm)
+    def _top_k(scores: np.ndarray, k: int) -> np.ndarray:
+        """The k highest scores' indices, ties broken by ascending index.
+
+        Everything at or above the k-th value is stable-sorted rather than the
+        whole array, which reproduces `argsort(-scores)[:k]` exactly, including
+        ties that straddle the cut.
+        """
+        if k >= scores.size:
+            return np.argsort(-scores, kind="stable")[:k]
+        cutoff = np.partition(-scores, k - 1)[k - 1]
+        candidates = np.flatnonzero(-scores <= cutoff)
+        return candidates[np.argsort(-scores[candidates], kind="stable")][:k]
 
     def search_semantic(
         self,
@@ -1720,6 +1850,7 @@ class MessageIndexService:
             if not self.vector_cache_enabled or query_vector.size != self.embedding_dimensions:
                 return self._search_semantic_sql_compat(query_vector, guild_id=guild_id, channel_id=channel_id, cross_channel=cross_channel, limit=limit, exclude_message_ids=exclude_message_ids)
             self._load_vector_cache()
+            unit_query = query_vector / query_norm
             with self._vector_lock:
                 count = self._vector_count
                 if not count: return []
@@ -1728,15 +1859,15 @@ class MessageIndexService:
                     mask = self._vector_guild_ids[:count] == int(guild_id)
                 excluded = set(int(value) for value in (exclude_message_ids or []))
                 if excluded: mask &= ~np.isin(self._vector_message_ids[:count], list(excluded))
-                positions = np.flatnonzero(mask)
-                if not len(positions): return []
-                matrix = self._vector_matrix[positions]
-                norms = np.linalg.norm(matrix, axis=1)
-                scores = np.zeros(len(positions), dtype=np.float32)
-                valid = norms > 0
-                scores[valid] = (matrix[valid] @ query_vector) / (norms[valid] * query_norm)
-                order = np.argsort(-scores, kind="stable")[:limit]
-                ranked = [(int(self._vector_message_ids[positions[i]]), float(scores[i])) for i in order if np.isfinite(scores[i]) and scores[i] > 0]
+                matching = int(np.count_nonzero(mask))
+                if not matching: return []
+                # Both operands are unit vectors, so the dot product IS the
+                # cosine. Scoring the live slice and masking the SCORES keeps
+                # this copy-free: `matrix[positions]` was a 153 MB fancy-index
+                # copy at 50k rows, and `matrix[valid]` a second one.
+                scores = self._vector_matrix[:count] @ unit_query
+                scores[~mask] = -np.inf
+                ranked = [(int(self._vector_message_ids[i]), float(scores[i])) for i in self._top_k(scores, min(limit, matching)) if np.isfinite(scores[i]) and scores[i] > 0]
             messages = {item.message_id: item for item in self.get_messages_by_ids(message_id for message_id, _score in ranked)}
             results = []
             for message_id, score in ranked:
@@ -1754,12 +1885,16 @@ class MessageIndexService:
         exclude = self._exclude_clause(exclude_message_ids or [], params)
         with self._connection() as conn:
             rows = conn.execute(f"SELECT m.*,e.embedding_vector,0.0 AS lexical_score,0.0 AS semantic_score FROM message_embeddings e JOIN message_index m ON m.message_id=e.message_id WHERE e.embedding_model=? AND e.embedding_status='done' AND e.embedding_vector IS NOT NULL AND {scope} AND m.hidden=0 AND m.deleted_at IS NULL {exclude}", [self.embedding_model, *params]).fetchall()
+        # Scored exactly as the cached path scores: a dot product against the unit
+        # query, divided by the stored vector's own norm. Zero-norm vectors score 0.
+        unit_query = self._unit_vector(query_vector)
         scored = []
         for row in rows:
             vector = self._decode_vector(row["embedding_vector"])
             if vector is None or vector.size != query_vector.size:
                 continue
-            score = self._cosine_similarity(vector.tolist(), query_vector.tolist())
+            norm = float(np.linalg.norm(vector))
+            score = 0.0 if norm == 0.0 else float(vector @ unit_query) / norm
             if score > 0: scored.append((score, row))
         results = []
         for score, row in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]:
@@ -1790,6 +1925,288 @@ class MessageIndexService:
         except Exception as exc:
             logger.error("Failed to load indexed messages by id: %s", exc, exc_info=True)
             return []
+
+    @staticmethod
+    def _conversation_size(conn: sqlite3.Connection, *, channel_id: int, conversation_id: int) -> int:
+        return conn.execute(
+            """
+            SELECT COUNT(*) FROM message_index
+            WHERE channel_id = ? AND conversation_id = ?
+              AND hidden = 0 AND deleted_at IS NULL
+            """,
+            (channel_id, conversation_id),
+        ).fetchone()[0]
+
+    def _assign_conversation_inline(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        message_id: int,
+        channel_id: int,
+        reply_to_message_id: Optional[int],
+        created_at: datetime,
+    ) -> int:
+        # Silence gap, size cap and a single-hop reply merge. Participant
+        # turnover needs lookahead this path does not have, so
+        # recompute_channel_conversations stays the authoritative pass.
+        conversation_id = message_id
+        previous = conn.execute(
+            """
+            SELECT conversation_id, created_at
+            FROM message_index
+            WHERE channel_id = ? AND created_at < ?
+              AND hidden = 0 AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (channel_id, created_at.isoformat()),
+        ).fetchone()
+        if previous is not None and previous["conversation_id"] is not None:
+            within_gap = created_at - self._parse_datetime(previous["created_at"]) <= self.conversation_gap
+            if within_gap and self._conversation_size(
+                conn, channel_id=channel_id, conversation_id=previous["conversation_id"]
+            ) < self.conversation_max_messages:
+                conversation_id = previous["conversation_id"]
+
+        if reply_to_message_id is None:
+            return conversation_id
+        target = conn.execute(
+            "SELECT channel_id, conversation_id, created_at FROM message_index WHERE message_id = ?",
+            (reply_to_message_id,),
+        ).fetchone()
+        if (
+            target is None
+            or target["conversation_id"] is None
+            or target["conversation_id"] == conversation_id
+            or int(target["channel_id"]) != int(channel_id)
+        ):
+            return conversation_id
+        # Both merge bounds, exactly as the batch pass applies them: the cap is
+        # checked against the SUM of the two conversations plus this message,
+        # because what follows merges them both.
+        if created_at - self._parse_datetime(target["created_at"]) >= self.conversation_reply_merge_max:
+            return conversation_id
+        merged_size = 1 + self._conversation_size(
+            conn, channel_id=channel_id, conversation_id=target["conversation_id"]
+        ) + self._conversation_size(
+            conn, channel_id=channel_id, conversation_id=conversation_id
+        )
+        if merged_size > self.conversation_max_messages:
+            return conversation_id
+        # Union both conversations into the older one, which is what
+        # _segment_channel_rows does. Moving the reply alone left the same data
+        # segmented one way live and another way after a rebuild. The only
+        # remaining difference is turnover, which needs lookahead this path does
+        # not have, so these rules stay a subset of the batch pass and
+        # recompute_channel_conversations stays authoritative.
+        conn.execute(
+            "UPDATE message_index SET conversation_id = ?"
+            " WHERE channel_id = ? AND conversation_id = ?",
+            (target["conversation_id"], channel_id, conversation_id),
+        )
+        return target["conversation_id"]
+
+    def _segment_channel_rows(self, rows: Iterable[tuple]) -> list[tuple[int, int]]:
+        """Map one channel's messages, oldest first, to (message_id, conversation_id)."""
+        window = self.conversation_turnover_window
+        cap = self.conversation_max_messages
+        parent: dict[int, int] = {}
+        size: dict[int, int] = {}
+        order: dict[int, int] = {}
+        # message_id -> (conversation at the time, created_at), for reply merges.
+        placed: dict[int, tuple[int, datetime]] = {}
+        assignments: list[tuple[int, int]] = []
+
+        def find(conversation_id: int) -> int:
+            root = conversation_id
+            while parent[root] != root:
+                root = parent[root]
+            while parent[conversation_id] != root:
+                parent[conversation_id], conversation_id = root, parent[conversation_id]
+            return root
+
+        source = iter(rows)
+        upcoming: deque = deque()
+        recent_authors: deque = deque(maxlen=window)
+        current: Optional[int] = None
+        previous_created: Optional[datetime] = None
+        sequence = 0
+        while True:
+            while len(upcoming) < window:
+                try:
+                    upcoming.append(next(source))
+                except StopIteration:
+                    break
+            if not upcoming:
+                break
+            lookahead = list(upcoming)[:window]
+            next_authors = {row[1] for row in lookahead}
+            message_id, author_key, created_at, reply_to = upcoming.popleft()
+
+            start_new = current is None
+            if not start_new:
+                elapsed = created_at - previous_created
+                if elapsed > self.conversation_gap or size[find(current)] >= cap:
+                    start_new = True
+                elif (
+                    # Turnover only counts with a full window either side and a
+                    # real pause: without the sub-gap a newcomer joining a live
+                    # discussion would split it.
+                    len(lookahead) == window
+                    and len(recent_authors) == window
+                    and elapsed >= self.conversation_turnover_min_gap
+                    and not next_authors & set(recent_authors)
+                ):
+                    start_new = True
+            if start_new:
+                current = message_id
+                parent[current] = current
+                size[current] = 0
+                order[current] = sequence
+            root = find(current)
+            size[root] += 1
+            assignments.append((message_id, root))
+            placed[message_id] = (root, created_at)
+            recent_authors.append(author_key)
+            previous_created = created_at
+            sequence += 1
+
+            if reply_to is not None and reply_to in placed:
+                target_root, target_created = placed[reply_to]
+                target_root = find(target_root)
+                if (
+                    target_root != root
+                    and created_at - target_created < self.conversation_reply_merge_max
+                    and size[target_root] + size[root] <= cap
+                ):
+                    winner, loser = (
+                        (target_root, root) if order[target_root] <= order[root] else (root, target_root)
+                    )
+                    parent[loser] = winner
+                    size[winner] += size[loser]
+        return [(message_id, find(root)) for message_id, root in assignments]
+
+    def list_indexed_channel_ids(self) -> list[int]:
+        with self._connection() as conn:
+            return [
+                int(row[0])
+                for row in conn.execute(
+                    "SELECT DISTINCT channel_id FROM message_index ORDER BY channel_id"
+                )
+            ]
+
+    def recompute_channel_conversations(self, channel_id: int, *, dry_run: bool = False) -> dict:
+        """Authoritative segmentation for one channel; deterministic and idempotent."""
+        channel_id = int(channel_id)
+        previous_ids: list[Optional[int]] = []
+
+        def stream(cursor):
+            for row in cursor:
+                previous_ids.append(row["conversation_id"])
+                yield (
+                    int(row["message_id"]),
+                    row["author_key"],
+                    self._parse_datetime(row["created_at"]),
+                    row["reply_to_message_id"],
+                )
+
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT message_id, COALESCE(author_id, author_name) AS author_key,
+                       created_at, reply_to_message_id, conversation_id
+                FROM message_index
+                WHERE channel_id = ? AND hidden = 0 AND deleted_at IS NULL
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (channel_id,),
+            )
+            assignments = self._segment_channel_rows(stream(cursor))
+
+        changed = sum(
+            1
+            for (_message_id, conversation_id), was in zip(assignments, previous_ids)
+            if conversation_id != was
+        )
+        if assignments and not dry_run:
+            with self._connection(transaction=True) as conn:
+                conn.executemany(
+                    "UPDATE message_index SET conversation_id = ? WHERE message_id = ?",
+                    ((conversation_id, message_id) for message_id, conversation_id in assignments),
+                )
+        return {
+            "channel_id": channel_id,
+            "messages": len(assignments),
+            "conversations": len({conversation_id for _mid, conversation_id in assignments}),
+            "changed": changed,
+        }
+
+    def get_conversation_window(
+        self,
+        conversation_id: int,
+        *,
+        center_message_id: int,
+        full_max_messages: int,
+        window_messages: int,
+        channel_id: Optional[int] = None,
+        exclude_message_ids: Optional[Iterable[int]] = None,
+    ) -> list[IndexedMessage]:
+        if conversation_id is None:
+            return []
+        try:
+            with self._connection() as conn:
+                # channel_id has to be bound or idx_message_index_conversation
+                # cannot drive the read: without it the query full-scans
+                # message_index and sorts into a temp B-tree. The caller knows
+                # it; failing that the centre row does; failing that the
+                # conversation's own root message, whose id IS the conversation
+                # id. A window with no resolvable channel is not worth a scan.
+                for candidate in (center_message_id, conversation_id):
+                    if channel_id is not None:
+                        break
+                    row = conn.execute(
+                        "SELECT channel_id FROM message_index WHERE message_id = ?",
+                        (int(candidate),),
+                    ).fetchone()
+                    channel_id = None if row is None else int(row["channel_id"])
+                if channel_id is None:
+                    return []
+                rows = conn.execute(
+                    """
+                    SELECT m.*, 0.0 AS lexical_score, 0.0 AS semantic_score
+                    FROM message_index m
+                    WHERE m.channel_id = ?
+                      AND m.conversation_id = ?
+                      AND m.hidden = 0
+                      AND m.deleted_at IS NULL
+                    ORDER BY m.created_at ASC
+                    """,
+                    (int(channel_id), int(conversation_id)),
+                ).fetchall()
+        except Exception as exc:
+            logger.error("Conversation window query failed: %s", exc, exc_info=True)
+            return []
+
+        messages = [self._row_to_indexed(row) for row in rows]
+        if len(messages) > max(1, int(full_max_messages)):
+            span = max(1, int(window_messages))
+            # An absent centre falls back to the tail, which is the recency
+            # default the rest of retrieval uses.
+            centre_index = next(
+                (
+                    index
+                    for index, message in enumerate(messages)
+                    if message.message_id == int(center_message_id)
+                ),
+                len(messages) - 1,
+            )
+            start = max(0, min(centre_index - span // 2, len(messages) - span))
+            messages = messages[start:start + span]
+        excluded = {int(message_id) for message_id in exclude_message_ids or []}
+        return [message for message in messages if message.message_id not in excluded]
+
+    async def get_conversation_window_async(self, conversation_id: int, **kwargs) -> list[IndexedMessage]:
+        return await asyncio.to_thread(self.get_conversation_window, conversation_id, **kwargs)
 
     def record_retrieval_event(
         self,

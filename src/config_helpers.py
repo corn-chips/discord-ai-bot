@@ -386,13 +386,13 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
             get_config_value(config_data, "rag", "recency_half_life_hours", 72)
         ),
         "rag_max_context_messages_low": int(
-            get_config_value(config_data, "rag", "max_context_messages_low", 4)
+            get_config_value(config_data, "rag", "max_context_messages_low", 6)
         ),
         "rag_max_context_messages_medium": int(
-            get_config_value(config_data, "rag", "max_context_messages_medium", 6)
+            get_config_value(config_data, "rag", "max_context_messages_medium", 10)
         ),
         "rag_max_context_messages_high": int(
-            get_config_value(config_data, "rag", "max_context_messages_high", 8)
+            get_config_value(config_data, "rag", "max_context_messages_high", 14)
         ),
         "rag_embedding_min_words": int(
             get_config_value(config_data, "rag", "embedding_min_words", 2)
@@ -402,6 +402,102 @@ def _parse_rag_values(config_data: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "rag_vector_cache_enabled": get_config_value(
             config_data, "rag", "vector_cache_enabled", True
+        ),
+        "rag_embedding_batch_delay_seconds": float(
+            get_config_value(config_data, "rag", "embedding_batch_delay_seconds", 1.0)
+        ),
+        "rag_embedding_drain_max_batches": int(
+            get_config_value(config_data, "rag", "embedding_drain_max_batches", 200)
+        ),
+        "rag_embedding_timeout_seconds": float(
+            get_config_value(config_data, "rag", "embedding_timeout_seconds", 30.0)
+        ),
+        "rag_embedding_retry_reset_hours": float(
+            get_config_value(config_data, "rag", "embedding_retry_reset_hours", 24.0)
+        ),
+        "rag_bm25_weight_content": float(
+            get_config_value(config_data, "rag", "bm25_weight_content", 1.0)
+        ),
+        "rag_bm25_weight_author": float(
+            get_config_value(config_data, "rag", "bm25_weight_author", 0.1)
+        ),
+        "rag_bm25_weight_attachment": float(
+            get_config_value(config_data, "rag", "bm25_weight_attachment", 0.5)
+        ),
+        "rag_fts_stopwords_enabled": bool(
+            get_config_value(config_data, "rag", "fts_stopwords_enabled", True)
+        ),
+        "rag_fts_min_and_results": int(
+            get_config_value(config_data, "rag", "fts_min_and_results", 5)
+        ),
+        "rag_rrf_k": float(get_config_value(config_data, "rag", "rrf_k", 60.0)),
+        "rag_fusion_weight_recent": float(
+            get_config_value(config_data, "rag", "fusion_weight_recent", 0.7)
+        ),
+        "rag_fusion_weight_lexical": float(
+            get_config_value(config_data, "rag", "fusion_weight_lexical", 2.0)
+        ),
+        "rag_fusion_weight_semantic": float(
+            get_config_value(config_data, "rag", "fusion_weight_semantic", 2.0)
+        ),
+        "rag_context_char_budget": int(
+            get_config_value(config_data, "rag", "context_char_budget", 8000)
+        ),
+        "rag_query_embedding_cache_size": int(
+            get_config_value(config_data, "rag", "query_embedding_cache_size", 128)
+        ),
+        "rag_query_embedding_cache_ttl": int(
+            get_config_value(config_data, "rag", "query_embedding_cache_ttl", 900)
+        ),
+        "rag_conversation_enabled": bool(
+            get_config_value(config_data, "rag", "conversation_enabled", True)
+        ),
+        "rag_conversation_gap_minutes": float(
+            get_config_value(config_data, "rag", "conversation_gap_minutes", 10.0)
+        ),
+        "rag_conversation_max_messages": int(
+            get_config_value(config_data, "rag", "conversation_max_messages", 40)
+        ),
+        "rag_conversation_reply_merge_max_hours": float(
+            get_config_value(
+                config_data, "rag", "conversation_reply_merge_max_hours", 6.0
+            )
+        ),
+        "rag_conversation_turnover_window": int(
+            get_config_value(config_data, "rag", "conversation_turnover_window", 3)
+        ),
+        "rag_conversation_turnover_min_gap_minutes": float(
+            get_config_value(
+                config_data, "rag", "conversation_turnover_min_gap_minutes", 3.0
+            )
+        ),
+        "rag_conversation_expand_full_max_messages": int(
+            get_config_value(
+                config_data, "rag", "conversation_expand_full_max_messages", 12
+            )
+        ),
+        "rag_conversation_expand_window_messages": int(
+            get_config_value(
+                config_data, "rag", "conversation_expand_window_messages", 8
+            )
+        ),
+        "rag_query_rewrite_enabled": bool(
+            get_config_value(config_data, "rag", "query_rewrite_enabled", True)
+        ),
+        "rag_query_rewrite_history_turns": int(
+            get_config_value(config_data, "rag", "query_rewrite_history_turns", 4)
+        ),
+        "rag_entity_profiles_enabled": bool(
+            get_config_value(config_data, "rag", "entity_profiles_enabled", True)
+        ),
+        "rag_entity_profile_min_messages": int(
+            get_config_value(config_data, "rag", "entity_profile_min_messages", 20)
+        ),
+        "rag_entity_profile_refresh_hours": float(
+            get_config_value(config_data, "rag", "entity_profile_refresh_hours", 24.0)
+        ),
+        "rag_entity_profile_max_chars": int(
+            get_config_value(config_data, "rag", "entity_profile_max_chars", 1200)
         ),
     }
 
@@ -618,6 +714,58 @@ def _validate_core_values(config: Any) -> List[str]:
             errors.append("rag.max_context_messages_low/medium/high must all be positive")
         elif not (config.rag_max_context_messages_low <= config.rag_max_context_messages_medium <= config.rag_max_context_messages_high):
             errors.append("rag.max_context_messages_low <= medium <= high is required")
+        if config.rag_embedding_batch_delay_seconds < 0:
+            errors.append("rag.embedding_batch_delay_seconds must be zero or positive")
+        if config.rag_embedding_drain_max_batches <= 0:
+            errors.append("rag.embedding_drain_max_batches must be positive")
+        if config.rag_embedding_timeout_seconds <= 0:
+            errors.append("rag.embedding_timeout_seconds must be positive")
+        if config.rag_embedding_retry_reset_hours <= 0:
+            errors.append("rag.embedding_retry_reset_hours must be positive")
+        if (
+            config.rag_bm25_weight_content < 0
+            or config.rag_bm25_weight_author < 0
+            or config.rag_bm25_weight_attachment < 0
+        ):
+            errors.append("rag.bm25_weight_content/author/attachment must all be zero or positive")
+        if config.rag_fts_min_and_results < 0:
+            errors.append("rag.fts_min_and_results must be zero or positive")
+        if config.rag_rrf_k <= 0:
+            errors.append("rag.rrf_k must be positive")
+        if (
+            config.rag_fusion_weight_recent < 0
+            or config.rag_fusion_weight_lexical < 0
+            or config.rag_fusion_weight_semantic < 0
+        ):
+            errors.append("rag.fusion_weight_recent/lexical/semantic must all be zero or positive")
+        if config.rag_context_char_budget <= 0:
+            errors.append("rag.context_char_budget must be positive")
+        if config.rag_query_embedding_cache_size <= 0:
+            errors.append("rag.query_embedding_cache_size must be positive")
+        if config.rag_query_embedding_cache_ttl <= 0:
+            errors.append("rag.query_embedding_cache_ttl must be positive")
+        if config.rag_conversation_gap_minutes <= 0:
+            errors.append("rag.conversation_gap_minutes must be positive")
+        if config.rag_conversation_max_messages <= 0:
+            errors.append("rag.conversation_max_messages must be positive")
+        if config.rag_conversation_reply_merge_max_hours <= 0:
+            errors.append("rag.conversation_reply_merge_max_hours must be positive")
+        if config.rag_conversation_turnover_window <= 0:
+            errors.append("rag.conversation_turnover_window must be positive")
+        if config.rag_conversation_turnover_min_gap_minutes < 0:
+            errors.append("rag.conversation_turnover_min_gap_minutes must be zero or positive")
+        if config.rag_conversation_expand_full_max_messages <= 0:
+            errors.append("rag.conversation_expand_full_max_messages must be positive")
+        if config.rag_conversation_expand_window_messages <= 0:
+            errors.append("rag.conversation_expand_window_messages must be positive")
+        if config.rag_query_rewrite_history_turns <= 0:
+            errors.append("rag.query_rewrite_history_turns must be positive")
+        if config.rag_entity_profile_min_messages <= 0:
+            errors.append("rag.entity_profile_min_messages must be positive")
+        if config.rag_entity_profile_refresh_hours <= 0:
+            errors.append("rag.entity_profile_refresh_hours must be positive")
+        if config.rag_entity_profile_max_chars <= 0:
+            errors.append("rag.entity_profile_max_chars must be positive")
     if config.response_timeout <= 0:
         errors.append("response.timeout must be positive")
     if config.max_retries < 0:

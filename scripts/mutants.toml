@@ -101,8 +101,8 @@ guard = "test_a_failure_after_delivery_is_not_retried_through_the_fallback"
 file = "src/bot/discord_bot.py"
 expect = "killed"
 [[mutant.edit]]
-find = "                rag_context = None\n                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                    )\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n\n                # Only a *retrieval* failure may fall through to the legacy path.\n                # Generation and delivery used to sit inside this try, so anything\n                # that failed after the model had already answered re-entered the\n                # legacy path and answered again: a second reply and a second\n                # Gemini charge for one inbound message.\n                #\n                # The gate is `is not None`, not truthiness. A retrieval that\n                # legitimately returns an empty context has succeeded, and\n                # re-running it buys a duplicate generation for nothing.\n                if rag_context is not None:\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n"
-replace = "                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                    )\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n"
+find = "                rag_context = None\n                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                        search_query=search_query,\n                    )\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n\n                # Only a *retrieval* failure may fall through to the legacy path.\n                # Generation and delivery used to sit inside this try, so anything\n                # that failed after the model had already answered re-entered the\n                # legacy path and answered again: a second reply and a second\n                # Gemini charge for one inbound message.\n                #\n                # The gate is `is not None`, not truthiness. A retrieval that\n                # legitimately returns an empty context has succeeded, and\n                # re-running it buys a duplicate generation for nothing.\n                if rag_context is not None:\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n"
+replace = "                try:\n                    rag_context = await self.hybrid_context_retriever.retrieve(\n                        message=message,\n                        user_prompt=user_prompt,\n                        complexity_level=complexity_level,\n                        bot_user_id=self.user.id if self.user else None,\n                        needs_context=needs_context,\n                        force_full_context=bool(message.reference) or routed_intent == \"live_mode\",\n                        search_query=search_query,\n                    )\n                    await self._generate_and_send_response(\n                        message,\n                        user_prompt,\n                        rag_context,\n                        model_override=model_override,\n                        prompt_mode_override=prompt_mode_override,\n                        search_override=search_override,\n                        show_status_message=show_status_message,\n                        skip_context_media=skip_context_media,\n                        apply_user_preferences=apply_user_preferences,\n                        complexity_level=complexity_level,\n                    )\n                    return\n                except Exception as exc:\n                    logger.warning(\n                        \"Hybrid RAG failed for message %s; using legacy context fallback: %s\",\n                        message.id,\n                        exc,\n                    )\n"
 
 [[mutant]]
 id = "M-DAB001B"
@@ -2178,3 +2178,369 @@ expect = "killed"
 [[mutant.edit]]
 find = "        name = SAFETY_THRESHOLD_FALLBACK\n    return types.HarmBlockThreshold[name]"
 replace = "            name = SAFETY_THRESHOLD_FALLBACK\n        else:\n            name = 'BLOCK_NONE'\n    return types.HarmBlockThreshold[name]"
+
+# --- The 2026 RAG overhaul -------------------------------------------------
+#
+# Retrieval quality, packing and rendering. The overhaul landed with tests but
+# no mutants, so every claim below was "the test covers it" rather than "the
+# test fails without it". `bug` names the area rather than a ticket: there is
+# no ticket, the work was one programme.
+
+[[mutant]]
+id = "M-RAG01"
+bug = "RAG-LEX"
+# The headline relevance defect. `message_search_fts` is
+# fts5(content_text, author_name, attachment_summary) and bm25() weights every
+# column at 1.0 by default; author_name holds one token, so BM25's short-field
+# normalisation made a hit on the AUTHOR beat any hit in a message BODY.
+# Measured on a 50k corpus: "alice" returned 30 messages she had SENT and none
+# about her. The bindings go with the weights -- left behind they are three
+# surplus parameters, which is a ProgrammingError rather than the old ranking.
+summary = "bm25 column weights dropped, so a query for a person returns what they wrote, not what was said about them"
+guard = "test_a_body_match_outranks_every_message_the_person_sent"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            SELECT m.*, bm25(message_search_fts, ?, ?, ?) AS lexical_score, 0.0 AS semantic_score\n"
+replace = "            SELECT m.*, bm25(message_search_fts) AS lexical_score, 0.0 AS semantic_score\n"
+[[mutant.edit]]
+find = "                        sql, [*self.bm25_weights, fts_query, *scope_params, limit]\n"
+replace = "                        sql, [fts_query, *scope_params, limit]\n"
+
+[[mutant]]
+id = "M-RAG02"
+bug = "RAG-LEX"
+# "who is alice and what did they do" searched for every one of those words.
+# The stopwords carry no discrimination and the OR form matches anything that
+# holds one, so the content word that mattered was buried. `_fts_terms` keeps
+# the stopwords when they are all there is, so nothing degrades to an empty
+# query -- that path is pinned separately.
+summary = "Stopword filtering dropped from the lexical query, so a question searches for its filler words"
+guard = "test_a_stopword_heavy_question_searches_only_its_content_words"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        terms = self._fts_terms(query, drop_stopwords=self.fts_stopwords_enabled)\n"
+replace = "        terms = self._fts_terms(query)\n"
+
+[[mutant]]
+id = "M-RAG03"
+bug = "RAG-LEX"
+# Joining every token with OR matched 29,385 of 50,000 rows for one ordinary
+# question, and bm25 then had to rank near-noise. AND first, OR only as the
+# fallback when AND comes back too thin.
+summary = "AND-preferred matching removed, so the OR form runs on every lexical search"
+guard = "test_and_matching_is_preferred_when_it_returns_enough_rows"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        forms = [\" AND \".join(terms)]\n        if len(terms) > 1:\n            forms.append(\" OR \".join(terms))\n"
+replace = "        forms = [\" OR \".join(terms)]\n"
+
+[[mutant]]
+id = "M-RAG03B"
+bug = "RAG-LEX"
+# The same defect by the subtler route, and the one that actually shipped: the
+# threshold was compared against a row set `limit` had already capped, so any
+# caller asking for fewer rows than `fts_min_and_results` made the AND form
+# unreachable. It ran, was thrown away, and OR ran anyway -- two queries per
+# retrieval for the worse of the two results.
+#
+# The guard is NOT test_a_limit_below_the_threshold_does_not_disable_the_and_preference,
+# the test named for this fix: it asserts the ROWS, and both AND matches also
+# top the OR ranking, so it passed with the cap removed and this mutant
+# survived. Only the queries issued distinguish the two, which is what the
+# guard below records.
+summary = "AND/OR threshold compared against an uncapped count, so a small limit silently disables the AND preference"
+guard = "test_a_limit_below_the_threshold_still_runs_only_the_and_query"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        enough = min(self.fts_min_and_results, limit)\n"
+replace = "        enough = self.fts_min_and_results\n"
+
+[[mutant]]
+id = "M-RAG04"
+bug = "RAG-VEC"
+# The cached matrix is multiplied straight against a unit query, so the dot
+# product IS the cosine only while the rows are unit vectors. Skip the
+# normalisation at load and every score is scaled by the stored vector's own
+# magnitude: an embedding that happens to be long outranks a closer one.
+summary = "Vector cache loaded unnormalised, so the 'cosine' is a raw dot product scaled by each vector's magnitude"
+guard = "test_scores_are_cosines_whatever_magnitude_was_stored"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            loaded = self._vector_matrix[:self._vector_count]\n            norms = np.linalg.norm(loaded, axis=1, keepdims=True)\n            np.divide(loaded, np.where(norms > 0, norms, np.float32(1.0)), out=loaded)\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG05"
+bug = "RAG-VEC"
+# `np.flatnonzero` returns candidates in INDEX order, not score order. Slicing
+# it directly picks the right k-sized pool and then hands it to the caller
+# ranked by message position, which is not a ranking at all -- and the top hit
+# is whichever qualifying message happens to sit first in the cache.
+summary = "Top-k slice taken unsorted, so the semantic leg returns its k best in cache order rather than by score"
+guard = "test_top_k_reproduces_a_full_argsort_including_ties"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        return candidates[np.argsort(-scores[candidates], kind=\"stable\")][:k]\n"
+replace = "        return candidates[:k]\n"
+
+[[mutant]]
+id = "M-RAG06"
+bug = "RAG-VEC"
+# 'failed' used to be a tombstone: three attempts and the row was never offered
+# again. A rate-limit storm part-way through a backfill therefore left a block
+# of messages permanently unembeddable, and hand-editing SQLite was the only
+# way back. `mark_embedding_failed` parks a terminal row one reset window out
+# instead, which only rescues anything if this query still selects it.
+summary = "'failed' is terminal again, so rows parked by a rate-limit storm are never retried"
+guard = "test_the_row_comes_back_once_the_window_has_passed"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                      AND e.embedding_status IN ('pending', 'failed')\n"
+replace = "                      AND e.embedding_status = 'pending'\n"
+
+[[mutant]]
+id = "M-RAG07"
+bug = "RAG-CONV"
+# Turnover splits a conversation when the next `window` authors share nobody
+# with the last `window`. Without the sub-gap requirement that fires on a
+# newcomer joining a live discussion mid-flow, cutting the exchange in half at
+# the moment it gets interesting.
+summary = "Participant-turnover split loses its sub-gap requirement, so a newcomer joining an active discussion splits it"
+guard = "test_turnover_without_the_sub_gap_does_not_split"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    and elapsed >= self.conversation_turnover_min_gap\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG08"
+bug = "RAG-CONV"
+# A reply merges the two conversations it spans, bounded by time and by size.
+# Unbounded in time, a reply to a three-day-old message drags that whole
+# conversation into today's and the expansion window then renders it.
+summary = "Reply merge loses its time-span bound, so a reply to a days-old message merges the two conversations"
+guard = "test_a_reply_outside_the_hour_bound_is_left_alone"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    and created_at - target_created < self.conversation_reply_merge_max\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG08B"
+bug = "RAG-CONV"
+# The other bound. Merging past the size cap is how one conversation swallows a
+# channel: every subsequent reply extends it, and `conversation_max_messages`
+# stops bounding anything.
+summary = "Reply merge loses its size cap, so merges grow a conversation past conversation_max_messages"
+guard = "test_a_merge_that_would_exceed_the_cap_is_refused"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    and size[target_root] + size[root] <= cap\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG09"
+bug = "RAG-CONV"
+# The window is centred on the hit and then clipped so it stays inside the
+# conversation. Unclipped, a hit at the start yields a negative `start`, which
+# slices from the END of the list and returns an empty window -- the hit's own
+# conversation, dropped, silently.
+summary = "Conversation window centring is not clipped, so a hit at either edge returns a short or empty window"
+guard = "test_the_window_clips_at_the_start_and_still_returns_a_full_window"
+file = "src/services/message_index_service.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            start = max(0, min(centre_index - span // 2, len(messages) - span))\n"
+replace = "            start = centre_index - span // 2\n"
+
+[[mutant]]
+id = "M-RAG10"
+bug = "RAG-PACK"
+# The packer budgets characters against what `format_prompt` will actually
+# emit, and every message carries a
+# `[CTX_MSG_nnn | message_id=... | time=...]` prefix worth ~96 characters. Bill
+# only the body and the pack costs roughly twice its stated budget -- worst on
+# exactly the short chat messages this corpus is made of.
+summary = "Render overhead billed at zero, so the pack costs about twice the character budget it was given"
+guard = "test_a_block_is_admitted_whole_or_not_at_all"
+file = "src/services/context_pack_builder.py"
+expect = "killed"
+[[mutant.edit]]
+find = "RENDER_OVERHEAD_CHARS = 96\n"
+replace = "RENDER_OVERHEAD_CHARS = 0\n"
+
+[[mutant]]
+id = "M-RAG11"
+bug = "RAG-PACK"
+# Blocks are conversations. Admitting one part-way emits half a transcript: the
+# model reads an exchange that stops mid-sentence and cannot tell the
+# truncation from the end of the discussion. Whole or not at all, and a later,
+# smaller block may still fit in what is left.
+summary = "Blocks admitted partially, so the pack emits half a transcript instead of skipping to one that fits"
+guard = "test_a_block_is_admitted_whole_or_not_at_all"
+file = "src/services/context_pack_builder.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            cost = sum(context_cost_chars(ctx) for ctx in block)\n            block_hits = sum(1 for ctx in block if not ctx.is_conversation_filler)\n            if cost > remaining or hits + block_hits > max_messages:\n                continue  # Never emit half a transcript; a later block may still fit.\n            packed.extend(block)\n            hits += block_hits\n            remaining -= cost\n"
+replace = "            for ctx in block:\n                cost = context_cost_chars(ctx)\n                if cost > remaining or hits >= max_messages:\n                    break\n                packed.append(ctx)\n                hits += 0 if ctx.is_conversation_filler else 1\n                remaining -= cost\n"
+
+[[mutant]]
+id = "M-RAG12"
+bug = "RAG-PACK"
+# DAB-073 in its character form: pins and anchors may not consume the whole
+# budget. At a share of 0 one fat pin leaves retrieval nothing to spend, the
+# index is queried and scored and thrown away, and the answer comes from pinned
+# memory alone -- with the retrieval paid for regardless.
+#
+# Not guarded by test_one_enormous_pin_still_leaves_retrieval_its_floor, which
+# does fail here but only on `assertGreater(int(1000 * MIN_RETRIEVAL_CHAR_SHARE), 0)`
+# -- an assertion about the constant, which any edit to the constant trips. Its
+# behavioural assertion passed: with the budget negative nothing fits whole and
+# the "best member beats nothing" fallback still returns one retrieved message.
+# What the floor actually buys is the WHOLE block, which is what the guard below
+# asserts.
+summary = "Character floor for retrieval set to zero, so pinned memory can consume the entire budget"
+guard = "test_the_floor_buys_a_whole_block_and_not_just_a_degraded_message"
+file = "src/services/context_pack_builder.py"
+expect = "killed"
+[[mutant.edit]]
+find = "MIN_RETRIEVAL_CHAR_SHARE = 0.25\n"
+replace = "MIN_RETRIEVAL_CHAR_SHARE = 0.0\n"
+
+[[mutant]]
+id = "M-RAG13"
+bug = "RAG-FUSE"
+# `weight / rank` gives rank 1 twice the score of rank 2, so one leg's
+# favourite wins outright and corroboration between legs counts for nothing.
+# The RRF constant flattens the curve: two legs agreeing at rank 3 beat one
+# leg's rank 1, which is the whole point of fusing them.
+summary = "RRF constant dropped from the fusion curve, so one leg's top hit outranks a message every leg found"
+guard = "test_rank_scores_follow_the_rrf_curve_read_from_config"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            candidate.add(source, weight / (rrf_k + rank), f\"{source} rank {rank}\")\n"
+replace = "            candidate.add(source, weight / rank, f\"{source} rank {rank}\")\n"
+
+[[mutant]]
+id = "M-RAG14"
+bug = "RAG-FUSE"
+# Conversation expansion pulls in the messages surrounding a hit. They are
+# grounding, not evidence: at parity a "morning" that happens to sit next to
+# the match scores exactly what the match scores, and the packer -- which ranks
+# blocks by their strongest member -- can then prefer a conversation whose only
+# merit is that something relevant happened nearby.
+#
+# This mutant survived when it was written: `_expand_conversations` had no test
+# of any kind, the retriever suites all run with rag_conversation_enabled=False,
+# and the factor was pinned nowhere. The guard below was added for it.
+summary = "Conversation filler scored at full strength, so surrounding chatter ties with the hit it surrounds"
+guard = "test_filler_is_scored_below_the_hit_it_surrounds"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    FILLER_SCORE_FACTOR = 0.25\n"
+replace = "    FILLER_SCORE_FACTOR = 1.0\n"
+
+[[mutant]]
+id = "M-RAG15"
+bug = "RAG-FUSE"
+# First boot over a large channel fires one embedding call per 16 messages,
+# back to back, until the channel is exhausted -- straight into the quota.
+# Spelled `sleep(0)` rather than deleting the await: with no sleep at all
+# `test_shutdown_during_the_delay_ends_the_drain` never reaches the event it
+# waits on and the suite hangs instead of failing, which scores as an error
+# rather than a kill.
+summary = "Inter-batch pacing removed from the embedding drain, so a backfill embeds at full rate"
+guard = "test_delay_sits_between_batches_only"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if batch_delay:\n                await asyncio.sleep(batch_delay)\n"
+replace = "            await asyncio.sleep(0)\n"
+
+[[mutant]]
+id = "M-RAG15B"
+bug = "RAG-FUSE"
+# The cap's companion defect, and the reason it is an off-by-one rather than a
+# deletion: the guard's fake index is a bottomless well, so a drain with no cap
+# at all never returns and the suite hangs rather than failing. Overrunning by
+# one batch per pass is the largest mutation that still terminates.
+summary = "Embedding drain runs one batch past its configured cap"
+guard = "test_drain_stops_at_the_batch_cap_and_logs_it"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "            if batches >= max_batches:\n"
+replace = "            if batches > max_batches:\n"
+
+[[mutant]]
+id = "M-RAG16"
+bug = "RAG-FUSE"
+# A rewrite is a guess at what the user meant. Fused at parity, its rank-1 hit
+# ties the raw query's rank-1 hit and the ordering between them is float noise,
+# so a bad rewrite can put its own hit in front of the one the user's actual
+# words found.
+summary = "Rewrite legs fused at full weight, so a bad rewrite can outrank the raw query"
+guard = "test_a_rewrite_hit_ranks_below_an_equal_raw_query_hit"
+file = "src/services/hybrid_context_retriever.py"
+expect = "killed"
+[[mutant.edit]]
+find = "    REWRITE_FUSION_FACTOR = 0.6\n"
+replace = "    REWRITE_FUSION_FACTOR = 1.0\n"
+
+[[mutant]]
+id = "M-RAG17"
+bug = "RAG-MENT"
+# Indexed text kept mention markup raw, so FTS held `<@1234>` and nothing else:
+# a message that only mentioned someone was unreachable by their name, and a
+# question naming them matched none of it. The id is kept alongside the name
+# because that is what a mention in a QUERY still tokenizes to.
+summary = "Mentions indexed as raw markup, so the id and the display name are disjoint token spaces again"
+guard = "test_a_user_mention_gains_the_display_name_and_keeps_the_id"
+file = "src/services/context_collector.py"
+expect = "killed"
+[[mutant.edit]]
+find = "        base_content = _resolve_mentions(message, base_content)\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG18"
+bug = "RAG-REND"
+# A block of one is a message, not a transcript. Wrapping each in a CTX_BLOCK
+# header and an END line costs three lines and ~200 characters to say nothing,
+# and every hit the retriever ran out of expansion slots for arrives here as a
+# block of one. Measured on the benchmark corpus: ~2,358 wasted characters,
+# about 40% of the context budget, on every request.
+summary = "A single-message block re-wrapped in CTX_BLOCK scaffolding, spending the budget on headers"
+guard = "test_an_unexpanded_hit_is_not_dressed_up_as_a_one_message_transcript"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                if len(unit) == 1:\n                    idx += 1\n                    prompt_parts.append(self._format_context_line(unit[0], idx, clipped[id(unit[0])]))\n                    continue\n"
+replace = ""
+
+[[mutant]]
+id = "M-RAG19"
+bug = "RAG-REND"
+# The pack is emitted weakest-first so the strongest item sits nearest the user
+# turn. Spend the budget in that same order and the truncation lands on the
+# BEST content: the weak block passes through intact and the strong one is
+# omitted whole. The clip therefore walks the units in reverse.
+summary = "Final character guard spends the budget in emission order, so it truncates the strongest block first"
+guard = "test_the_budget_reaches_the_strongest_block_before_the_weakest"
+file = "src/services/gemini_client.py"
+expect = "killed"
+[[mutant.edit]]
+find = "                    priority_units + blocks[::-1],\n"
+replace = "                    priority_units + blocks,\n"

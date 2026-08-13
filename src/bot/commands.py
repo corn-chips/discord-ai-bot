@@ -27,7 +27,10 @@ from .command_modules.general import (
     register_feature_commands,
     register_ping_command,
 )
-from .command_modules.personalization import register_personalization_commands
+from .command_modules.personalization import (
+    register_entity_profile_commands,
+    register_personalization_commands,
+)
 from .command_modules.reports_usage import (
     register_report_commands,
     register_statistics_commands,
@@ -78,3 +81,4 @@ async def setup_commands(
 
     register_summarize_command(context)
     register_personalization_commands(context)
+    register_entity_profile_commands(context)

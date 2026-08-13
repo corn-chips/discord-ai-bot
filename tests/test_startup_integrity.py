@@ -211,7 +211,7 @@ class OnReadyReentryTest(OnReadyHarness):
 
     discord.py re-fires `on_ready` on every reconnect and `setup_commands` is
     not idempotent: the second call raises `CommandAlreadyRegistered` on `ping`,
-    the first command it re-declares, leaving the tree intact at 22. `on_ready`
+    the first command it re-declares, leaving the tree intact at 23. `on_ready`
     then logged two CRITICAL records -- one with a traceback -- both saying the
     command tree was incomplete when it was complete.
 
@@ -232,7 +232,7 @@ class OnReadyReentryTest(OnReadyHarness):
         first = await self._run_on_ready()
         self.assertEqual(self._critical(first), [])
         registered = len(self.bot.tree.get_commands())
-        self.assertEqual(registered, 22)
+        self.assertEqual(registered, 23)
 
         second = await self._run_on_ready()
 
@@ -299,7 +299,7 @@ class OnReadyReentryTest(OnReadyHarness):
 
         # And the next on_ready really does build the tree.
         await self._run_on_ready()
-        self.assertEqual(len(self.bot.tree.get_commands()), 22)
+        self.assertEqual(len(self.bot.tree.get_commands()), 23)
 
     async def test_a_transient_fault_on_reconnect_cannot_shrink_a_working_tree(self):
         # Why the fix is not `tree.clear_commands()` + rebuild, which is the
@@ -309,7 +309,7 @@ class OnReadyReentryTest(OnReadyHarness):
         # 16 are deleted from Discord globally by a fault the current code
         # survives untouched.
         await self._run_on_ready()
-        self.assertEqual(len(self.bot.tree.get_commands()), 22)
+        self.assertEqual(len(self.bot.tree.get_commands()), 23)
 
         with patch(
             "src.bot.commands.register_feature_commands",
@@ -317,7 +317,7 @@ class OnReadyReentryTest(OnReadyHarness):
         ):
             await self._run_on_ready()
 
-        self.assertEqual(len(self.bot.tree.get_commands()), 22)
+        self.assertEqual(len(self.bot.tree.get_commands()), 23)
 
     async def test_a_partially_registered_tree_is_not_reported_as_healthy(self):
         # The reason this is a flag rather than `bool(tree.get_commands())`:
@@ -333,7 +333,7 @@ class OnReadyReentryTest(OnReadyHarness):
             second = await self._run_on_ready()
 
         self.assertGreater(partial, 0, "the tree must be non-empty for this to bite")
-        self.assertLess(partial, 22)
+        self.assertLess(partial, 23)
         self.assertEqual(len(self._critical(first)), 2)
         self.assertEqual(
             len(self._critical(second)), 2,

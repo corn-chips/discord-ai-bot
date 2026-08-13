@@ -19,6 +19,7 @@ change and it is not: the stored side is not normalised, so normalising only the
 query takes that case from a hit to a miss.
 """
 
+import contextlib
 import re
 import sqlite3
 import tempfile
@@ -69,6 +70,37 @@ class LexicalScriptCoverageTest(unittest.TestCase):
             term, channel_id=1, guild_id=2, cross_channel=False, limit=5
         )
 
+    def _executed_match(self, term):
+        """Every FTS MATCH expression `search_lexical` really sent to SQLite.
+
+        `_build_fts_query` is not on that path any more -- `search_lexical`
+        builds its own AND form out of `_fts_terms` -- so the guards below read
+        the expression off the wire rather than off a function production has
+        stopped calling.
+        """
+        statements = []
+        original = self.service._connection
+
+        @contextlib.contextmanager
+        def traced(*args, **kwargs):
+            with original(*args, **kwargs) as conn:
+                conn.set_trace_callback(statements.append)
+                try:
+                    yield conn
+                finally:
+                    conn.set_trace_callback(None)
+
+        self.service._connection = traced
+        try:
+            self._search(term)
+        finally:
+            self.service._connection = original
+        return [
+            expression
+            for statement in statements
+            for expression in re.findall(r"MATCH '(.*?)'", statement)
+        ]
+
     def test_every_script_is_searchable(self):
         for script, text in DOCUMENTS.items():
             term = text.split()[0]
@@ -77,6 +109,34 @@ class LexicalScriptCoverageTest(unittest.TestCase):
                     self._search(term),
                     f"a {script} query found nothing in an index that holds it",
                 )
+
+    def test_a_non_latin_query_reaches_the_index_on_the_live_path(self):
+        # DAB-087 where it now runs. Pinned only against `_build_fts_query`, the
+        # guard survived `search_lexical` moving to `_fts_terms` and an AND join
+        # -- both fixes intact, neither of them tested any more.
+        self.assertEqual(self._executed_match("Привет как")[0], '"Привет" AND "как"')
+        self.assertEqual(self._executed_match("今天天气很好")[0], '"今天天气很好"')
+
+    def test_every_live_token_is_phrase_quoted_whatever_it_spells(self):
+        # DAB-094 where it now runs: a query is user input, and an unquoted
+        # token is an FTS5 operator. NEAR and a trailing star are the two that
+        # turn a search into a syntax error or a different search.
+        matches = self._executed_match("NEAR(alice bar) alice*")
+
+        self.assertEqual(matches[0], '"NEAR" AND "alice" AND "bar"')
+        for expression in matches:
+            with self.subTest(expression=expression):
+                self.assertNotIn("*", expression)
+                self.assertNotIn("(", expression)
+
+    def test_a_quote_in_the_query_cannot_close_a_phrase_on_the_live_path(self):
+        # The injection itself: an unescaped quote would end the phrase and let
+        # the rest of the token parse as operators.
+        for hostile in ('foo" OR bar', 'kubernetes" NEAR/2 "rollout'):
+            with self.subTest(query=hostile):
+                for expression in self._executed_match(hostile):
+                    self.assertEqual(expression.count('"') % 2, 0, expression)
+                self.assertIsInstance(self._search(hostile), list)
 
     def test_a_non_latin_query_reaches_the_index_at_all(self):
         # The precise shape of the defect, asserted directly: the query was not

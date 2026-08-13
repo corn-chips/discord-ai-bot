@@ -24,6 +24,11 @@ from ..models.data_models import APIResponse, MessageContext, TokenUsage
 from ..utils.error_manager import ErrorManager
 from ..utils.logging_config import PerformanceLogger
 from ..utils.token_extraction import extract_token_usage
+from .context_pack_builder import (
+    DEFAULT_CONTEXT_CHAR_BUDGET,
+    context_cost_chars,
+    group_conversation_blocks,
+)
 from .gemini_response_pipeline import (
     GeminiAttemptResult,
     GeminiRequestContent,
@@ -35,6 +40,11 @@ from .gemini_response_pipeline import (
 
 
 logger = logging.getLogger(__name__)
+
+
+#: An id step this many times a transcript block's own step marks a seam between
+#: two windows unioned from the same conversation.
+TRANSCRIPT_GAP_FACTOR = 4
 
 
 #: Distinct unrecognised safety-threshold values already reported, so a
@@ -1770,7 +1780,9 @@ Candidate messages:
                 prompt_parts.append(
                     "This is a compact, relevance-ranked retrieval pack from Discord history. "
                     "It may include pinned memories, direct reply anchors, recent continuity, lexical matches, and semantic matches. "
-                    "Use provenance labels when helpful, ignore unrelated items, and prioritize the current user message."
+                    "Use provenance labels when helpful, ignore unrelated items, and prioritize the current user message. "
+                    "A CTX_BLOCK is one conversation: lines marked retrieved_match are the matches themselves, "
+                    "lines marked surrounding are only there for context."
                 )
                 pins = [msg for msg in context if getattr(msg, "is_pinned_memory", False)]
                 anchors = [
@@ -1783,16 +1795,34 @@ Candidate messages:
                     if msg not in pins and msg not in anchors
                 ]
                 anchors = sorted(anchors, key=lambda msg: (msg.timestamp, msg.message_id))
-                # Lowest-confidence retrieved items first so the strongest item sits closest to the user prompt.
-                others = sorted(
-                    others,
-                    key=lambda msg: (
-                        getattr(msg, "retrieval_score", 0.0) or 0.0,
-                        msg.timestamp,
-                        msg.message_id,
+                # Lowest-confidence retrieved items first so the strongest item sits closest to
+                # the user prompt. Applied per block, since a block is now one retrieved item.
+                priority_units = [[msg] for msg in pins + anchors]
+                blocks = sorted(
+                    group_conversation_blocks(others),
+                    key=lambda block: (
+                        max((getattr(msg, "retrieval_score", 0.0) or 0.0) for msg in block),
+                        block[0].timestamp,
+                        block[0].message_id,
                     ),
                 )
-                sorted_context = pins + anchors + others
+                render_units = priority_units + blocks
+                # Last guard before the prompt goes out; 0 or missing means unbounded.
+                clipped = self._clip_to_budget(
+                    priority_units + blocks[::-1],
+                    int(getattr(
+                        self.config, "rag_context_char_budget", DEFAULT_CONTEXT_CHAR_BUDGET
+                    ) or 0),
+                )
+                # A message the budget cannot pay for is dropped whole. Emitted as
+                # "...[omitted]" it still spent a ~100 character header saying nothing.
+                render_units = [
+                    unit for unit in (
+                        [msg for msg in unit if clipped[id(msg)] is not None]
+                        for unit in render_units
+                    )
+                    if unit
+                ]
             else:
                 prompt_parts.append("\n--- Selected Conversation Context (oldest to newest) ---")
                 prompt_parts.append(
@@ -1801,29 +1831,26 @@ Candidate messages:
                     "ignore unrelated chatter and prioritize the current user message, reply relationships, and the newest relevant messages."
                 )
                 # Sort context by timestamp to ensure chronological order
-                sorted_context = sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
-            
-            for idx, msg in enumerate(sorted_context, start=1):
-                # Include explicit sequence + id for deterministic ordering references
-                time_str = msg.timestamp.isoformat()
-                
-                # Mark replied-to messages for clarity
-                reply_indicator = " (replying)" if msg.is_reply else ""
-                source = getattr(msg, "retrieval_source", None)
-                score = getattr(msg, "retrieval_score", None)
-                reason = getattr(msg, "retrieval_reason", None)
-                source_suffix = ""
-                if source:
-                    score_text = f", score={score:.3f}" if isinstance(score, (int, float)) else ""
-                    reason_text = f", reason={reason}" if reason else ""
-                    source_suffix = f" | source={source}{score_text}{reason_text}"
-                
-                formatted_msg = (
-                    f"[CTX_MSG_{idx:03d} | message_id={msg.message_id} | time={time_str}{source_suffix}] "
-                    f"{msg.author}{reply_indicator}: {msg.content}"
-                )
-                prompt_parts.append(formatted_msg)
-            
+                render_units = [
+                    [msg] for msg in sorted(context, key=lambda msg: (msg.timestamp, msg.message_id))
+                ]
+                clipped = self._clip_to_budget(render_units, 0)  # Legacy path: unbounded, as before.
+
+            idx = 0
+            block_number = 0
+            for unit in render_units:
+                # A block of one is a message, not a transcript: wrapping it in a
+                # CTX_BLOCK header and END line cost three lines and ~200 characters
+                # to say nothing, and every hit whose conversation the retriever ran
+                # out of expansion slots for arrives here as a block of one.
+                if len(unit) == 1:
+                    idx += 1
+                    prompt_parts.append(self._format_context_line(unit[0], idx, clipped[id(unit[0])]))
+                    continue
+                block_number += 1
+                lines, idx = self._format_transcript_block(unit, block_number, idx, clipped)
+                prompt_parts.extend(lines)
+
             prompt_parts.append("--- End Context ---\n")
 
         # Add image ordering metadata if images are provided
@@ -1860,6 +1887,97 @@ Candidate messages:
         logger.debug(f"Formatted prompt total length: {len(formatted)} characters")
         
         return formatted
+
+    @staticmethod
+    def _transcript_gaps(block: List[MessageContext]) -> set:
+        """Positions where the id sequence jumps past the block's own step size.
+
+        The producer may union two windows of one conversation; the seam shows up
+        as a step several times the usual one. Two messages give no yardstick.
+        """
+        steps = [later.message_id - earlier.message_id for earlier, later in zip(block, block[1:])]
+        positive = sorted(step for step in steps if step > 0)
+        if len(steps) < 2 or not positive:
+            return set()
+        yardstick = positive[(len(positive) - 1) // 2]
+        return {
+            position + 1
+            for position, step in enumerate(steps)
+            if step > yardstick * TRANSCRIPT_GAP_FACTOR
+        }
+
+    @staticmethod
+    def _context_provenance(msg: MessageContext) -> str:
+        source = getattr(msg, "retrieval_source", None)
+        if not source:
+            return ""
+        score = getattr(msg, "retrieval_score", None)
+        reason = getattr(msg, "retrieval_reason", None)
+        score_text = f", score={score:.3f}" if isinstance(score, (int, float)) else ""
+        reason_text = f", reason={reason}" if reason else ""
+        return f" | source={source}{score_text}{reason_text}"
+
+    @staticmethod
+    def _clip_to_budget(units: List[List[MessageContext]], budget: int) -> dict:
+        """Body to render per message, `None` for one the budget cannot pay for.
+
+        Billed with `context_cost_chars`, the same accounting the packer spends,
+        so this stays a real backstop: charging the body alone made it strictly
+        cheaper than the packer and therefore unreachable.
+
+        `units` arrives in SPEND order, which is the reverse of emission order for
+        everything but pins and anchors: the pack is emitted weakest-first so the
+        strongest item sits nearest the user turn, and spending in that order let a
+        weak block eat the whole budget and omit the best one outright.
+        """
+        remaining = budget if budget > 0 else None
+        clipped = {}
+        for msg in (msg for unit in units for msg in unit):
+            text = msg.content or ""
+            cost = context_cost_chars(msg)
+            if remaining is None or cost <= remaining:
+                clipped[id(msg)] = text
+                remaining = None if remaining is None else remaining - cost
+                continue
+            body = remaining - (cost - len(text))
+            clipped[id(msg)] = f"{text[:body]} ...[truncated]" if body > 0 else None
+            remaining = 0
+        return clipped
+
+    def _format_context_line(
+        self, msg: MessageContext, idx: int, content: str, *, provenance: Optional[str] = None
+    ) -> str:
+        # Include explicit sequence + id for deterministic ordering references, and
+        # mark replied-to messages for clarity.
+        reply_indicator = " (replying)" if msg.is_reply else ""
+        suffix = self._context_provenance(msg) if provenance is None else provenance
+        return (
+            f"[CTX_MSG_{idx:03d} | message_id={msg.message_id} | time={msg.timestamp.isoformat()}{suffix}] "
+            f"{msg.author}{reply_indicator}: {content}"
+        )
+
+    def _format_transcript_block(
+        self, block: List[MessageContext], block_number: int, idx: int, clipped: dict
+    ) -> Tuple[List[str], int]:
+        """Render one expanded conversation: provenance on the header, hits marked inside."""
+        hits = [msg for msg in block if not getattr(msg, "is_conversation_filler", False)]
+        best = max(
+            hits or block,
+            key=lambda msg: ((getattr(msg, "retrieval_score", 0.0) or 0.0), msg.message_id),
+        )
+        lines = [
+            f"[CTX_BLOCK_{block_number:03d} | conversation_id={getattr(block[0], 'conversation_id', None)}"
+            f" | messages={len(block)} | matches={len(hits)}{self._context_provenance(best)}]"
+        ]
+        gaps = self._transcript_gaps(block)
+        for position, msg in enumerate(block):
+            if position in gaps:
+                lines.append("[... transcript gap: messages omitted ...]")
+            idx += 1
+            marker = " | surrounding" if getattr(msg, "is_conversation_filler", False) else " | retrieved_match"
+            lines.append(self._format_context_line(msg, idx, clipped[id(msg)], provenance=marker))
+        lines.append(f"[CTX_BLOCK_{block_number:03d} END]")
+        return lines, idx
     
 
     

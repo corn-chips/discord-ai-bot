@@ -51,7 +51,8 @@ def make_bot(**overrides):
             index_discord_message_async=AsyncMock(return_value=True)
         ),
         "hybrid_context_retriever": SimpleNamespace(
-            schedule_pending_embeddings=Mock()
+            schedule_pending_embeddings=Mock(),
+            schedule_entity_profiles=Mock(),
         ),
         "_is_live_mode_enabled": Mock(return_value=False),
         "_enqueue_live_message": AsyncMock(),

@@ -42,7 +42,7 @@ EXPECTED_TOP_LEVEL_ORDER = [
     "ping", "report", "report-status", "stats", "token-leaderboard", "features",
     "clear-cache", "dev", "api-usage", "usage-report", "deepresearch", "config",
     "rag", "summarize", "personality", "personality-info", "live", "pin", "pins",
-    "hide", "unhide", "preferences",
+    "hide", "unhide", "preferences", "profile",
 ]
 
 #: The same tree with the image service available. `/edit-image` and
@@ -52,7 +52,7 @@ EXPECTED_TOP_LEVEL_ORDER_WITH_IMAGES = [
     "ping", "report", "report-status", "stats", "token-leaderboard", "features",
     "edit-image", "image-queue", "clear-cache", "dev", "api-usage", "usage-report",
     "deepresearch", "config", "rag", "summarize", "personality", "personality-info",
-    "live", "pin", "pins", "hide", "unhide", "preferences",
+    "live", "pin", "pins", "hide", "unhide", "preferences", "profile",
 ]
 
 EXPECTED_SIGNATURE = [
@@ -91,6 +91,13 @@ EXPECTED_SIGNATURE = [
     ("preferences language", "Set your preferred response language", "prefs_language"),
     ("preferences show", "Show your current preferences", "prefs_show"),
     ("preferences clear", "Reset all your preferences to defaults", "prefs_clear"),
+    ("profile", "Inspect and rebuild per-person profile memory", "GROUP"),
+    ("profile show", "Show the stored profile memory for a member", "profile_show"),
+    (
+        "profile rebuild",
+        "Rebuild a member's profile memory from indexed history",
+        "profile_rebuild",
+    ),
 ]
 
 
@@ -180,7 +187,7 @@ class CommandRegistrationTest(unittest.IsolatedAsyncioTestCase):
             [command.name for command in bot.tree.get_commands()],
             EXPECTED_TOP_LEVEL_ORDER,
         )
-        self.assertEqual(len(EXPECTED_SIGNATURE), 35)
+        self.assertEqual(len(EXPECTED_SIGNATURE), 38)
 
         report = self._command(bot, "report")
         self.assertEqual(

@@ -36,6 +36,7 @@ from ..services.sqlite_utils import configure_busy_timeout
 from ..services.report_service import ReportService
 from ..services.report_web_server import ReportWebServer
 from ..services.pin_service import PinService
+from ..services.entity_profile_service import EntityProfileService
 from ..services.channel_settings_service import ChannelSettingsService
 from ..services.message_visibility_service import MessageVisibilityService
 from ..services.user_preferences_service import UserPreferencesService
@@ -372,11 +373,29 @@ class DiscordBot(discord.Client):
             embedding_min_words=config.rag_embedding_min_words,
             embedding_min_alphanumeric_chars=config.rag_embedding_min_alphanumeric_chars,
             vector_cache_enabled=config.rag_vector_cache_enabled,
+            embedding_retry_reset_hours=config.rag_embedding_retry_reset_hours,
+            bm25_weight_content=config.rag_bm25_weight_content,
+            bm25_weight_author=config.rag_bm25_weight_author,
+            bm25_weight_attachment=config.rag_bm25_weight_attachment,
+            fts_stopwords_enabled=config.rag_fts_stopwords_enabled,
+            fts_min_and_results=config.rag_fts_min_and_results,
+            conversation_enabled=config.rag_conversation_enabled,
+            conversation_gap_minutes=config.rag_conversation_gap_minutes,
+            conversation_max_messages=config.rag_conversation_max_messages,
+            conversation_reply_merge_max_hours=config.rag_conversation_reply_merge_max_hours,
+            conversation_turnover_window=config.rag_conversation_turnover_window,
+            conversation_turnover_min_gap_minutes=config.rag_conversation_turnover_min_gap_minutes,
             legacy_db_path=config.token_db_path,
         )
         self._pin_service = PinService(
             db_path=config.rag_database_path,
             legacy_db_path=config.token_db_path,
+        )
+        # Eager, next to _pin_service and for the same DAB-002 reason: every
+        # reader reaches it through getattr, so a registrar failing must not be
+        # able to decide whether profile memory exists.
+        self._entity_profile_service = EntityProfileService(
+            db_path=config.rag_database_path,
         )
 
         # Construct these here rather than during command registration (DAB-002).
@@ -413,6 +432,7 @@ class DiscordBot(discord.Client):
             gemini_client=self.gemini_client,
             pack_builder=self.context_pack_builder,
             pin_service=self._pin_service,
+            entity_profile_service=self._entity_profile_service,
         )
         self.message_splitter = MessageSplitter(
             max_length=config.message_split_length,
@@ -907,6 +927,9 @@ class DiscordBot(discord.Client):
                     self.hybrid_context_retriever.schedule_pending_embeddings(
                         message.channel.id
                     )
+                    self.hybrid_context_retriever.schedule_entity_profiles(
+                        message.guild.id if message.guild else None
+                    )
             except Exception as exc:
                 # WARNING, not debug: with DAB-065 an infrastructure write
                 # failure surfaces here as an exception, and this is now the
@@ -950,6 +973,7 @@ class DiscordBot(discord.Client):
             complexity_level = "low"
             routed_intent = "unknown"
             needs_context = True
+            search_query = None
             model_override = None
 
             # Try enhanced command handler first if available
@@ -958,6 +982,7 @@ class DiscordBot(discord.Client):
                 complexity_level = routing.complexity
                 routed_intent = routing.intent.value
                 needs_context = routing.needs_context
+                search_query = routing.search_query
                 if handled:
                     context_logger.info("Message handled by enhanced command handler")
                     return
@@ -993,6 +1018,7 @@ class DiscordBot(discord.Client):
                 complexity_level=complexity_level,
                 routed_intent=routed_intent,
                 needs_context=needs_context,
+                search_query=search_query,
                 model_override=model_override,
             )
             
@@ -1034,6 +1060,7 @@ class DiscordBot(discord.Client):
         routed_intent: str = "unknown",
         needs_context: bool = True,
         *,
+        search_query: Optional[str] = None,
         model_override: Optional[str] = None,
         prompt_mode_override: Optional[str] = None,
         search_override: Optional[bool] = None,
@@ -1064,6 +1091,7 @@ class DiscordBot(discord.Client):
                         bot_user_id=self.user.id if self.user else None,
                         needs_context=needs_context,
                         force_full_context=bool(message.reference) or routed_intent == "live_mode",
+                        search_query=search_query,
                     )
                 except Exception as exc:
                     logger.warning(

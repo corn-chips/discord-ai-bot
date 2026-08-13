@@ -7,11 +7,62 @@ reply context enhancement.
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import List, Set
 import discord
 from ..models.data_models import MessageContext
 from ..utils.logging_config import TimingContext
+
+# `<@id>`, the legacy nickname form `<@!id>`, roles `<@&id>` and channels `<#id>`.
+_MENTION_MARKUP = re.compile(r"<(@[!&]?|#)(\d+)>")
+
+
+def _entity_name(entity) -> str:
+    return getattr(entity, "display_name", None) or getattr(entity, "name", None) or ""
+
+
+def _resolve_mentions(message, text: str) -> str:
+    """Rewrite mention markup as `@name (id)` so both forms tokenize.
+
+    Indexed text kept mentions raw, so FTS held only the bare snowflake and a
+    question naming the person matched none of it; the id stays because that is
+    what a mention in a *query* still tokenizes to. Runs against SimpleNamespace
+    fakes too, so an unresolved mention keeps its markup rather than raising.
+    """
+    if not text or "<" not in text:
+        return text
+
+    def by_id(entities) -> dict:
+        return {
+            str(getattr(entity, "id", "")): _entity_name(entity)
+            for entity in (entities or [])
+            if getattr(entity, "id", None) is not None
+        }
+
+    try:
+        users = by_id(getattr(message, "mentions", None))
+        roles = by_id(getattr(message, "role_mentions", None))
+        channels = by_id(getattr(message, "channel_mentions", None))
+        guild = getattr(message, "guild", None)
+
+        def from_guild(getter_name: str, raw_id: str) -> str:
+            getter = getattr(guild, getter_name, None)
+            return _entity_name(getter(int(raw_id))) if callable(getter) else ""
+
+        def replace(match) -> str:
+            kind, raw_id = match.group(1), match.group(2)
+            if kind == "#":
+                name, prefix = channels.get(raw_id) or from_guild("get_channel", raw_id), "#"
+            elif kind == "@&":
+                name, prefix = roles.get(raw_id) or from_guild("get_role", raw_id), "@"
+            else:
+                name, prefix = users.get(raw_id) or from_guild("get_member", raw_id), "@"
+            return f"{prefix}{name} ({raw_id})" if name else match.group(0)
+
+        return _MENTION_MARKUP.sub(replace, text)
+    except Exception:
+        return text
 
 
 class ContextCollector:
@@ -48,6 +99,7 @@ class ContextCollector:
         if not base_content:
             # For system/forwarded messages, Discord may populate system_content but not content.
             base_content = (getattr(message, "system_content", "") or "").strip()
+        base_content = _resolve_mentions(message, base_content)
 
         image_names = []
         other_names = []

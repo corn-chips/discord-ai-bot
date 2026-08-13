@@ -14,6 +14,7 @@ from ...constants import (
     DISCORD_VIEW_CHILD_LIMIT,
 )
 from ...services.channel_settings_service import ChannelSettingsService
+from ...services.entity_profile_service import EntityProfileService
 from ...services.message_visibility_service import MessageVisibilityService
 from ...services.pin_service import PinService
 from ...services.user_preferences_service import UserPreferencesService
@@ -588,3 +589,88 @@ def register_personalization_commands(context: CommandContext) -> None:
         )
 
     bot.tree.add_command(prefs_group)
+
+
+def register_entity_profile_commands(context: CommandContext) -> None:
+    bot = context.bot
+    config = context.config
+
+    # Reuse the instance DiscordBot.__init__ built; see the DAB-002 note above.
+    entity_profile_service = getattr(bot, "_entity_profile_service", None) or EntityProfileService(
+        db_path=config.rag_database_path,
+    )
+    bot._entity_profile_service = entity_profile_service
+
+    # Gated as a group, like /rag: a rebuild spends the operator's API key, and
+    # a card is a summary of one member's activity.
+    profile_group = app_commands.Group(
+        name="profile",
+        description="Inspect and rebuild per-person profile memory",
+        default_permissions=discord.Permissions(manage_guild=True),
+        guild_only=True,
+    )
+
+    @profile_group.command(name="show", description="Show the stored profile memory for a member")
+    @app_commands.describe(member="The member whose profile card to show")
+    async def profile_show(interaction: discord.Interaction, member: discord.Member):
+        profile = entity_profile_service.get_profile(interaction.guild_id, member.id)
+        if profile is None:
+            await interaction.response.send_message(
+                f"No profile memory for {member.display_name} yet. "
+                "Profiles are built in the background from indexed history.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"Profile Memory: {profile.display_name}",
+            description=profile.summary or "No summary yet.",
+            color=discord.Color.teal(),
+        )
+        embed.add_field(name="Messages", value=f"{profile.message_count:,}", inline=True)
+        embed.add_field(
+            name="Threshold",
+            value=str(config.rag_entity_profile_min_messages),
+            inline=True,
+        )
+        embed.add_field(
+            name="Summarized",
+            value=(profile.last_summarized_at or "never")[:19],
+            inline=True,
+        )
+        if profile.aliases:
+            embed.add_field(name="Also seen as", value=", ".join(profile.aliases[:5]), inline=False)
+        if profile.last_error:
+            embed.add_field(name="Last Error", value=f"```{profile.last_error[:900]}```", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @profile_group.command(
+        name="rebuild",
+        description="Rebuild a member's profile memory from indexed history",
+    )
+    @app_commands.describe(member="The member whose profile to rebuild")
+    async def profile_rebuild(interaction: discord.Interaction, member: discord.Member):
+        if not await require_guild_permission(
+            interaction, "manage_guild", "rebuild profile memory"
+        ):
+            return
+        if not config.rag_entity_profiles_enabled:
+            await interaction.response.send_message(
+                "Entity profiles are disabled (`rag.entity_profiles_enabled`).",
+                ephemeral=True,
+            )
+            return
+
+        # Rewinding the watermark is the whole rebuild: the background pass
+        # then re-reads the member's history from the start.
+        entity_profile_service.clear_summary(interaction.guild_id, member.id)
+        retriever = getattr(bot, "hybrid_context_retriever", None)
+        if retriever is not None:
+            retriever.schedule_entity_profiles(interaction.guild_id)
+        await interaction.response.send_message(
+            f"Queued a profile rebuild for {member.display_name}. "
+            "It runs in the background; check `/profile show` shortly.",
+            ephemeral=True,
+        )
+
+    bot.tree.add_command(profile_group)
